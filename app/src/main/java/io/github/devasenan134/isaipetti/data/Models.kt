@@ -86,6 +86,45 @@ data class StructuredLyrics(
 @Serializable internal data class ArtistIndex(val artist: List<Artist> = emptyList())
 @Serializable internal data class Artists(val index: List<ArtistIndex> = emptyList())
 @Serializable internal data class Playlists(val playlist: List<Playlist> = emptyList())
+/** Everything Navidrome knows about one song (getSong, with OpenSubsonic's extra fields). */
+@Serializable
+data class SongDetails(
+    val id: String,
+    val title: String = "",
+    val album: String? = null,
+    val albumId: String? = null,
+    val artist: String? = null,
+    val artists: List<ArtistRef> = emptyList(),
+    val displayAlbumArtist: String? = null,
+    val albumArtists: List<ArtistRef> = emptyList(),
+    val displayComposer: String? = null,
+    val contributors: List<Contributor> = emptyList(),
+    val year: Int? = null,
+    val genre: String? = null,
+    val genres: List<Genre> = emptyList(),
+    val track: Int? = null,
+    val discNumber: Int? = null,
+    val duration: Int = 0,
+    val bitRate: Int? = null,
+    val suffix: String? = null,
+    val samplingRate: Int? = null,
+    val bitDepth: Int? = null,
+    val channelCount: Int? = null,
+    val size: Long? = null,
+    val playCount: Long? = null,
+    val played: String? = null,
+    val created: String? = null,
+    val bpm: Int? = null,
+    val comment: String? = null,
+) {
+    /** People credited in [role] ("composer", "lyricist", ...). */
+    fun credited(role: String) = contributors.filter { it.role.equals(role, ignoreCase = true) }.map { it.artist.name }.distinct()
+}
+
+@Serializable data class ArtistRef(val id: String = "", val name: String = "")
+@Serializable data class Contributor(val role: String = "", val subRole: String? = null, val artist: ArtistRef = ArtistRef())
+@Serializable data class Genre(val name: String = "")
+
 /** What you've liked (starred) in Navidrome. */
 @Serializable data class Starred(val album: List<Album> = emptyList(), val song: List<Song> = emptyList())
 @Serializable internal data class LyricsList(val structuredLyrics: List<StructuredLyrics> = emptyList())

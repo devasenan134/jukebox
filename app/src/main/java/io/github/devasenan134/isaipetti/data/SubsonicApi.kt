@@ -64,6 +64,9 @@ class SubsonicApi(
     suspend fun playlist(id: String): Playlist =
         get("getPlaylist", mapOf("id" to id)).decode<Playlist>("playlist") ?: throw SubsonicException("Playlist not found")
 
+    suspend fun songDetails(id: String): SongDetails =
+        get("getSong", mapOf("id" to id)).decode<SongDetails>("song") ?: throw SubsonicException("Song not found")
+
     /** Your liked songs and movies (Navidrome's "starred" items), newest likes first. */
     suspend fun starred(): Starred =
         (get("getStarred2").decode<Starred>("starred2") ?: Starred()).let { s ->

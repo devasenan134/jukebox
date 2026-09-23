@@ -39,6 +39,9 @@ import io.github.devasenan134.isaipetti.BuildConfig
 import io.github.devasenan134.isaipetti.data.AppUpdate
 import io.github.devasenan134.isaipetti.data.BugReport
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
+import io.github.devasenan134.isaipetti.ui.components.releaseNotesText
+import io.github.devasenan134.isaipetti.ui.components.ExpandableText
+import androidx.compose.runtime.produceState
 import kotlinx.coroutines.launch
 
 /** Settings card: this version, and checking for / installing a newer one. */
@@ -50,6 +53,11 @@ fun UpdatesCard() {
     var status by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
     var showing by remember { mutableStateOf<AppUpdate?>(null) }
+    // Patch notes: the new version's when there is one, otherwise the version you're running.
+    val notesVersion = available?.version ?: updates.currentVersion
+    val notes by produceState<String?>(null, notesVersion, available) {
+        value = available?.notes?.takeIf { it.isNotBlank() } ?: updates.notesFor(notesVersion)
+    }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -59,6 +67,14 @@ fun UpdatesCard() {
                     ?: status ?: "You have ${updates.currentVersion}.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            notes?.let {
+                Text(
+                    "What's new in $notesVersion",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                ExpandableText(releaseNotesText(it))
+            }
             if (available != null) {
                 Button(onClick = { showing = available }, modifier = Modifier.fillMaxWidth()) { Text("Update to ${available!!.version}") }
             } else {
@@ -129,7 +145,7 @@ fun UpdateDialog(update: AppUpdate, onDismiss: () -> Unit) {
                         LinearProgressIndicator(progress = { progress!! }, modifier = Modifier.fillMaxWidth())
                     }
                     else -> Text(
-                        update.notes.ifBlank { "A new version is ready." },
+                        releaseNotesText(update.notes.ifBlank { "A new version is ready." }),
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
                     )

@@ -65,6 +65,21 @@ class Updates(private val context: Context, private val http: OkHttpClient) {
         update
     }
 
+    /** The patch notes of a released version (from its GitHub release), saved once fetched. Null if there are none. */
+    suspend fun notesFor(version: String): String? = withContext(Dispatchers.IO) {
+        prefs.getString("$NOTES$version", null)?.let { return@withContext it }
+        val request = Request.Builder()
+            .url("https://api.github.com/repos/${BuildConfig.GITHUB_REPO}/releases/tags/v$version")
+            .header("Accept", "application/vnd.github+json")
+            .build()
+        runCatching {
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                json.decodeFromString(Release.serializer(), response.body.string()).body?.takeIf { it.isNotBlank() }
+            }
+        }.getOrNull()?.also { prefs.edit { putString("$NOTES$version", it) } }
+    }
+
     /** Whether the "update available" pop-up was already closed for this version. */
     fun isDismissed(update: AppUpdate) = prefs.getString(DISMISSED, null) == update.version
     fun dismiss(update: AppUpdate) = prefs.edit { putString(DISMISSED, update.version) }
@@ -128,6 +143,7 @@ class Updates(private val context: Context, private val http: OkHttpClient) {
     companion object {
         private const val LAST_CHECK = "last_check"
         private const val DISMISSED = "dismissed_version"
+        private const val NOTES = "notes_"
         private const val CHECK_EVERY_MS = 6 * 60 * 60 * 1000L
 
         /** "0.3.10" is newer than "0.3.9". */
