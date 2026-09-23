@@ -35,7 +35,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -54,7 +53,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
-import io.github.devasenan134.isaipetti.data.Album
 import io.github.devasenan134.isaipetti.data.Artist
 import io.github.devasenan134.isaipetti.data.SearchResult
 import io.github.devasenan134.isaipetti.ui.Nav
@@ -68,7 +66,8 @@ import kotlinx.coroutines.delay
 
 /**
  * Search, and browsing:
- *  - before you tap the search bar: Movies and Composers boxes, then what you played recently;
+ *  - before you tap the search bar: Movies, Composers and Playlists boxes, then what you picked
+ *    from searches before (songs, movies, composers) and playlists you played;
  *  - with the search bar tapped but empty: your recent searches;
  *  - once you type: results.
  */
@@ -82,19 +81,11 @@ fun SearchScreen(nav: Nav) {
     var result by remember { mutableStateOf(SearchResult()) }
     var error by remember { mutableStateOf<String?>(null) }
     val history by app.searches.queries.collectAsStateWithLifecycle()
-    val recentSongs by app.recent.songs.collectAsStateWithLifecycle()
+    // What you picked from search results before, newest first.
+    val searchedSongs by app.searches.songs.collectAsStateWithLifecycle()
+    val searchedAlbums by app.searches.albums.collectAsStateWithLifecycle()
+    val searchedArtists by app.searches.artists.collectAsStateWithLifecycle()
     val recentPlaylists by app.recentPlaylists.playlists.collectAsStateWithLifecycle()
-    // Recently played movies come from Navidrome, so they include what you played on other devices.
-    val recentAlbums by produceState(emptyList<Album>()) {
-        value = runCatching { app.api.albumList("recent", 15) }.getOrDefault(emptyList())
-    }
-    // Composers of those movies, in the same order, with their pictures.
-    val recentComposers by produceState(emptyList<Artist>(), recentAlbums) {
-        val ids = recentAlbums.mapNotNull { it.artistId }.distinct()
-        if (ids.isEmpty()) return@produceState
-        val byId = runCatching { app.api.artists() }.getOrDefault(emptyList()).associateBy { it.id }
-        value = ids.mapNotNull { byId[it] }.take(10)
-    }
     // A search counts for the history once you use it: press search, or open a result.
     val saveSearch = { app.searches.add(query) }
 
@@ -145,7 +136,7 @@ fun SearchScreen(nav: Nav) {
                             Text(
                                 artist.name,
                                 style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.fillMaxWidth().clickable { saveSearch(); nav.openArtist(artist.id) }
+                                modifier = Modifier.fillMaxWidth().clickable { saveSearch(); app.searches.picked(artist); nav.openArtist(artist.id) }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                             )
                         }
@@ -155,7 +146,7 @@ fun SearchScreen(nav: Nav) {
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(result.album, key = { it.id }) { album ->
-                                    AlbumCard(album, onClick = { saveSearch(); nav.openAlbum(album.id) }, modifier = Modifier.width(140.dp))
+                                    AlbumCard(album, onClick = { saveSearch(); app.searches.picked(album); nav.openAlbum(album.id) }, modifier = Modifier.width(140.dp))
                                 }
                             }
                         }
@@ -165,7 +156,7 @@ fun SearchScreen(nav: Nav) {
                         itemsIndexed(result.song, key = { _, song -> "song-${song.id}" }) { index, song ->
                             SongRow(
                                 song = song,
-                                onClick = { saveSearch(); app.player.play(result.song, index) },
+                                onClick = { saveSearch(); app.searches.picked(song); app.player.play(result.song, index) },
                                 isCurrent = song.id == nowPlaying.songId,
                                 showCover = true,
                                 onOpenAlbum = nav.openAlbum,
@@ -219,10 +210,10 @@ fun SearchScreen(nav: Nav) {
                             )
                         }
                     }
-                    if (recentSongs.isNotEmpty()) {
-                        item { SectionTitle("Recently played songs") }
-                        val songs = recentSongs.take(5).map { it.toSong() }
-                        itemsIndexed(songs, key = { _, song -> "recent-${song.id}" }) { index, song ->
+                    if (searchedSongs.isNotEmpty()) {
+                        item { SectionTitle("Recently searched songs") }
+                        val songs = searchedSongs.take(5).map { it.toSong() }
+                        itemsIndexed(songs, key = { _, song -> "searched-${song.id}" }) { index, song ->
                             SongRow(
                                 song = song,
                                 onClick = { app.player.play(songs, index) },
@@ -232,12 +223,22 @@ fun SearchScreen(nav: Nav) {
                             )
                         }
                     }
-                    if (recentAlbums.isNotEmpty()) {
-                        item { SectionTitle("Recently played movies") }
+                    if (searchedAlbums.isNotEmpty()) {
+                        item { SectionTitle("Recently searched movies") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
-                                items(recentAlbums, key = { "recent-album-${it.id}" }) { album ->
+                                items(searchedAlbums, key = { "searched-album-${it.id}" }) { album ->
                                     AlbumCard(album, onClick = { nav.openAlbum(album.id) }, modifier = Modifier.width(140.dp))
+                                }
+                            }
+                        }
+                    }
+                    if (searchedArtists.isNotEmpty()) {
+                        item { SectionTitle("Recently searched composers") }
+                        item {
+                            LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
+                                items(searchedArtists, key = { "searched-artist-${it.id}" }) { artist ->
+                                    ComposerCard(artist) { nav.openArtist(artist.id) }
                                 }
                             }
                         }
@@ -248,16 +249,6 @@ fun SearchScreen(nav: Nav) {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(recentPlaylists, key = { "recent-playlist-${it.id}" }) { playlist ->
                                     PlaylistCard(playlist, onClick = { nav.openPlaylist(playlist.id) })
-                                }
-                            }
-                        }
-                    }
-                    if (recentComposers.isNotEmpty()) {
-                        item { SectionTitle("Recently played composers") }
-                        item {
-                            LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
-                                items(recentComposers, key = { "recent-artist-${it.id}" }) { artist ->
-                                    ComposerCard(artist) { nav.openArtist(artist.id) }
                                 }
                             }
                         }

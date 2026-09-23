@@ -61,7 +61,7 @@ class IsaipettiApp : Application() {
                     player.stop()
                     recent.clear()
                     recentPlaylists.clear()
-                    searches.clear()
+                    searches.clearAll()
                     likes.clear()
                     social.logout() // also stops notifications to this phone
                     session.clear("Your password was changed. Log in again with the new one.")

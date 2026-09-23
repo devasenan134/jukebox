@@ -120,7 +120,7 @@ fun SettingsScreen(nav: Nav) {
                         app.player.stop()
                         app.recent.clear()
                         app.recentPlaylists.clear()
-                        app.searches.clear()
+                        app.searches.clearAll()
                         app.likes.clear()
                         app.social.logout()
                         app.session.clear()
