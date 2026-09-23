@@ -88,7 +88,7 @@ fun SettingsScreen(nav: Nav) {
 
             UpdatesCard()
 
-            BugReportCard(enabled = social != null)
+            FeedbackCard(enabled = social != null)
 
             OutlinedButton(
                 onClick = { confirmLogout = true },

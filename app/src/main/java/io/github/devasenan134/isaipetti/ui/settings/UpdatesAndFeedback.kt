@@ -154,45 +154,61 @@ fun UpdateDialog(update: AppUpdate, onDismiss: () -> Unit) {
     )
 }
 
-/** Settings card that opens the bug report form. */
+/** The two kinds of feedback, each with its own wording. */
+private enum class Feedback(
+    val kind: String,
+    val button: String,
+    val titleLabel: String,
+    val descriptionLabel: String,
+    val includeDeviceByDefault: Boolean,
+) {
+    Bug("bug", "Report a bug", "What's wrong, in a few words", "What happened, and what did you expect?", true),
+    Feature("feature", "Suggest a feature", "Your idea, in a few words", "What would you like the app to do, and why?", false),
+}
+
+/** Settings card for bug reports and feature requests. */
 @Composable
-fun BugReportCard(enabled: Boolean) {
-    var open by rememberSaveable { mutableStateOf(false) }
+fun FeedbackCard(enabled: Boolean) {
+    var open by rememberSaveable { mutableStateOf<Feedback?>(null) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Found a bug?", style = MaterialTheme.typography.titleMedium)
+            Text("Feedback", style = MaterialTheme.typography.titleMedium)
             Text(
-                if (enabled) "Tell us what went wrong. It's posted as an issue on the app's GitHub page."
-                else "Bug reports need the friends server, which isn't connected right now.",
+                if (enabled) "Found a bug or have an idea? It's posted as an issue on the app's GitHub page."
+                else "Feedback needs the friends server, which isn't connected right now.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text("Report a bug") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Feedback.entries.forEach { type ->
+                    OutlinedButton(onClick = { open = type }, enabled = enabled, modifier = Modifier.weight(1f)) { Text(type.button) }
+                }
+            }
         }
     }
-    if (open) BugReportDialog(onDismiss = { open = false })
+    open?.let { FeedbackDialog(it, onDismiss = { open = null }) }
 }
 
 @Composable
-private fun BugReportDialog(onDismiss: () -> Unit) {
+private fun FeedbackDialog(type: Feedback, onDismiss: () -> Unit) {
     val app = LocalApp.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var title by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
-    var includeDevice by rememberSaveable { mutableStateOf(true) }
+    var includeDevice by rememberSaveable { mutableStateOf(type.includeDeviceByDefault) }
     var sending by remember { mutableStateOf(false) }
     var sent by remember { mutableStateOf<BugReport?>(null) }
     val deviceInfo = "Isaipetti ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · " +
         "${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
 
-    sent?.let { report ->
+    sent?.let { issue ->
         AlertDialog(
             onDismissRequest = onDismiss,
             title = { Text("Thanks!") },
-            text = { Text("Your report is issue #${report.number} on GitHub.") },
+            text = { Text("It's issue #${issue.number} on GitHub.") },
             confirmButton = {
                 TextButton(onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(report.url)))
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(issue.url)))
                     onDismiss()
                 }) { Text("Open it") }
             },
@@ -204,20 +220,20 @@ private fun BugReportDialog(onDismiss: () -> Unit) {
     val canSend = title.trim().length >= 3 && description.trim().length >= 10 && !sending
     AlertDialog(
         onDismissRequest = { if (!sending) onDismiss() },
-        title = { Text("Report a bug") },
+        title = { Text(type.button) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it.take(120) },
-                    label = { Text("What's wrong, in a few words") },
+                    label = { Text(type.titleLabel) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it.take(5000) },
-                    label = { Text("What happened, and what did you expect?") },
+                    label = { Text(type.descriptionLabel) },
                     minLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -229,7 +245,7 @@ private fun BugReportDialog(onDismiss: () -> Unit) {
                     }
                 }
                 Text(
-                    "Reports are public on GitHub. Your name isn't shown, but don't include passwords or anything private.",
+                    "This is posted publicly on GitHub. Your name isn't shown, but don't include passwords or anything private.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -240,9 +256,9 @@ private fun BugReportDialog(onDismiss: () -> Unit) {
                 sending = true
                 scope.launch {
                     try {
-                        sent = app.social.api.reportBug(title.trim(), description.trim(), deviceInfo.takeIf { includeDevice })
+                        sent = app.social.api.sendFeedback(type.kind, title.trim(), description.trim(), deviceInfo.takeIf { includeDevice })
                     } catch (e: Exception) {
-                        Toast.makeText(context, e.message ?: "Couldn't send the report", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, e.message ?: "Couldn't send it", Toast.LENGTH_LONG).show()
                     }
                     sending = false
                 }

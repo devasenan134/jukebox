@@ -41,9 +41,9 @@ class SocialApi(
     suspend fun registerDevice(pushToken: String) = post<DeviceBody, Unit>("/devices", DeviceBody(pushToken))
     suspend fun unregisterDevice(pushToken: String) = post<DeviceBody, Unit>("/devices/remove", DeviceBody(pushToken))
 
-    /** Files a bug report; the server turns it into a public GitHub issue. */
-    suspend fun reportBug(title: String, description: String, deviceInfo: String?): BugReport =
-        post("/bug-reports", BugBody(title, description, deviceInfo))
+    /** Sends a bug report or a feature request ([kind] "bug" or "feature"); the server turns it into a public GitHub issue. */
+    suspend fun sendFeedback(kind: String, title: String, description: String, deviceInfo: String?): BugReport =
+        post("/bug-reports", FeedbackBody(title, description, deviceInfo, kind))
 
     suspend fun createInvite(): Invite = post("/invites", Unit)
     suspend fun invites(): List<Invite> = get("/invites")
@@ -113,5 +113,5 @@ class SocialApi(
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)
-    @Serializable private data class BugBody(val title: String, val description: String, val deviceInfo: String?)
+    @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 }
