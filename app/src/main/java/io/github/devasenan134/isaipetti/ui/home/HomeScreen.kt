@@ -23,11 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.devasenan134.isaipetti.data.Album
-import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.AlbumCard
 import io.github.devasenan134.isaipetti.ui.components.Cover
-import io.github.devasenan134.isaipetti.ui.components.PlaylistCard
 import io.github.devasenan134.isaipetti.ui.components.LoadableContent
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
@@ -37,7 +35,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
 private data class HomeData(
-    val playlists: List<Playlist>,
     val recent: List<Album>,
     val frequent: List<Album>,
     val newest: List<Album>,
@@ -50,12 +47,11 @@ fun HomeScreen(nav: Nav) {
     val loader = rememberLoader("home") {
         // Fetch all rows at the same time instead of one after another.
         coroutineScope {
-            val playlists = async { app.api.playlists() }
             val recent = async { app.api.albumList("recent", 20) }
             val frequent = async { app.api.albumList("frequent", 20) }
             val newest = async { app.api.albumList("newest", 20) }
             val random = async { app.api.albumList("random", 20) }
-            HomeData(playlists.await(), recent.await(), frequent.await(), newest.await(), random.await())
+            HomeData(recent.await(), frequent.await(), newest.await(), random.await())
         }
     }
 
@@ -66,14 +62,7 @@ fun HomeScreen(nav: Nav) {
         }
         LoadableContent(loader) { data ->
             LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                if (data.playlists.isNotEmpty()) {
-                    item { SectionTitle("Playlists") }
-                    item {
-                        LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
-                            items(data.playlists, key = { it.id }) { PlaylistCard(it) { nav.openPlaylist(it.id) } }
-                        }
-                    }
-                }
+                // Playlists live under Search → Playlists and in Your Library.
                 albumRow("Recently played", data.recent, nav)
                 albumRow("Most played", data.frequent, nav)
                 albumRow("Recently added", data.newest, nav)

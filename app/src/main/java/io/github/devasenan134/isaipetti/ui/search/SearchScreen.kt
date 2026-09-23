@@ -233,7 +233,7 @@ fun SearchScreen(nav: Nav) {
                         }
                     }
                     if (searchedSongs.isNotEmpty()) {
-                        item { SectionTitle("Recently searched songs") }
+                        item { SectionTitle("Your recent songs") }
                         val songs = searchedSongs.take(5).map { it.toSong() }
                         itemsIndexed(songs, key = { _, song -> "searched-${song.id}" }) { index, song ->
                             SongRow(
@@ -246,7 +246,7 @@ fun SearchScreen(nav: Nav) {
                         }
                     }
                     if (searchedAlbums.isNotEmpty()) {
-                        item { SectionTitle("Recently searched movies") }
+                        item { SectionTitle("Your recent movies") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(searchedAlbums, key = { "searched-album-${it.id}" }) { album ->
@@ -256,7 +256,7 @@ fun SearchScreen(nav: Nav) {
                         }
                     }
                     if (searchedArtists.isNotEmpty()) {
-                        item { SectionTitle("Recently searched composers and artists") }
+                        item { SectionTitle("Your recent composers and artists") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(searchedArtists, key = { "searched-artist-${it.id}" }) { artist ->

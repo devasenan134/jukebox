@@ -10,8 +10,9 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 /**
- * Your search history, newest first, kept on the phone: the words you searched, and what you
- * picked from the results (songs you played, movies and composers you opened).
+ * Your search history and recents, newest first, kept on the phone: the words you searched, songs
+ * you played from search results, and movies, composers and artists you opened from a search or
+ * played from their page.
  */
 class SearchHistory(context: Context) {
     private val prefs = context.getSharedPreferences("search", Context.MODE_PRIVATE)

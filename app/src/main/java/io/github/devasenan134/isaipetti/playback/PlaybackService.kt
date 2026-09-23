@@ -67,6 +67,7 @@ class PlaybackService : MediaSessionService() {
             .build()
 
         startScrobbling(player)
+        rememberQueues(player)
         stopAtClipEnds(player)
         listenSync = ListenSync(player, api, app.social.listen, scope)
         // Tell friends what's playing (only while it's actually playing).
@@ -109,6 +110,30 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<MutableList<MediaItem>> = Futures.immediateFuture(
             mediaItems.map { it.buildUpon().setUri(songUri(it.mediaId)).build() }.toMutableList()
         )
+    }
+
+    /**
+     * For queues started from a playlist: saves the play order (shuffled or not) and the current song
+     * whenever either changes, so opening that playlist later can offer to resume.
+     */
+    private fun rememberQueues(player: ExoPlayer) {
+        player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (!events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) return
+                val current = player.currentMediaItem ?: return
+                val source = current.mediaMetadata.extras?.getString(EXTRA_SOURCE) ?: return
+                val timeline = player.currentTimeline
+                val ids = mutableListOf<String>()
+                var index = timeline.getFirstWindowIndex(player.shuffleModeEnabled)
+                while (index != C.INDEX_UNSET) {
+                    val item = player.getMediaItemAt(index)
+                    // Only the songs that came from this source (songs added to the queue later don't count).
+                    if (item.mediaMetadata.extras?.getString(EXTRA_SOURCE) == source) ids += item.mediaId
+                    index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                }
+                app.queueMemory.save(source, ids, current.mediaId)
+            }
+        })
     }
 
     /** A shared clip pauses once at its end point; pressing play afterwards carries on with the rest of the song. */

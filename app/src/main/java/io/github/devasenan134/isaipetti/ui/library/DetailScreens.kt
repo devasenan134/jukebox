@@ -32,6 +32,10 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
+import androidx.compose.foundation.layout.Box
+import io.github.devasenan134.isaipetti.data.Playlist
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.material3.OutlinedButton
 import io.github.devasenan134.isaipetti.ui.components.Loadable
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
@@ -65,6 +69,7 @@ fun AlbumScreen(id: String, nav: Nav) {
             SongList(
                 liked = likedAlbums.any { it.id == album.id },
                 onToggleLike = { app.likes.toggle(album) },
+                onPlay = { app.searches.picked(album) }, // shows under "Your recent movies" in Search
                 coverArt = album.coverArt,
                 title = album.name,
                 subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
@@ -97,6 +102,8 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 liked = likedPlaylists.any { it.id == playlist.id },
                 onToggleLike = { app.likes.toggle(playlist) },
                 onPlay = { app.recentPlaylists.played(playlist) },
+                source = "playlist:${playlist.id}",
+                extraAction = { ResumeButton(playlist) },
                 onRemoveSong = if (!mine) null else { index ->
                     scope.launch {
                         runCatching { app.api.updatePlaylist(playlist.id, removeIndexes = listOf(index)) }
@@ -148,6 +155,7 @@ fun ArtistScreen(id: String, nav: Nav) {
                             enabled = !shuffling,
                             onClick = {
                                 shuffling = true
+                                app.searches.picked(artist) // shows under "Your recent composers and artists"
                                 scope.launch {
                                     // Fetch every movie's songs in parallel, then shuffle them together.
                                     val songs = runCatching {
@@ -176,6 +184,10 @@ internal fun SongList(
     onPlay: () -> Unit = {},
     /** On a playlist you own: remove the song at this position. */
     onRemoveSong: ((Int) -> Unit)? = null,
+    /** What plays from here are started from (e.g. "playlist:<id>"), to remember where you left off. */
+    source: String? = null,
+    /** Shown under Play and Shuffle, e.g. "Resume". */
+    extraAction: (@Composable () -> Unit)? = null,
     coverArt: String?,
     title: String,
     subtitle: String,
@@ -217,22 +229,23 @@ internal fun SongList(
                     modifier = Modifier.padding(top = 4.dp),
                 )
                 Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { onPlay(); player.play(songs) }, enabled = songs.isNotEmpty()) {
+                    Button(onClick = { onPlay(); player.play(songs, source = source) }, enabled = songs.isNotEmpty()) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Text("Play", Modifier.padding(start = 8.dp))
                     }
-                    FilledTonalButton(onClick = { onPlay(); player.play(songs, shuffle = true) }, enabled = songs.isNotEmpty()) {
+                    FilledTonalButton(onClick = { onPlay(); player.play(songs, shuffle = true, source = source) }, enabled = songs.isNotEmpty()) {
                         Icon(painterResource(R.drawable.ic_shuffle), contentDescription = null)
                         Text("Shuffle", Modifier.padding(start = 8.dp))
                     }
                     liked?.let { LikeButton(it, onToggleLike) }
                 }
+                extraAction?.let { Box(Modifier.padding(top = 8.dp)) { it() } }
             }
         }
         itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
             SongRow(
                 song = song,
-                onClick = { onPlay(); player.play(songs, index) },
+                onClick = { onPlay(); player.play(songs, index, source = source) },
                 isCurrent = song.id == nowPlaying.songId,
                 showCover = showCovers,
                 onOpenAlbum = if (showCovers) nav.openAlbum else null,
@@ -246,3 +259,28 @@ internal fun SongList(
 private fun shortDate(iso: String): String = runCatching {
     java.time.OffsetDateTime.parse(iso).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
 }.getOrDefault(iso.take(10))
+
+/**
+ * "Resume · Song name": continue this playlist from the song you were on last time, in the same
+ * order as then (a shuffled order stays as it was). Songs added since join at the end.
+ */
+@Composable
+private fun ResumeButton(playlist: Playlist) {
+    val app = LocalApp.current
+    val now by app.player.nowPlaying.collectAsStateWithLifecycle()
+    val source = "playlist:${playlist.id}"
+    if (now.source == source) return // already playing from here
+    val saved = remember(playlist, now.source) { app.queueMemory.get(source) } ?: return
+    val byId = playlist.entry.associateBy { it.id }
+    val current = byId[saved.currentId] ?: return
+    OutlinedButton(onClick = {
+        val order = saved.songIds.mapNotNull { byId[it] }.distinctBy { it.id }
+        val added = playlist.entry.filter { song -> order.none { it.id == song.id } }
+        val queue = order + added
+        app.recentPlaylists.played(playlist)
+        app.player.play(queue, queue.indexOfFirst { it.id == current.id }.coerceAtLeast(0), source = source)
+    }) {
+        Icon(Icons.Filled.PlayArrow, contentDescription = null)
+        Text("Resume · ${current.title}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
+    }
+}

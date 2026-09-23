@@ -31,6 +31,8 @@ data class NowPlaying(
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     /** The current song in the form friends can play too (for sharing). */
     val song: SongRef? = null,
+    /** What the queue was started from, e.g. "playlist:<id>". */
+    val source: String? = null,
 )
 
 /** A queue entry. [index] is its position in the player's list, used to jump to it. */
@@ -77,12 +79,13 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
     /** Current position in ms. Read it often (e.g. every 200 ms) for progress bars and lyrics. */
     fun positionMs(): Long = controller?.currentPosition ?: 0
 
-    fun play(songs: List<Song>, startIndex: Int = 0, shuffle: Boolean = false) {
+    /** Plays [songs]. [source] (e.g. "playlist:<id>") lets the app remember where you left off in it. */
+    fun play(songs: List<Song>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) {
         val c = controller ?: return
         if (songs.isEmpty()) return
         c.shuffleModeEnabled = shuffle
         val start = if (shuffle) songs.indices.random() else startIndex
-        c.setMediaItems(songs.map { it.toMediaItem() }, start, 0)
+        c.setMediaItems(songs.map { it.toMediaItem(api, source = source) }, start, 0)
         c.prepare()
         c.play()
     }
@@ -165,6 +168,7 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
             shuffle = c.shuffleModeEnabled,
             repeatMode = c.repeatMode,
             song = item?.toSongRef(),
+            source = meta?.extras?.getString(EXTRA_SOURCE),
         )
 
         // Walk the timeline in play order, so the queue matches what will actually play next.
