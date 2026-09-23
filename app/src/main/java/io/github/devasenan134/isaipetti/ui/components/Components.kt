@@ -10,6 +10,17 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import io.github.devasenan134.isaipetti.R
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Arrangement
+import android.widget.Toast
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -135,72 +146,116 @@ fun SongRow(
 ) {
     val app = LocalApp.current
     val player = app.player
+    val context = LocalContext.current
     val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
     val liked = likedSongs.any { it.id == song.id }
+    // Saved = liked or in one of your playlists; shown with a check mark like Spotify.
+    val inPlaylists by app.myPlaylists.songs.collectAsStateWithLifecycle()
+    val saved = liked || !inPlaylists[song.id].isNullOrEmpty()
     var menuOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     var addingToPlaylist by remember { mutableStateOf(false) }
     if (sharing) ShareSongSheet(song.toRef(), onDismiss = { sharing = false })
     if (addingToPlaylist) AddToPlaylistSheet(song, onDismiss = { addingToPlaylist = false })
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (showCover) {
-            Cover(song.coverArt, Modifier.size(44.dp), size = 100, corner = 4.dp)
-        } else {
-            Text(
-                song.track?.toString() ?: "",
-                modifier = Modifier.width(28.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-            Text(
-                song.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isCurrent) FontWeight.Bold else null,
-                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                listOfNotNull(song.artist, if (showCover) song.album else null).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (liked) {
-            Icon(
-                Icons.Filled.Favorite,
-                contentDescription = "Liked",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(end = 8.dp).size(16.dp),
-            )
-        }
-        Text(formatDuration(song.duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Box {
-            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text(if (liked) "Remove from liked songs" else "Like") },
-                    onClick = { app.likes.toggle(song); menuOpen = false },
-                )
-                DropdownMenuItem(text = { Text("Play next") }, onClick = { player.playNext(song); menuOpen = false })
-                DropdownMenuItem(text = { Text("Add to queue") }, onClick = { player.addToQueue(song); menuOpen = false })
-                DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { addingToPlaylist = true; menuOpen = false })
-                onRemoveFromPlaylist?.let { remove ->
-                    DropdownMenuItem(text = { Text("Remove from this playlist") }, onClick = { remove(); menuOpen = false })
+    // Swipe right: play next. Swipe left: add to the end of the queue. The row springs back either way.
+    val swipe = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    player.playNext(song)
+                    Toast.makeText(context, "Playing next", Toast.LENGTH_SHORT).show()
                 }
-                DropdownMenuItem(text = { Text("Share with friends") }, onClick = { sharing = true; menuOpen = false })
-                if (onOpenAlbum != null && song.albumId != null) {
-                    DropdownMenuItem(text = { Text("Go to movie") }, onClick = { onOpenAlbum(song.albumId); menuOpen = false })
+                SwipeToDismissBoxValue.EndToStart -> {
+                    player.addToQueue(song)
+                    Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
+                }
+                SwipeToDismissBoxValue.Settled -> Unit
+            }
+            false
+        },
+    )
+    SwipeToDismissBox(
+        state = swipe,
+        backgroundContent = { SwipeHint(swipe.dismissDirection) },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).clickable(onClick = onClick)
+                .padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (showCover) {
+                Cover(song.coverArt, Modifier.size(44.dp), size = 100, corner = 4.dp)
+            } else {
+                Text(
+                    song.track?.toString() ?: "",
+                    modifier = Modifier.width(28.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(
+                    song.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isCurrent) FontWeight.Bold else null,
+                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    listOfNotNull(song.artist, if (showCover) song.album else null).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (saved) {
+                // Tap to see (and change) where it's saved: Liked songs and which playlists.
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = "Saved. Tap to see where",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 8.dp).clip(CircleShape).clickable { addingToPlaylist = true }.padding(2.dp).size(18.dp),
+                )
+            }
+            Text(formatDuration(song.duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Box {
+                IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (liked) "Remove from liked songs" else "Like") },
+                        onClick = { app.likes.toggle(song); menuOpen = false },
+                    )
+                    DropdownMenuItem(text = { Text("Play next") }, onClick = { player.playNext(song); menuOpen = false })
+                    DropdownMenuItem(text = { Text("Add to queue") }, onClick = { player.addToQueue(song); menuOpen = false })
+                    DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { addingToPlaylist = true; menuOpen = false })
+                    onRemoveFromPlaylist?.let { remove ->
+                        DropdownMenuItem(text = { Text("Remove from this playlist") }, onClick = { remove(); menuOpen = false })
+                    }
+                    DropdownMenuItem(text = { Text("Share with friends") }, onClick = { sharing = true; menuOpen = false })
+                    if (onOpenAlbum != null && song.albumId != null) {
+                        DropdownMenuItem(text = { Text("Go to movie") }, onClick = { onOpenAlbum(song.albumId); menuOpen = false })
+                    }
                 }
             }
         }
+    }
+}
+
+/** What shows behind a song row while you swipe it. */
+@Composable
+private fun SwipeHint(direction: SwipeToDismissBoxValue) {
+    if (direction == SwipeToDismissBoxValue.Settled) return
+    val playNext = direction == SwipeToDismissBoxValue.StartToEnd
+    Row(
+        Modifier.fillMaxSize().background(if (playNext) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer)
+            .padding(horizontal = 20.dp),
+        horizontalArrangement = if (playNext) Arrangement.Start else Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(painterResource(R.drawable.ic_queue), contentDescription = null)
+        Text(if (playNext) "Play next" else "Add to queue", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
     }
 }
 

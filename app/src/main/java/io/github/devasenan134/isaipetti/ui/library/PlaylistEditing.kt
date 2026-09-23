@@ -102,6 +102,7 @@ fun AddToPlaylistSheet(song: Song, onDismiss: () -> Unit) {
                 else -> null
             }
             message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+            if (changed > 0) app.myPlaylists.refresh()
             onDismiss()
         }
     }
@@ -224,7 +225,11 @@ fun PlaylistOwnerMenu(playlist: Playlist, onChanged: () -> Unit, onDeleted: () -
     fun change(what: suspend () -> Unit, done: String? = null) {
         scope.launch {
             runCatching { what() }
-                .onSuccess { done?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }; onChanged() }
+                .onSuccess {
+                    done?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                    app.myPlaylists.refresh()
+                    onChanged()
+                }
                 .onFailure { Toast.makeText(context, it.message ?: "Couldn't change the playlist", Toast.LENGTH_SHORT).show() }
         }
     }
@@ -277,6 +282,7 @@ fun PlaylistOwnerMenu(playlist: Playlist, onChanged: () -> Unit, onDeleted: () -
                                 .onSuccess {
                                     if (app.likes.isLiked(playlist)) app.likes.toggle(playlist)
                                     app.recentPlaylists.forget(playlist.id)
+                                    app.myPlaylists.refresh()
                                     Toast.makeText(context, "Playlist deleted", Toast.LENGTH_SHORT).show()
                                     onDeleted()
                                 }

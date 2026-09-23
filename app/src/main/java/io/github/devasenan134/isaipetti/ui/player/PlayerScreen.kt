@@ -1,6 +1,21 @@
 package io.github.devasenan134.isaipetti.ui.player
 
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.foundation.background
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.animateColorAsState
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.verticalScroll
@@ -85,12 +100,53 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
     var dragging by remember { mutableStateOf<Float?>(null) }
 
     val scope = rememberCoroutineScope()
-    Surface(Modifier.fillMaxSize()) {
+
+    // A mild gradient in the cover's colour, fading into the normal background (like Spotify, but calmer).
+    val base = MaterialTheme.colorScheme.surface
+    val dark = base.luminance() < 0.5f
+    val coverColor = rememberCoverColor(now.artworkUri, dark)
+    val tint by animateColorAsState(
+        targetValue = coverColor?.let { lerp(base, it, if (dark) 0.55f else 0.35f) } ?: base,
+        animationSpec = tween(700),
+        label = "cover tint",
+    )
+
+    // Swipe down to minimize: the player follows the finger; let go far enough (or fast) and it closes.
+    val density = LocalDensity.current
+    val closeAfter = with(density) { 140.dp.toPx() }
+    var pulled by remember { mutableFloatStateOf(0f) }
+    val pullToClose = remember {
+        object : NestedScrollConnection {
+            // Dragging back up while pulled down moves the player back first.
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y >= 0 || pulled <= 0f) return Offset.Zero
+                val used = maxOf(available.y, -pulled)
+                pulled += used
+                return Offset(0f, used)
+            }
+
+            // Pulling down when there's nothing left to scroll up moves the whole player.
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (available.y <= 0 || source != NestedScrollSource.UserInput) return Offset.Zero
+                pulled += available.y
+                return Offset(0f, available.y)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (pulled <= 0f) return Velocity.Zero
+                if (pulled > closeAfter || available.y > 2_500f) onClose()
+                else animate(pulled, 0f) { value, _ -> pulled = value }
+                return available
+            }
+        }
+    }
+
+    Surface(Modifier.fillMaxSize().graphicsLayer { translationY = pulled }) {
         // The player fills the screen; scrolling down shows "About this song" below it.
-        BoxWithConstraints(Modifier.safeDrawingPadding()) {
+        BoxWithConstraints(Modifier.background(Brush.verticalGradient(0f to tint, 0.7f to base)).safeDrawingPadding()) {
             val pageHeight = maxHeight
             val scroll = rememberScrollState()
-            Column(Modifier.verticalScroll(scroll)) {
+            Column(Modifier.nestedScroll(pullToClose).verticalScroll(scroll)) {
                 Column(Modifier.height(pageHeight).padding(horizontal = 24.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onClose) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Close") }

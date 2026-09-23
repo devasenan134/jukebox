@@ -82,6 +82,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.androidx.palette) // colours from cover art, for the player's background
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging) // push notifications

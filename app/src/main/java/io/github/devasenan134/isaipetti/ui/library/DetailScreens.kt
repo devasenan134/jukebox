@@ -107,7 +107,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 onRemoveSong = if (!mine) null else { index ->
                     scope.launch {
                         runCatching { app.api.updatePlaylist(playlist.id, removeIndexes = listOf(index)) }
-                            .onSuccess { loader.reload(quietly = true) }
+                            .onSuccess { loader.reload(quietly = true); app.myPlaylists.refresh() }
                             .onFailure { Toast.makeText(context, it.message ?: "Couldn't remove it", Toast.LENGTH_SHORT).show() }
                     }
                 },
