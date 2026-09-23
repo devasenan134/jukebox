@@ -55,7 +55,12 @@ data class ChatMessage(
     val body: String,
     val song: SongRef? = null,
     val createdAt: Long,
-)
+    /** A line about the chat itself, like "left the group". */
+    val system: Boolean = false,
+) {
+    /** "Alice left the group" / "You left the group". */
+    fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body
+}
 
 @Serializable
 data class Conversation(
@@ -69,6 +74,8 @@ data class Conversation(
     val canMessage: Boolean = true,
     /** Who is listening together in this chat right now. */
     val listeners: List<Long> = emptyList(),
+    /** The group's owner, the only one who can delete it for everyone. */
+    val createdBy: Long? = null,
 ) {
     val isGroup get() = kind == "group"
 
@@ -94,6 +101,10 @@ data class FriendAddedEvent(val friend: Friend) : SocialEvent
 
 @Serializable @SerialName("friendRemoved")
 data class FriendRemovedEvent(val userId: Long) : SocialEvent
+
+/** A group was deleted for everyone. */
+@Serializable @SerialName("conversationRemoved")
+data class ConversationRemovedEvent(val conversationId: Long) : SocialEvent
 
 /**
  * What a listen-together session is playing: a shared queue, which song in it, where in the song

@@ -6,6 +6,7 @@ import io.github.devasenan134.isaipetti.push.PushSetup
 import io.github.devasenan134.isaipetti.data.AppStateUpdate
 import io.github.devasenan134.isaipetti.data.ChatMessage
 import io.github.devasenan134.isaipetti.data.ClientEvent
+import io.github.devasenan134.isaipetti.data.ConversationRemovedEvent
 import io.github.devasenan134.isaipetti.data.Conversation
 import io.github.devasenan134.isaipetti.data.Friend
 import io.github.devasenan134.isaipetti.data.FriendAddedEvent
@@ -177,6 +178,24 @@ class Social(private val context: Context, private val session: SessionStore, pr
         scope.launch { quietly { api.markRead(conversationId, messageId) } }
     }
 
+    private val _removed = MutableSharedFlow<Long>(extraBufferCapacity = 8)
+
+    /** Chats deleted for everyone (by their owner), so an open chat screen can close. */
+    val removed: SharedFlow<Long> = _removed
+
+    /** Leaves a group chat. */
+    suspend fun leaveGroup(conversationId: Long) {
+        if (listen.joined.value == conversationId) listen.leave()
+        api.leaveGroup(conversationId)
+        _conversations.update { list -> list.filter { it.id != conversationId } }
+    }
+
+    /** Deletes a group and its messages for every member (only its owner can). */
+    suspend fun deleteForEveryone(conversationId: Long) {
+        api.deleteForEveryone(conversationId)
+        _conversations.update { list -> list.filter { it.id != conversationId } }
+    }
+
     /** Deletes a chat you can't message in anymore. It disappears for you only. */
     suspend fun deleteConversation(conversationId: Long) {
         api.deleteConversation(conversationId)
@@ -268,6 +287,10 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 refreshConversations()
             }
             is FriendRequestEvent -> refreshRequests()
+            is ConversationRemovedEvent -> {
+                _conversations.update { list -> list.filter { it.id != event.conversationId } }
+                _removed.emit(event.conversationId)
+            }
             is ListenSessionEvent -> listen.handle(event)
             is ListenStateEvent -> listen.handle(event)
             is FriendAddedEvent, is FriendRemovedEvent -> {

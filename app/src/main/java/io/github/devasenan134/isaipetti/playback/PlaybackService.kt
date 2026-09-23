@@ -75,6 +75,10 @@ class PlaybackService : MediaSessionService() {
                 if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) {
                     app.social.onPlayback(player.currentMediaItem?.toSongRef(), player.isPlaying)
                 }
+                // Remember songs that actually play, for "recently played" when sharing in a chat.
+                if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && player.isPlaying) {
+                    player.currentMediaItem?.let { app.recent.played(it.toSongRef()) }
+                }
             }
         })
     }

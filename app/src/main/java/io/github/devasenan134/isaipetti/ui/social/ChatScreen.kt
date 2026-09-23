@@ -2,6 +2,13 @@ package io.github.devasenan134.isaipetti.ui.social
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.layout.Box
 import io.github.devasenan134.isaipetti.data.SocialUser
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Button
@@ -63,7 +70,6 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val me = social.me?.id
     val conversations by social.conversations.collectAsStateWithLifecycle()
     val friends by social.friends.collectAsStateWithLifecycle()
-    val nowPlaying by app.player.nowPlaying.collectAsStateWithLifecycle()
     val conversation = conversations.firstOrNull { it.id == conversationId }
 
     val messages = remember { mutableStateListOf<ChatMessage>() }
@@ -85,6 +91,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             page.lastOrNull()?.let { social.markRead(conversationId, it.id) }
         }.onFailure { Toast.makeText(context, it.message, Toast.LENGTH_SHORT).show() }
         social.messages.collect { if (it.conversationId == conversationId) add(it) }
+    }
+    // The owner deleted this group for everyone.
+    LaunchedEffect(conversationId) {
+        social.removed.collect {
+            if (it == conversationId) {
+                Toast.makeText(context, "This group was deleted", Toast.LENGTH_SHORT).show()
+                nav.back()
+            }
+        }
     }
     DisposableEffect(conversationId) {
         social.openConversationId = conversationId
@@ -117,6 +132,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val inSession = joined == conversationId
     Column(Modifier.imePadding()) {
         ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back) {
+            if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, onGone = nav.back)
             if (conversation?.canMessage == true) {
                 IconButton(onClick = {
                     when {
@@ -167,7 +183,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 // Show the sender's name in groups when a new person starts talking.
                 val olderNeighbour = newestFirst.getOrNull(i + 1)
                 val showName = conversation?.isGroup == true && message.sender.id != me && olderNeighbour?.sender?.id != message.sender.id
-                Bubble(message, mine = message.sender.id == me, showName = showName)
+                if (message.system) SystemLine(message.systemText(me)) else Bubble(message, mine = message.sender.id == me, showName = showName)
             }
             if (hasOlder) {
                 item {
@@ -198,10 +214,13 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             return@Column
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            // Share whatever is playing right now with one tap.
-            val current = nowPlaying.song
-            IconButton(enabled = current != null && !sending, onClick = { current?.let { send("", it) } }) {
-                Icon(painterResource(R.drawable.ic_music_note), contentDescription = "Share the song you're playing")
+            // Share what's playing or a recently played song, whole or just a part.
+            var sharingMusic by remember { mutableStateOf(false) }
+            IconButton(enabled = !sending, onClick = { sharingMusic = true }) {
+                Icon(painterResource(R.drawable.ic_music_note), contentDescription = "Share a song")
+            }
+            if (sharingMusic) {
+                ShareMusicSheet(conversationId, onSent = { add(it); social.refreshConversationsSoon() }, onDismiss = { sharingMusic = false })
             }
             OutlinedTextField(
                 value = draft,
@@ -277,5 +296,72 @@ private fun ListenBar(members: List<SocialUser>, listeners: List<Long>, me: Long
             )
             if (inSession) TextButton(onClick = onLeave) { Text("Leave") } else Button(onClick = onJoin) { Text("Join") }
         }
+    }
+}
+
+/** A line about the chat itself, like "Alice left the group". */
+@Composable
+private fun SystemLine(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+    )
+}
+
+/** The ⋮ menu of a group chat: leave it, or (for its owner) delete it for everyone. */
+@Composable
+private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, onGone: () -> Unit) {
+    val social = LocalApp.current.social
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var open by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<String?>(null) } // "leave" or "delete"
+
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Leave group") }, onClick = { open = false; confirm = "leave" })
+            if (isOwner) {
+                DropdownMenuItem(
+                    text = { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) },
+                    onClick = { open = false; confirm = "delete" },
+                )
+            }
+        }
+    }
+
+    confirm?.let { action ->
+        val leaving = action == "leave"
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text(if (leaving) "Leave \"$title\"?" else "Delete \"$title\" for everyone?") },
+            text = {
+                Text(
+                    if (leaving) "You won't get its messages anymore, and the others will see that you left." +
+                        (if (isOwner) " Someone else in the group becomes its owner." else "")
+                    else "The group and all its messages are deleted for every member. This can't be undone.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirm = null
+                        scope.launch {
+                            try {
+                                if (leaving) social.leaveGroup(conversationId) else social.deleteForEveryone(conversationId)
+                                onGone()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, e.message ?: "Something went wrong", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = if (leaving) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text(if (leaving) "Leave" else "Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
+        )
     }
 }

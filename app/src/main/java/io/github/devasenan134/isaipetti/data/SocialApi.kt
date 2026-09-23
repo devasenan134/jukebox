@@ -63,6 +63,8 @@ class SocialApi(
     suspend fun sendMessage(conversationId: Long, body: String, song: SongRef? = null): ChatMessage =
         post("/conversations/$conversationId/messages", MessageBody(body, song))
     suspend fun deleteConversation(conversationId: Long) = send<Unit>("DELETE", "/conversations/$conversationId", null)
+    suspend fun leaveGroup(conversationId: Long) = post<Unit, Unit>("/conversations/$conversationId/leave", Unit)
+    suspend fun deleteForEveryone(conversationId: Long) = send<Unit>("DELETE", "/conversations/$conversationId/everyone", null)
     suspend fun markRead(conversationId: Long, messageId: Long) =
         post<ReadBody, Unit>("/conversations/$conversationId/read", ReadBody(messageId))
 

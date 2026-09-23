@@ -151,19 +151,9 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
     // Friends you don't have a DM with yet also appear, so you can share with anyone.
     val dmPartners = conversations.filter { !it.isGroup }.flatMap { c -> c.members.map { it.id } }.toSet()
     val newPeople = friends.filter { it.user.id !in dmPartners }
+    val targets = conversations.filter { it.canMessage }
 
-    // "Share only a part": a start and end point, in whole seconds.
-    val durationMs = song.duration * 1000L
-    var clipping by rememberSaveable { mutableStateOf(false) }
-    var clip by remember {
-        val now = app.player.nowPlaying.value
-        val start = if (now.songId == song.id) app.player.positionMs() / 1000 * 1000 else 0L
-        val from = start.coerceAtMost((durationMs - 1_000).coerceAtLeast(0))
-        mutableStateOf(from..(from + 30_000).coerceAtMost(durationMs))
-    }
-    val shared = if (clipping) song.copy(clipStartMs = clip.first, clipEndMs = clip.last) else song
-
-    fun send(title: String, conversationId: suspend () -> Long) {
+    fun send(shared: SongRef, title: String, conversationId: suspend () -> Long) {
         scope.launch {
             try {
                 social.api.sendMessage(conversationId(), "", shared)
@@ -178,17 +168,8 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SectionTitle("Share \"${song.title}\"")
-        if (durationMs >= 2_000) {
-            Row(
-                Modifier.fillMaxWidth().clickable { clipping = !clipping }.padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Share only a part", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                Switch(checked = clipping, onCheckedChange = { clipping = it })
-            }
-            if (clipping) ClipPicker(song, durationMs, clip, onChange = { clip = it })
-        }
-        if (conversations.isEmpty() && newPeople.isEmpty()) {
+        val shared = clipOptions(song)
+        if (targets.isEmpty() && newPeople.isEmpty()) {
             Text(
                 "Add friends first, from the Friends tab.",
                 modifier = Modifier.padding(16.dp),
@@ -196,12 +177,12 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
             )
         }
         LazyColumn(Modifier.padding(bottom = 16.dp)) {
-            items(conversations, key = { "c${it.id}" }) { c ->
+            items(targets, key = { "c${it.id}" }) { c ->
                 val title = c.title(me)
-                ShareTarget(title, "c${c.id}") { send(title) { c.id } }
+                ShareTarget(title, "c${c.id}") { send(shared, title) { c.id } }
             }
             items(newPeople, key = { "f${it.user.id}" }) { f ->
-                ShareTarget(f.user.displayName, f.user.username) { send(f.user.displayName) { social.api.openDm(f.user.id).id } }
+                ShareTarget(f.user.displayName, f.user.username) { send(shared, f.user.displayName) { social.api.openDm(f.user.id).id } }
             }
         }
     }
@@ -216,6 +197,33 @@ private fun ShareTarget(title: String, key: String, onClick: () -> Unit) {
         Avatar(title, key, size = 40.dp)
         Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
     }
+}
+
+/**
+ * The "Share only a part" switch and, when it's on, the clip picker. Returns what to send:
+ * the whole [song], or the chosen part of it.
+ */
+@Composable
+fun clipOptions(song: SongRef): SongRef {
+    val player = LocalApp.current.player
+    val durationMs = song.duration * 1000L
+    if (durationMs < 2_000) return song
+    var clipping by rememberSaveable(song.id) { mutableStateOf(false) }
+    // Start where the song is now if it's playing (whole seconds), and take 30 seconds.
+    var clip by remember(song.id) {
+        val start = if (player.nowPlaying.value.songId == song.id) player.positionMs() / 1000 * 1000 else 0L
+        val from = start.coerceAtMost((durationMs - 1_000).coerceAtLeast(0))
+        mutableStateOf(from..(from + 30_000).coerceAtMost(durationMs))
+    }
+    Row(
+        Modifier.fillMaxWidth().clickable { clipping = !clipping }.padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Share only a part", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Switch(checked = clipping, onCheckedChange = { clipping = it })
+    }
+    if (clipping) ClipPicker(song, durationMs, clip, onChange = { clip = it })
+    return if (clipping) song.copy(clipStartMs = clip.first, clipEndMs = clip.last) else song
 }
 
 /** Pick the start and end of a clip with a two-handled slider, and preview it. */

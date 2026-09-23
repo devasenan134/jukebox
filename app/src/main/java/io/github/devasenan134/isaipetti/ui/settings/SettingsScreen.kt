@@ -118,6 +118,7 @@ fun SettingsScreen(nav: Nav) {
                     confirmLogout = false
                     scope.launch {
                         app.player.stop()
+                        app.recent.clear()
                         app.social.logout()
                         app.session.clear()
                     }
