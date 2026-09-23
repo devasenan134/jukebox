@@ -69,7 +69,11 @@ fun AlbumScreen(id: String, nav: Nav) {
             SongList(
                 liked = likedAlbums.any { it.id == album.id },
                 onToggleLike = { app.likes.toggle(album) },
-                onPlay = { app.searches.picked(album) }, // shows under "Your recent movies" in Search
+                onPlay = { app.searches.picked(album); app.activity.movie(album) },
+                source = "album:${album.id}",
+                extraAction = {
+                    ResumeButton("album:${album.id}", album.song) { app.searches.picked(album); app.activity.movie(album) }
+                },
                 coverArt = album.coverArt,
                 title = album.name,
                 subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
@@ -101,10 +105,15 @@ fun PlaylistScreen(id: String, nav: Nav) {
             SongList(
                 liked = likedPlaylists.any { it.id == playlist.id },
                 onToggleLike = { app.likes.toggle(playlist) },
-                onPlay = { app.recentPlaylists.played(playlist) },
+                onPlay = { app.recentPlaylists.played(playlist); app.activity.playlist(playlist) },
                 source = "playlist:${playlist.id}",
-                extraAction = { ResumeButton(playlist) },
-                onRemoveSong = if (!mine) null else { index ->
+                extraAction = {
+                    ResumeButton("playlist:${playlist.id}", playlist.entry) {
+                        app.recentPlaylists.played(playlist)
+                        app.activity.playlist(playlist)
+                    }
+                },
+                onRemoveSong = if (!mine || playlist.readonly) null else { index ->
                     scope.launch {
                         runCatching { app.api.updatePlaylist(playlist.id, removeIndexes = listOf(index)) }
                             .onSuccess { loader.reload(quietly = true); app.myPlaylists.refresh() }
@@ -121,6 +130,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                         if (playlist.public) "Public playlist" else "Private playlist",
                         playlist.changed?.let { "Updated ${shortDate(it)}" },
                     ).joinToString(" · "),
+                    if (mine && playlist.readonly) "Its songs can't be changed here: it's a smart playlist or comes from a playlist file on the server." else null,
                 ),
                 songs = playlist.entry,
                 onSubtitleClick = null,
@@ -156,6 +166,7 @@ fun ArtistScreen(id: String, nav: Nav) {
                             onClick = {
                                 shuffling = true
                                 app.searches.picked(artist) // shows under "Your recent composers and artists"
+                                app.activity.composer(artist)
                                 scope.launch {
                                     // Fetch every movie's songs in parallel, then shuffle them together.
                                     val songs = runCatching {
@@ -261,23 +272,22 @@ private fun shortDate(iso: String): String = runCatching {
 }.getOrDefault(iso.take(10))
 
 /**
- * "Resume · Song name": continue this playlist from the song you were on last time, in the same
- * order as then (a shuffled order stays as it was). Songs added since join at the end.
+ * "Resume · Song name": continue a playlist, movie or Liked songs from the song you were on last
+ * time, in the same order as then (a shuffled order stays as it was). Songs added since join at the end.
  */
 @Composable
-private fun ResumeButton(playlist: Playlist) {
+internal fun ResumeButton(source: String, songs: List<Song>, onResume: () -> Unit = {}) {
     val app = LocalApp.current
     val now by app.player.nowPlaying.collectAsStateWithLifecycle()
-    val source = "playlist:${playlist.id}"
     if (now.source == source) return // already playing from here
-    val saved = remember(playlist, now.source) { app.queueMemory.get(source) } ?: return
-    val byId = playlist.entry.associateBy { it.id }
+    val saved = remember(source, songs, now.source) { app.queueMemory.get(source) } ?: return
+    val byId = songs.associateBy { it.id }
     val current = byId[saved.currentId] ?: return
     OutlinedButton(onClick = {
         val order = saved.songIds.mapNotNull { byId[it] }.distinctBy { it.id }
-        val added = playlist.entry.filter { song -> order.none { it.id == song.id } }
+        val added = songs.filter { song -> order.none { it.id == song.id } }
         val queue = order + added
-        app.recentPlaylists.played(playlist)
+        onResume()
         app.player.play(queue, queue.indexOfFirst { it.id == current.id }.coerceAtLeast(0), source = source)
     }) {
         Icon(Icons.Filled.PlayArrow, contentDescription = null)

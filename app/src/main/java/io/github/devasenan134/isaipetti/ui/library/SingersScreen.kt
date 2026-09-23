@@ -125,7 +125,10 @@ fun SingerScreen(id: String, name: String, coverArt: String?, nav: Nav) {
         ScreenHeader("", onBack = nav.back)
         LoadableContent(loader) { songs ->
             SongList(
-                onPlay = { app.searches.picked(Artist(id, name, coverArt = coverArt, roles = listOf("artist"))) },
+                onPlay = {
+                    app.searches.picked(Artist(id, name, coverArt = coverArt, roles = listOf("artist")))
+                    app.activity.artist(id, name, coverArt)
+                },
                 coverArt = coverArt,
                 title = name,
                 subtitle = "Artist",

@@ -5,6 +5,7 @@ import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.Likes
 import io.github.devasenan134.isaipetti.data.MyPlaylists
 import io.github.devasenan134.isaipetti.data.QueueMemory
+import io.github.devasenan134.isaipetti.data.RecentActivity
 import io.github.devasenan134.isaipetti.data.RecentPlaylists
 import io.github.devasenan134.isaipetti.data.RecentSongs
 import io.github.devasenan134.isaipetti.data.SearchHistory
@@ -45,6 +46,8 @@ class IsaipettiApp : Application() {
         private set
     lateinit var myPlaylists: MyPlaylists
         private set
+    lateinit var activity: RecentActivity
+        private set
     lateinit var searches: SearchHistory
         private set
     lateinit var likes: Likes
@@ -69,6 +72,7 @@ class IsaipettiApp : Application() {
                     recentPlaylists.clear()
                     queueMemory.clear()
                     myPlaylists.clear()
+                    activity.clear()
                     searches.clearAll()
                     likes.clear()
                     social.logout() // also stops notifications to this phone
@@ -84,6 +88,7 @@ class IsaipettiApp : Application() {
         recent = RecentSongs(this)
         recentPlaylists = RecentPlaylists(this)
         queueMemory = QueueMemory(this)
+        activity = RecentActivity(this)
         searches = SearchHistory(this)
         likes = Likes(this, api, session) { social.api }
         myPlaylists = MyPlaylists(api, session)

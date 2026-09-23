@@ -43,10 +43,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.devasenan134.isaipetti.data.Playlist
+import io.github.devasenan134.isaipetti.data.RecentActivity
 import io.github.devasenan134.isaipetti.data.Song
 import io.github.devasenan134.isaipetti.ui.components.Cover
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
@@ -152,10 +154,12 @@ fun AddToPlaylistSheet(song: Song, onDismiss: () -> Unit) {
             items(list.orEmpty(), key = { it.id }) { playlist ->
                 SaveRow(
                     title = playlist.name,
-                    subtitle = songCount(playlist.songCount),
+                    // Navidrome won't change the songs of smart playlists or ones synced from a file.
+                    subtitle = if (playlist.readonly) "Can't be changed here (smart or file playlist)" else songCount(playlist.songCount),
                     leading = { Cover(playlist.coverArt, Modifier.size(48.dp), size = 150, corner = 6.dp) },
                     checked = checked[playlist.id] == true,
                     onChange = { checked[playlist.id] = it },
+                    enabled = !playlist.readonly,
                 )
             }
         }
@@ -180,9 +184,18 @@ fun AddToPlaylistSheet(song: Song, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun SaveRow(title: String, subtitle: String?, leading: @Composable () -> Unit, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SaveRow(
+    title: String,
+    subtitle: String?,
+    leading: @Composable () -> Unit,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
     Row(
-        Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().clickable(enabled = enabled) { onChange(!checked) }
+            .alpha(if (enabled) 1f else 0.5f)
+            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leading()
@@ -190,7 +203,7 @@ private fun SaveRow(title: String, subtitle: String?, leading: @Composable () ->
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
-        Checkbox(checked = checked, onCheckedChange = onChange)
+        Checkbox(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 
@@ -282,6 +295,7 @@ fun PlaylistOwnerMenu(playlist: Playlist, onChanged: () -> Unit, onDeleted: () -
                                 .onSuccess {
                                     if (app.likes.isLiked(playlist)) app.likes.toggle(playlist)
                                     app.recentPlaylists.forget(playlist.id)
+                                    app.activity.forget(RecentActivity.Kind.Playlist, playlist.id)
                                     app.myPlaylists.refresh()
                                     Toast.makeText(context, "Playlist deleted", Toast.LENGTH_SHORT).show()
                                     onDeleted()

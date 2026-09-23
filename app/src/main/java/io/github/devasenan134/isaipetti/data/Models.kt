@@ -64,6 +64,8 @@ data class Playlist(
     /** Who made it (their Navidrome username). */
     val owner: String? = null,
     val public: Boolean = false,
+    /** Navidrome won't change its songs: a smart playlist, or one kept in sync with a playlist file on the server. */
+    val readonly: Boolean = false,
     /** When it was last changed (ISO date and time). */
     val changed: String? = null,
     val entry: List<Song> = emptyList(),

@@ -105,7 +105,11 @@ fun chatTime(millis: Long): String {
 @Composable
 fun SongCard(song: SongRef, modifier: Modifier = Modifier) {
     val player = LocalApp.current.player
-    val play = { if (song.isClip) player.playClip(song) else player.play(listOf(song.toSong())) }
+    val activity = LocalApp.current.activity
+    val play = {
+        activity.song(song.toSong())
+        if (song.isClip) player.playClip(song) else player.play(listOf(song.toSong()))
+    }
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),

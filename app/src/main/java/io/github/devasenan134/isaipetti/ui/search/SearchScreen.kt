@@ -173,7 +173,7 @@ fun SearchScreen(nav: Nav) {
                         itemsIndexed(result.song, key = { _, song -> "song-${song.id}" }) { index, song ->
                             SongRow(
                                 song = song,
-                                onClick = { saveSearch(); app.searches.picked(song); app.player.play(result.song, index) },
+                                onClick = { saveSearch(); app.searches.picked(song); app.activity.song(song); app.player.play(result.song, index) },
                                 isCurrent = song.id == nowPlaying.songId,
                                 showCover = true,
                                 onOpenAlbum = nav.openAlbum,

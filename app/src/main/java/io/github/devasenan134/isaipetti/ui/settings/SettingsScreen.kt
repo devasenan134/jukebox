@@ -122,6 +122,7 @@ fun SettingsScreen(nav: Nav) {
                         app.recentPlaylists.clear()
                         app.queueMemory.clear()
                         app.myPlaylists.clear()
+                        app.activity.clear()
                         app.searches.clearAll()
                         app.likes.clear()
                         app.social.logout()

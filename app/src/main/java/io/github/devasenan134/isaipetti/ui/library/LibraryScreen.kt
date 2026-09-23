@@ -169,15 +169,16 @@ fun LikedSongsScreen(nav: Nav) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = { player.play(songs) }, enabled = songs.isNotEmpty()) {
+                        Button(onClick = { app.activity.liked(); player.play(songs, source = LIKED) }, enabled = songs.isNotEmpty()) {
                             Icon(Icons.Filled.PlayArrow, contentDescription = null)
                             Text("Play", Modifier.padding(start = 8.dp))
                         }
-                        FilledTonalButton(onClick = { player.play(songs, shuffle = true) }, enabled = songs.isNotEmpty()) {
+                        FilledTonalButton(onClick = { app.activity.liked(); player.play(songs, shuffle = true, source = LIKED) }, enabled = songs.isNotEmpty()) {
                             Icon(painterResource(R.drawable.ic_shuffle), contentDescription = null)
                             Text("Shuffle", Modifier.padding(start = 8.dp))
                         }
                     }
+                    Box(Modifier.padding(top = 8.dp)) { ResumeButton(LIKED, songs) { app.activity.liked() } }
                 }
             }
             if (songs.isEmpty()) {
@@ -192,7 +193,7 @@ fun LikedSongsScreen(nav: Nav) {
             itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
                 SongRow(
                     song = song,
-                    onClick = { player.play(songs, index) },
+                    onClick = { app.activity.liked(); player.play(songs, index, source = LIKED) },
                     isCurrent = song.id == nowPlaying.songId,
                     showCover = true,
                     onOpenAlbum = nav.openAlbum,
@@ -222,9 +223,12 @@ private fun LibraryRow(title: String, subtitle: String, leading: @Composable () 
     }
 }
 
+/** Queue source for Liked songs, so it can be resumed like a playlist. */
+private const val LIKED = "liked"
+
 /** The "Liked songs" artwork: a heart on the brand colour. */
 @Composable
-private fun LikedTile(size: Dp) {
+internal fun LikedTile(size: Dp) {
     Box(
         Modifier.size(size).clip(RoundedCornerShape(size / 10)).background(MaterialTheme.colorScheme.primary),
         contentAlignment = Alignment.Center,
