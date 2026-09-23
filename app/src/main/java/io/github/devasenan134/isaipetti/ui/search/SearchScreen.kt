@@ -61,6 +61,7 @@ import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.AlbumCard
 import io.github.devasenan134.isaipetti.ui.components.Cover
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
+import io.github.devasenan134.isaipetti.ui.components.PlaylistCard
 import io.github.devasenan134.isaipetti.ui.components.SectionTitle
 import io.github.devasenan134.isaipetti.ui.components.SongRow
 import kotlinx.coroutines.delay
@@ -82,6 +83,7 @@ fun SearchScreen(nav: Nav) {
     var error by remember { mutableStateOf<String?>(null) }
     val history by app.searches.queries.collectAsStateWithLifecycle()
     val recentSongs by app.recent.songs.collectAsStateWithLifecycle()
+    val recentPlaylists by app.recentPlaylists.playlists.collectAsStateWithLifecycle()
     // Recently played movies come from Navidrome, so they include what you played on other devices.
     val recentAlbums by produceState(emptyList<Album>()) {
         value = runCatching { app.api.albumList("recent", 15) }.getOrDefault(emptyList())
@@ -199,13 +201,20 @@ fun SearchScreen(nav: Nav) {
 
                 else -> {
                     item {
-                        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             BrowseBox("Movies", painterResource(R.drawable.ic_album), MaterialTheme.colorScheme.primaryContainer, nav.openAlbums, Modifier.weight(1f))
                             BrowseBox(
                                 "Composers",
                                 rememberVectorPainter(Icons.Filled.Person),
                                 MaterialTheme.colorScheme.tertiaryContainer,
                                 nav.openArtists,
+                                Modifier.weight(1f),
+                            )
+                            BrowseBox(
+                                "Playlists",
+                                painterResource(R.drawable.ic_queue),
+                                MaterialTheme.colorScheme.secondaryContainer,
+                                nav.openPlaylists,
                                 Modifier.weight(1f),
                             )
                         }
@@ -233,6 +242,16 @@ fun SearchScreen(nav: Nav) {
                             }
                         }
                     }
+                    if (recentPlaylists.isNotEmpty()) {
+                        item { SectionTitle("Recently played playlists") }
+                        item {
+                            LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
+                                items(recentPlaylists, key = { "recent-playlist-${it.id}" }) { playlist ->
+                                    PlaylistCard(playlist, onClick = { nav.openPlaylist(playlist.id) })
+                                }
+                            }
+                        }
+                    }
                     if (recentComposers.isNotEmpty()) {
                         item { SectionTitle("Recently played composers") }
                         item {
@@ -253,10 +272,10 @@ fun SearchScreen(nav: Nav) {
 @Composable
 private fun BrowseBox(label: String, icon: Painter, color: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        modifier.height(96.dp).clip(RoundedCornerShape(12.dp)).background(color).clickable(onClick = onClick).padding(14.dp),
+        modifier.height(88.dp).clip(RoundedCornerShape(12.dp)).background(color).clickable(onClick = onClick).padding(12.dp),
     ) {
-        Text(label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.TopStart))
-        Icon(icon, contentDescription = null, modifier = Modifier.align(Alignment.BottomEnd).size(36.dp))
+        Text(label, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.align(Alignment.TopStart))
+        Icon(icon, contentDescription = null, modifier = Modifier.align(Alignment.BottomEnd).size(30.dp))
     }
 }
 

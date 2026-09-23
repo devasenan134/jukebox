@@ -65,6 +65,7 @@ import io.github.devasenan134.isaipetti.ui.library.ArtistsScreen
 import io.github.devasenan134.isaipetti.ui.library.LibraryScreen
 import io.github.devasenan134.isaipetti.ui.library.LikedSongsScreen
 import io.github.devasenan134.isaipetti.ui.library.PlaylistScreen
+import io.github.devasenan134.isaipetti.ui.library.PlaylistsScreen
 import io.github.devasenan134.isaipetti.ui.player.MiniPlayer
 import io.github.devasenan134.isaipetti.ui.player.PlayerScreen
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
@@ -88,6 +89,7 @@ import kotlinx.serialization.Serializable
 @Serializable object SettingsRoute
 @Serializable object LibraryRoute
 @Serializable object LikedSongsRoute
+@Serializable object PlaylistsRoute
 
 /** Navigation actions that screens can call. */
 class Nav(
@@ -99,6 +101,7 @@ class Nav(
     val openAlbums: () -> Unit,
     val openArtists: () -> Unit,
     val openLikedSongs: () -> Unit,
+    val openPlaylists: () -> Unit,
     val back: () -> Unit,
 )
 
@@ -127,6 +130,7 @@ fun MainScreen() {
         openAlbums = { navController.navigate(AlbumsRoute) },
         openArtists = { navController.navigate(ArtistsRoute) },
         openLikedSongs = { navController.navigate(LikedSongsRoute) },
+        openPlaylists = { navController.navigate(PlaylistsRoute) },
         back = { navController.popBackStack() },
     )
 
@@ -228,6 +232,7 @@ fun MainScreen() {
                 screen<SettingsRoute> { SettingsScreen(nav) }
                 screen<LibraryRoute> { LibraryScreen(nav) }
                 screen<LikedSongsRoute> { LikedSongsScreen(nav) }
+                screen<PlaylistsRoute> { PlaylistsScreen(nav) }
             }
         }
 

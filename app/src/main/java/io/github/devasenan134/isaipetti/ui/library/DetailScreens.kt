@@ -83,6 +83,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
             SongList(
                 liked = likedPlaylists.any { it.id == playlist.id },
                 onToggleLike = { app.likes.toggle(playlist) },
+                onPlay = { app.recentPlaylists.played(playlist) },
                 coverArt = playlist.coverArt,
                 title = playlist.name,
                 subtitle = playlist.comment.orEmpty(),
@@ -144,6 +145,7 @@ fun ArtistScreen(id: String, nav: Nav) {
 internal fun SongList(
     liked: Boolean? = null,
     onToggleLike: () -> Unit = {},
+    onPlay: () -> Unit = {},
     coverArt: String?,
     title: String,
     subtitle: String,
@@ -173,11 +175,11 @@ internal fun SongList(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { player.play(songs) }, enabled = songs.isNotEmpty()) {
+                    Button(onClick = { onPlay(); player.play(songs) }, enabled = songs.isNotEmpty()) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Text("Play", Modifier.padding(start = 8.dp))
                     }
-                    FilledTonalButton(onClick = { player.play(songs, shuffle = true) }, enabled = songs.isNotEmpty()) {
+                    FilledTonalButton(onClick = { onPlay(); player.play(songs, shuffle = true) }, enabled = songs.isNotEmpty()) {
                         Icon(painterResource(R.drawable.ic_shuffle), contentDescription = null)
                         Text("Shuffle", Modifier.padding(start = 8.dp))
                     }
@@ -188,7 +190,7 @@ internal fun SongList(
         itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
             SongRow(
                 song = song,
-                onClick = { player.play(songs, index) },
+                onClick = { onPlay(); player.play(songs, index) },
                 isCurrent = song.id == nowPlaying.songId,
                 showCover = showCovers,
                 onOpenAlbum = if (showCovers) nav.openAlbum else null,

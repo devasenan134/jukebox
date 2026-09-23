@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.devasenan134.isaipetti.IsaipettiApp
 import io.github.devasenan134.isaipetti.data.Album
+import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.data.Song
 import io.github.devasenan134.isaipetti.data.toRef
 import io.github.devasenan134.isaipetti.ui.social.ShareSongSheet
@@ -83,6 +84,20 @@ fun AlbumCard(album: Album, onClick: () -> Unit, modifier: Modifier = Modifier) 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun PlaylistCard(playlist: Playlist, modifier: Modifier = Modifier.width(140.dp), onClick: () -> Unit) {
+    Column(modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
+        Cover(playlist.coverArt, Modifier.fillMaxWidth().aspectRatio(1f))
+        Spacer(Modifier.height(6.dp))
+        Text(playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            "${playlist.songCount} songs",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

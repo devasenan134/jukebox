@@ -28,7 +28,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,7 +39,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
-import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.Cover
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
@@ -50,21 +48,17 @@ import io.github.devasenan134.isaipetti.ui.components.formatDuration
 
 private enum class LibraryFilter(val label: String) { All("All"), Movies("Movies"), Playlists("Playlists") }
 
-/** Your Library: liked songs, liked movies, liked playlists and your own playlists. */
+/** Your Library: liked songs, liked movies and liked playlists. */
 @Composable
 fun LibraryScreen(nav: Nav) {
     val app = LocalApp.current
     val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
     val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
-    val credentials by app.session.credentials.collectAsStateWithLifecycle()
-    // Playlists you made in Navidrome belong in your library too.
-    val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username) {
-        value = runCatching { app.api.playlists().filter { it.owner == credentials?.username } }.getOrDefault(emptyList())
-    }
     LaunchedEffect(Unit) { app.likes.refresh() }
     var filter by rememberSaveable { mutableStateOf(LibraryFilter.All) }
-    val playlists = (likedPlaylists + ownPlaylists.filter { own -> likedPlaylists.none { it.id == own.id } })
+    // Only what you liked; every playlist is under Search → Playlists.
+    val playlists = likedPlaylists
 
     Column {
         ScreenHeader("Your Library")

@@ -27,6 +27,7 @@ import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.AlbumCard
 import io.github.devasenan134.isaipetti.ui.components.Cover
+import io.github.devasenan134.isaipetti.ui.components.PlaylistCard
 import io.github.devasenan134.isaipetti.ui.components.LoadableContent
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
@@ -93,24 +94,5 @@ private fun androidx.compose.foundation.lazy.LazyListScope.albumRow(title: Strin
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun PlaylistCard(playlist: Playlist, onClick: () -> Unit) {
-    Column(Modifier.width(140.dp).clickable(onClick = onClick).padding(6.dp)) {
-        Cover(playlist.coverArt, Modifier.fillMaxWidth().aspectRatio(1f))
-        Text(
-            playlist.name,
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        Text(
-            "${playlist.songCount} songs",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
