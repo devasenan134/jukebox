@@ -64,6 +64,21 @@ class SubsonicApi(
     suspend fun playlist(id: String): Playlist =
         get("getPlaylist", mapOf("id" to id)).decode<Playlist>("playlist") ?: throw SubsonicException("Playlist not found")
 
+    /** Your liked songs and movies (Navidrome's "starred" items), newest likes first. */
+    suspend fun starred(): Starred =
+        (get("getStarred2").decode<Starred>("starred2") ?: Starred()).let { s ->
+            Starred(album = s.album.sortedByDescending { it.starred }, song = s.song.sortedByDescending { it.starred })
+        }
+
+    /** Likes (stars) a song or a movie in Navidrome, so it's liked on every device. */
+    suspend fun like(songId: String? = null, albumId: String? = null, liked: Boolean) {
+        val params = buildMap<String, Any> {
+            songId?.let { put("id", it) }
+            albumId?.let { put("albumId", it) }
+        }
+        get(if (liked) "star" else "unstar", params)
+    }
+
     suspend fun lyrics(songId: String): List<StructuredLyrics> =
         get("getLyricsBySongId", mapOf("id" to songId)).decode<LyricsList>("lyricsList")?.structuredLyrics.orEmpty()
 

@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,7 +99,10 @@ fun SongRow(
     showCover: Boolean = false,
     onOpenAlbum: ((String) -> Unit)? = null,
 ) {
-    val player = LocalApp.current.player
+    val app = LocalApp.current
+    val player = app.player
+    val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
+    val liked = likedSongs.any { it.id == song.id }
     var menuOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     if (sharing) ShareSongSheet(song.toRef(), onDismiss = { sharing = false })
@@ -130,10 +137,22 @@ fun SongRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (liked) {
+            Icon(
+                Icons.Filled.Favorite,
+                contentDescription = "Liked",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(end = 8.dp).size(16.dp),
+            )
+        }
         Text(formatDuration(song.duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Box {
             IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (liked) "Remove from liked songs" else "Like") },
+                    onClick = { app.likes.toggle(song); menuOpen = false },
+                )
                 DropdownMenuItem(text = { Text("Play next") }, onClick = { player.playNext(song); menuOpen = false })
                 DropdownMenuItem(text = { Text("Add to queue") }, onClick = { player.addToQueue(song); menuOpen = false })
                 DropdownMenuItem(text = { Text("Share with friends") }, onClick = { sharing = true; menuOpen = false })
@@ -142,6 +161,18 @@ fun SongRow(
                 }
             }
         }
+    }
+}
+
+/** A heart: filled when liked. */
+@Composable
+fun LikeButton(liked: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    IconButton(onClick = onToggle, modifier = modifier) {
+        Icon(
+            if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            contentDescription = if (liked) "Remove from liked" else "Like",
+            tint = if (liked) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+        )
     }
 }
 

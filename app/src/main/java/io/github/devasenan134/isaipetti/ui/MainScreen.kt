@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -63,6 +62,8 @@ import io.github.devasenan134.isaipetti.ui.library.AlbumScreen
 import io.github.devasenan134.isaipetti.ui.library.AlbumsScreen
 import io.github.devasenan134.isaipetti.ui.library.ArtistScreen
 import io.github.devasenan134.isaipetti.ui.library.ArtistsScreen
+import io.github.devasenan134.isaipetti.ui.library.LibraryScreen
+import io.github.devasenan134.isaipetti.ui.library.LikedSongsScreen
 import io.github.devasenan134.isaipetti.ui.library.PlaylistScreen
 import io.github.devasenan134.isaipetti.ui.player.MiniPlayer
 import io.github.devasenan134.isaipetti.ui.player.PlayerScreen
@@ -85,6 +86,8 @@ import kotlinx.serialization.Serializable
 @Serializable object SocialRoute
 @Serializable data class ChatRoute(val id: Long)
 @Serializable object SettingsRoute
+@Serializable object LibraryRoute
+@Serializable object LikedSongsRoute
 
 /** Navigation actions that screens can call. */
 class Nav(
@@ -93,6 +96,9 @@ class Nav(
     val openPlaylist: (String) -> Unit,
     val openChat: (Long) -> Unit,
     val openSettings: () -> Unit,
+    val openAlbums: () -> Unit,
+    val openArtists: () -> Unit,
+    val openLikedSongs: () -> Unit,
     val back: () -> Unit,
 )
 
@@ -100,9 +106,9 @@ private data class Tab(val label: String, val route: Any, val icon: @Composable 
 
 private val tabs = listOf(
     Tab("Home", HomeRoute) { rememberVectorPainter(Icons.Filled.Home) },
-    Tab("Movies", AlbumsRoute) { painterResource(R.drawable.ic_album) },
-    Tab("Composers", ArtistsRoute) { rememberVectorPainter(Icons.Filled.Person) },
+    // Movies and Composers open from Search, like browsing in Spotify.
     Tab("Search", SearchRoute) { rememberVectorPainter(Icons.Filled.Search) },
+    Tab("Your Library", LibraryRoute) { painterResource(R.drawable.ic_library) },
     Tab("Friends", SocialRoute) { painterResource(R.drawable.ic_group) },
 )
 
@@ -118,6 +124,9 @@ fun MainScreen() {
         openPlaylist = { navController.navigate(PlaylistRoute(it)) },
         openChat = { navController.navigate(ChatRoute(it)) },
         openSettings = { navController.navigate(SettingsRoute) },
+        openAlbums = { navController.navigate(AlbumsRoute) },
+        openArtists = { navController.navigate(ArtistsRoute) },
+        openLikedSongs = { navController.navigate(LikedSongsRoute) },
         back = { navController.popBackStack() },
     )
 
@@ -217,6 +226,8 @@ fun MainScreen() {
                 screen<SocialRoute> { SocialScreen(nav) }
                 screen<ChatRoute> { ChatScreen(it.toRoute<ChatRoute>().id, nav) }
                 screen<SettingsRoute> { SettingsScreen(nav) }
+                screen<LibraryRoute> { LibraryScreen(nav) }
+                screen<LikedSongsRoute> { LikedSongsScreen(nav) }
             }
         }
 

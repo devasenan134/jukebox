@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import io.github.devasenan134.isaipetti.R
+import io.github.devasenan134.isaipetti.ui.components.LikeButton
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.formatDuration
 import io.github.devasenan134.isaipetti.ui.social.ShareSongSheet
@@ -120,14 +121,20 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
                 }
             }
 
-            Text(now.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                now.artist,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(now.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        now.artist,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                now.song?.let { song -> LikeButton(likedSongs.any { it.id == song.id }, onToggle = { app.likes.toggle(song.toSong()) }) }
+            }
 
             val duration = now.durationMs.coerceAtLeast(1)
             Slider(

@@ -113,7 +113,7 @@ fun AlbumsScreen(nav: Nav) {
     LaunchedEffect(vm.sort) { gridState.scrollToItem(0) }
 
     Column {
-        ScreenHeader("Movies")
+        ScreenHeader("Movies", onBack = nav.back)
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

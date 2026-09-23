@@ -71,6 +71,7 @@ fun LoginScreen() {
                 }
                 app.api.ping(credentials) // checks the server address and password
                 app.session.save(credentials) // AppRoot then switches to the main screen
+                app.likes.refresh()
             } catch (e: Exception) {
                 error = e.message ?: "Couldn't connect"
                 busy = false

@@ -19,6 +19,8 @@ data class Song(
     val year: Int? = null,
     val duration: Int = 0,
     val coverArt: String? = null,
+    /** When you liked it (Navidrome calls it "starred"); null if you haven't. */
+    val starred: String? = null,
 )
 
 @Serializable
@@ -32,6 +34,7 @@ data class Album(
     val duration: Int = 0,
     val year: Int? = null,
     val song: List<Song> = emptyList(),
+    val starred: String? = null,
 )
 
 @Serializable
@@ -51,6 +54,7 @@ data class Playlist(
     val songCount: Int = 0,
     val duration: Int = 0,
     val coverArt: String? = null,
+    val owner: String? = null,
     val entry: List<Song> = emptyList(),
 )
 
@@ -78,4 +82,6 @@ data class StructuredLyrics(
 @Serializable internal data class ArtistIndex(val artist: List<Artist> = emptyList())
 @Serializable internal data class Artists(val index: List<ArtistIndex> = emptyList())
 @Serializable internal data class Playlists(val playlist: List<Playlist> = emptyList())
+/** What you've liked (starred) in Navidrome. */
+@Serializable data class Starred(val album: List<Album> = emptyList(), val song: List<Song> = emptyList())
 @Serializable internal data class LyricsList(val structuredLyrics: List<StructuredLyrics> = emptyList())

@@ -32,6 +32,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
+import io.github.devasenan134.isaipetti.ui.components.LikeButton
 import io.github.devasenan134.isaipetti.data.Song
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.AlbumCard
@@ -52,10 +53,13 @@ import kotlinx.coroutines.launch
 fun AlbumScreen(id: String, nav: Nav) {
     val app = LocalApp.current
     val loader = rememberLoader("album-$id") { app.api.album(id) }
+    val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
     Column {
         ScreenHeader("", onBack = nav.back)
         LoadableContent(loader) { album ->
             SongList(
+                liked = likedAlbums.any { it.id == album.id },
+                onToggleLike = { app.likes.toggle(album) },
                 coverArt = album.coverArt,
                 title = album.name,
                 subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
@@ -72,10 +76,13 @@ fun AlbumScreen(id: String, nav: Nav) {
 fun PlaylistScreen(id: String, nav: Nav) {
     val app = LocalApp.current
     val loader = rememberLoader("playlist-$id") { app.api.playlist(id) }
+    val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
     Column {
         ScreenHeader("", onBack = nav.back)
         LoadableContent(loader) { playlist ->
             SongList(
+                liked = likedPlaylists.any { it.id == playlist.id },
+                onToggleLike = { app.likes.toggle(playlist) },
                 coverArt = playlist.coverArt,
                 title = playlist.name,
                 subtitle = playlist.comment.orEmpty(),
@@ -134,7 +141,9 @@ fun ArtistScreen(id: String, nav: Nav) {
 }
 
 @Composable
-private fun SongList(
+internal fun SongList(
+    liked: Boolean? = null,
+    onToggleLike: () -> Unit = {},
     coverArt: String?,
     title: String,
     subtitle: String,
@@ -172,6 +181,7 @@ private fun SongList(
                         Icon(painterResource(R.drawable.ic_shuffle), contentDescription = null)
                         Text("Shuffle", Modifier.padding(start = 8.dp))
                     }
+                    liked?.let { LikeButton(it, onToggleLike) }
                 }
             }
         }

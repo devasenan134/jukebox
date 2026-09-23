@@ -29,7 +29,7 @@ fun ArtistsScreen(nav: Nav) {
     val app = LocalApp.current
     val loader = rememberLoader("artists") { app.api.artists().sortedByDescending { it.albumCount } }
     Column {
-        ScreenHeader("Composers")
+        ScreenHeader("Composers", onBack = nav.back)
         LoadableContent(loader) { artists ->
             LazyColumn {
                 items(artists, key = { it.id }) { artist ->
