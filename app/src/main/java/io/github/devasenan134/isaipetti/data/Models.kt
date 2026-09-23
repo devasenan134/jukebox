@@ -54,7 +54,11 @@ data class Playlist(
     val songCount: Int = 0,
     val duration: Int = 0,
     val coverArt: String? = null,
+    /** Who made it (their Navidrome username). */
     val owner: String? = null,
+    val public: Boolean = false,
+    /** When it was last changed (ISO date and time). */
+    val changed: String? = null,
     val entry: List<Song> = emptyList(),
 )
 

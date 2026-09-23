@@ -58,6 +58,22 @@ fun formatDuration(seconds: Int): String {
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
+/** A total playing time: "45 min", "2 hr 15 min", "3 days 4 hr". */
+fun formatTotalDuration(seconds: Int): String {
+    val days = seconds / 86_400
+    val hours = seconds % 86_400 / 3600
+    val minutes = seconds % 3600 / 60
+    return when {
+        days > 0 -> "$days ${if (days == 1) "day" else "days"}" + if (hours > 0) " $hours hr" else ""
+        hours > 0 -> "$hours hr" + if (minutes > 0) " $minutes min" else ""
+        minutes > 0 -> "$minutes min"
+        else -> "$seconds sec"
+    }
+}
+
+/** "1 song", "3,264 songs" */
+fun songCount(n: Int) = if (n == 1) "1 song" else "%,d songs".format(n)
+
 /** Album art from Navidrome, with a plain placeholder behind it while loading or if missing. */
 @Composable
 fun Cover(coverArt: String?, modifier: Modifier = Modifier, size: Int = 300, corner: Dp = 8.dp) {

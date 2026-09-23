@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,16 +40,18 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
+import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.Cover
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.SongRow
-import io.github.devasenan134.isaipetti.ui.components.formatDuration
+import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
+import io.github.devasenan134.isaipetti.ui.components.songCount
 
 private enum class LibraryFilter(val label: String) { All("All"), Movies("Movies"), Playlists("Playlists") }
 
-/** Your Library: liked songs, liked movies and liked playlists. */
+/** Your Library: liked songs, liked movies, liked playlists and playlists you created. */
 @Composable
 fun LibraryScreen(nav: Nav) {
     val app = LocalApp.current
@@ -56,9 +59,14 @@ fun LibraryScreen(nav: Nav) {
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
     val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { app.likes.refresh() }
+    val credentials by app.session.credentials.collectAsStateWithLifecycle()
+    // Playlists you created in Navidrome, next to the ones you liked.
+    val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username) {
+        value = runCatching { app.api.playlists().filter { it.owner == credentials?.username } }.getOrDefault(emptyList())
+    }
     var filter by rememberSaveable { mutableStateOf(LibraryFilter.All) }
-    // Only what you liked; every playlist is under Search → Playlists.
-    val playlists = likedPlaylists
+    // Liked first (newest like first), then the rest of your own. Every playlist is under Search → Playlists.
+    val playlists = likedPlaylists + ownPlaylists.filter { own -> likedPlaylists.none { it.id == own.id } }
 
     Column {
         ScreenHeader("Your Library")
@@ -92,7 +100,7 @@ fun LibraryScreen(nav: Nav) {
                 items(playlists, key = { "playlist-${it.id}" }) { playlist ->
                     LibraryRow(
                         title = playlist.name,
-                        subtitle = "Playlist · ${playlist.songCount} songs",
+                        subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount)).joinToString(" · "),
                         leading = { Cover(playlist.coverArt, Modifier.size(56.dp), size = 150, corner = 6.dp) },
                         onClick = { nav.openPlaylist(playlist.id) },
                     )
@@ -132,7 +140,7 @@ fun LikedSongsScreen(nav: Nav) {
                     LikedTile(180.dp)
                     Text("Liked songs", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 16.dp))
                     Text(
-                        "${songs.size} songs · ${formatDuration(songs.sumOf { it.duration })}",
+                        "${songCount(songs.size)} · ${formatTotalDuration(songs.sumOf { it.duration })}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
