@@ -101,12 +101,12 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
 
     val scope = rememberCoroutineScope()
 
-    // A mild gradient in the cover's colour, fading into the normal background (like Spotify, but calmer).
+    // A gradient in the cover's colour at the top, easing into the normal background (like Spotify).
     val base = MaterialTheme.colorScheme.surface
     val dark = base.luminance() < 0.5f
     val coverColor = rememberCoverColor(now.artworkUri, dark)
     val tint by animateColorAsState(
-        targetValue = coverColor?.let { lerp(base, it, if (dark) 0.55f else 0.35f) } ?: base,
+        targetValue = coverColor ?: base,
         animationSpec = tween(700),
         label = "cover tint",
     )
@@ -143,7 +143,7 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
 
     Surface(Modifier.fillMaxSize().graphicsLayer { translationY = pulled }) {
         // The player fills the screen; scrolling down shows "About this song" below it.
-        BoxWithConstraints(Modifier.background(Brush.verticalGradient(0f to tint, 0.7f to base)).safeDrawingPadding()) {
+        BoxWithConstraints(Modifier.background(Brush.verticalGradient(0f to tint, 0.45f to lerp(base, tint, 0.55f), 0.85f to base)).safeDrawingPadding()) {
             val pageHeight = maxHeight
             val scroll = rememberScrollState()
             Column(Modifier.nestedScroll(pullToClose).verticalScroll(scroll)) {

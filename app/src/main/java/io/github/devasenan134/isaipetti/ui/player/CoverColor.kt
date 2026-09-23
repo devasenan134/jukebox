@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.graphics.ColorUtils
 import androidx.palette.graphics.Palette
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
@@ -16,8 +17,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * A calm colour from the cover art, for the player's background: a muted shade that suits a dark
- * or light screen, rather than the loudest colour on the cover. Null until it's worked out.
+ * The cover's colour, for the player's background, like Spotify: the colour that covers most of the
+ * cover (a red cover gives red), with its brightness set to suit a dark or light screen and its
+ * saturation capped so it never looks neon. Null until it's worked out.
  */
 @Composable
 fun rememberCoverColor(artworkUri: Uri?, darkTheme: Boolean): Color? {
@@ -34,12 +36,18 @@ fun rememberCoverColor(artworkUri: Uri?, darkTheme: Boolean): Color? {
                 val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toBitmap()
                     ?: return@runCatching null
                 val palette = Palette.from(bitmap).generate()
-                val swatch = if (darkTheme) {
-                    palette.darkMutedSwatch ?: palette.mutedSwatch ?: palette.darkVibrantSwatch ?: palette.dominantSwatch
-                } else {
-                    palette.lightMutedSwatch ?: palette.mutedSwatch ?: palette.lightVibrantSwatch ?: palette.dominantSwatch
-                }
-                swatch?.rgb?.let { Color(it) }
+                // The biggest colour on the cover, unless it's nearly grey; then the most vivid one.
+                val candidates = listOfNotNull(
+                    palette.dominantSwatch,
+                    palette.vibrantSwatch,
+                    palette.darkVibrantSwatch,
+                    palette.mutedSwatch,
+                )
+                val swatch = candidates.firstOrNull { it.hsl[1] >= 0.2f } ?: candidates.firstOrNull() ?: return@runCatching null
+                val hsl = swatch.hsl.copyOf()
+                hsl[1] = hsl[1].coerceAtMost(if (darkTheme) 0.75f else 0.6f)
+                hsl[2] = if (darkTheme) 0.3f else 0.82f
+                Color(ColorUtils.HSLToColor(hsl))
             }.getOrNull()
         }
     }
