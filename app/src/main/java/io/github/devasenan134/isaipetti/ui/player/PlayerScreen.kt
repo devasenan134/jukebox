@@ -84,7 +84,7 @@ fun rememberPosition(songId: String?, isPlaying: Boolean, intervalMs: Long = 200
 }
 
 @Composable
-fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
+fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: (String) -> Unit) {
     val app = LocalApp.current
     val player = app.player
     val now by player.nowPlaying.collectAsStateWithLifecycle()
@@ -158,6 +158,9 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        IconButton(onClick = { now.songId?.let { onOpenMix("radio-song-$it") } }, enabled = now.songId != null) {
+                            Icon(painterResource(R.drawable.ic_radio), contentDescription = "Song radio")
+                        }
                         IconButton(onClick = { showShare = true }, enabled = now.song != null) {
                             Icon(Icons.Filled.Share, contentDescription = "Share with friends")
                         }

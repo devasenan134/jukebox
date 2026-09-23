@@ -106,7 +106,7 @@ fun LoginScreen() {
                 value = friendsServer, onValueChange = { friendsServer = it.trim() },
                 label = { Text(if (signingUp) "Friends server" else "Friends server (optional)") },
                 placeholder = { Text("friends.example.com") },
-                supportingText = { Text("For friends, chat and listening together. Ask whoever invited you") },
+                supportingText = { Text("For friends, chat, listening together and mixes. Ask whoever invited you") },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )

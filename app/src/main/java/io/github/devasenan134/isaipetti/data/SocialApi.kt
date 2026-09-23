@@ -47,6 +47,20 @@ class SocialApi(
         send<Unit>("PUT", "/likes/playlists", json.encodeToString(PlaylistBody.serializer(), PlaylistBody(playlist.id, playlist.name, playlist.coverArt, playlist.songCount)))
     suspend fun unlikePlaylist(id: String) = send<Unit>("DELETE", "/likes/playlists/${java.net.URLEncoder.encode(id, "UTF-8")}", null)
 
+    // Mixes, playlists and stations by Isai Pettai.
+    suspend fun mixes(): HomeMixes = get("/mixes")
+    suspend fun mix(id: String): Mix = get("/mixes/${enc(id)}")
+    suspend fun followedMixes(): List<Mix> = get("/mixes/followed")
+    suspend fun followMix(id: String) = send<Unit>("PUT", "/mixes/${enc(id)}/follow", "")
+    suspend fun unfollowMix(id: String) = send<Unit>("DELETE", "/mixes/${enc(id)}/follow", null)
+    /** The next songs of a station, leaving out [exclude] (what it already played). */
+    suspend fun radio(id: String, exclude: List<String>, count: Int = 25): Mix = post("/mixes/radio", RadioBody(id, exclude, count))
+    /** Songs that would fit a playlist made of [songIds]; [page] 1, 2... for more. */
+    suspend fun recommend(songIds: List<String>, count: Int = 10, page: Int = 0): List<MixSong> =
+        post("/mixes/recommend", RecommendBody(songIds, count, page))
+    /** What was played and skipped, so mixes can learn. */
+    suspend fun recordPlays(events: List<PlayEvent>) = post<PlaysBody, Unit>("/plays", PlaysBody(events))
+
     /** Sends a bug report or a feature request ([kind] "bug" or "feature"); the server turns it into a public GitHub issue. */
     suspend fun sendFeedback(kind: String, title: String, description: String, deviceInfo: String?): BugReport =
         post("/bug-reports", FeedbackBody(title, description, deviceInfo, kind))
@@ -83,6 +97,8 @@ class SocialApi(
     } catch (e: SocialException) {
         if (e.code == 404) null else throw e
     }
+
+    private fun enc(id: String) = java.net.URLEncoder.encode(id, "UTF-8")
 
     private suspend inline fun <reified T> get(path: String): T = send("GET", path, null, serializer<T>())
 
@@ -122,5 +138,8 @@ class SocialApi(
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)
     @Serializable private data class PlaylistBody(val id: String, val name: String = "", val coverArt: String? = null, val songCount: Int = 0)
+    @Serializable private data class RadioBody(val id: String, val exclude: List<String>, val count: Int)
+    @Serializable private data class RecommendBody(val songIds: List<String>, val count: Int, val page: Int)
+    @Serializable private data class PlaysBody(val events: List<PlayEvent>)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 }

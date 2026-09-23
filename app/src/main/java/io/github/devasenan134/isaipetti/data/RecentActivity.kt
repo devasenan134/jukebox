@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
  * playlists, composers, artists and Liked songs. Kept on the phone.
  */
 class RecentActivity(context: Context) {
-    enum class Kind { Song, Movie, Playlist, Composer, Artist, Liked }
+    enum class Kind { Song, Movie, Playlist, Composer, Artist, Liked, Mix }
 
     @Serializable
     data class Item(
@@ -48,6 +48,8 @@ class RecentActivity(context: Context) {
     fun composer(artist: Artist) = played(Item(Kind.Composer, artist.id, artist.name, "Composer", artist.coverArt))
     fun artist(id: String, name: String, coverArt: String?) = played(Item(Kind.Artist, id, name, "Artist", coverArt))
     fun liked() = played(Item(Kind.Liked, "liked", "Liked songs", "Playlist"))
+    fun mix(mix: Mix) =
+        played(Item(Kind.Mix, mix.id, mix.title, (if (mix.endless) "Station by " else "By ") + MIX_AUTHOR, mix.covers.firstOrNull()))
 
     fun forget(kind: Kind, id: String) {
         val list = _items.value.filterNot { it.kind == kind && it.id == id }

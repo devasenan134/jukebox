@@ -50,6 +50,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
 import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.ui.Nav
+import io.github.devasenan134.isaipetti.ui.mixes.MixCover
+import io.github.devasenan134.isaipetti.data.MIX_AUTHOR
 import io.github.devasenan134.isaipetti.ui.components.Cover
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
@@ -59,7 +61,7 @@ import io.github.devasenan134.isaipetti.ui.components.songCount
 
 private enum class LibraryFilter(val label: String) { All("All"), Movies("Movies"), Playlists("Playlists") }
 
-/** Your Library: liked songs, liked movies, liked playlists and playlists you created. */
+/** Your Library: liked songs, saved mixes, liked movies, liked playlists and playlists you created. */
 @Composable
 fun LibraryScreen(nav: Nav) {
     val app = LocalApp.current
@@ -68,7 +70,9 @@ fun LibraryScreen(nav: Nav) {
     val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
     val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { app.likes.refresh() }
+    // Mixes by Isai Pettai you saved; they keep updating here.
+    val savedMixes by app.mixes.followed.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { app.likes.refresh(); app.mixes.refresh() }
     val credentials by app.session.credentials.collectAsStateWithLifecycle()
     // Playlists you created in Navidrome, next to the ones you liked.
     var reloadOwn by remember { mutableIntStateOf(0) }
@@ -110,6 +114,20 @@ fun LibraryScreen(nav: Nav) {
                     )
                 }
             }
+            if (filter != LibraryFilter.Movies) {
+                items(savedMixes, key = { "mix-${it.id}" }) { mix ->
+                    LibraryRow(
+                        title = mix.title,
+                        subtitle = listOfNotNull(
+                            if (mix.endless) "Station" else "Mix",
+                            "by $MIX_AUTHOR",
+                            if (mix.endless || mix.songCount == 0) null else songCount(mix.songCount),
+                        ).joinToString(" · "),
+                        leading = { MixCover(mix, size = 56.dp) },
+                        onClick = { nav.openMix(mix.id) },
+                    )
+                }
+            }
             if (filter != LibraryFilter.Playlists) {
                 items(likedAlbums, key = { "album-${it.id}" }) { album ->
                     LibraryRow(
@@ -131,7 +149,7 @@ fun LibraryScreen(nav: Nav) {
                 }
             }
             val empty = when (filter) {
-                LibraryFilter.All -> likedSongs.isEmpty() && likedAlbums.isEmpty() && playlists.isEmpty()
+                LibraryFilter.All -> likedSongs.isEmpty() && likedAlbums.isEmpty() && playlists.isEmpty() && savedMixes.isEmpty()
                 LibraryFilter.Movies -> likedAlbums.isEmpty()
                 LibraryFilter.Playlists -> likedSongs.isEmpty() && playlists.isEmpty()
             }

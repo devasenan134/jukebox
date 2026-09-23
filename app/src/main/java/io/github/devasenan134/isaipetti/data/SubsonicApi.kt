@@ -84,6 +84,7 @@ class SubsonicApi(
         removeIndexes: List<Int> = emptyList(),
         name: String? = null,
         public: Boolean? = null,
+        comment: String? = null,
     ) {
         get(
             "updatePlaylist",
@@ -91,6 +92,7 @@ class SubsonicApi(
                 put("playlistId", id)
                 name?.let { put("name", it) }
                 public?.let { put("public", it) }
+                comment?.let { put("comment", it) }
                 if (addSongIds.isNotEmpty()) put("songIdToAdd", addSongIds)
                 if (removeIndexes.isNotEmpty()) put("songIndexToRemove", removeIndexes)
             },

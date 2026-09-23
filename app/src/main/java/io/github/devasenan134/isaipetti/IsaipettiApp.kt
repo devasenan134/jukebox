@@ -4,6 +4,7 @@ import android.app.Application
 import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.Likes
 import io.github.devasenan134.isaipetti.data.MyPlaylists
+import io.github.devasenan134.isaipetti.data.Mixes
 import io.github.devasenan134.isaipetti.data.QueueMemory
 import io.github.devasenan134.isaipetti.data.RecentActivity
 import io.github.devasenan134.isaipetti.data.RecentPlaylists
@@ -52,6 +53,8 @@ class IsaipettiApp : Application() {
         private set
     lateinit var likes: Likes
         private set
+    lateinit var mixes: Mixes
+        private set
 
     /** A screen to open, set when the app is launched from a notification. */
     val pendingOpen = MutableStateFlow<PendingOpen?>(null)
@@ -75,6 +78,7 @@ class IsaipettiApp : Application() {
                     activity.clear()
                     searches.clearAll()
                     likes.clear()
+                    mixes.clear()
                     social.logout() // also stops notifications to this phone
                     session.clear("Your password was changed. Log in again with the new one.")
                 }
@@ -92,6 +96,7 @@ class IsaipettiApp : Application() {
         searches = SearchHistory(this)
         likes = Likes(this, api, session) { social.api }
         myPlaylists = MyPlaylists(api, session)
+        mixes = Mixes({ social.api }, appScope)
         if (session.credentials.value != null) {
             likes.refresh()
             myPlaylists.refresh()

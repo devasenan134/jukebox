@@ -58,6 +58,9 @@ import io.github.devasenan134.isaipetti.data.Song
 import io.github.devasenan134.isaipetti.data.toRef
 import io.github.devasenan134.isaipetti.ui.library.AddToPlaylistSheet
 import io.github.devasenan134.isaipetti.ui.social.ShareSongSheet
+import io.github.devasenan134.isaipetti.ui.mixes.startStation
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import coil3.compose.AsyncImage
 
 /** Lets any screen reach the app-wide objects (API, player) without passing them down by hand. */
@@ -152,6 +155,7 @@ fun SongRow(
     // Saved = liked or in one of your playlists; shown with a check mark like Spotify.
     val inPlaylists by app.myPlaylists.songs.collectAsStateWithLifecycle()
     val saved = liked || !inPlaylists[song.id].isNullOrEmpty()
+    val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
     var addingToPlaylist by remember { mutableStateOf(false) }
@@ -233,6 +237,10 @@ fun SongRow(
                     onRemoveFromPlaylist?.let { remove ->
                         DropdownMenuItem(text = { Text("Remove from this playlist") }, onClick = { remove(); menuOpen = false })
                     }
+                    DropdownMenuItem(text = { Text("Start song radio") }, onClick = {
+                        menuOpen = false
+                        scope.launch { startStation(app, context, "song", song.id) }
+                    })
                     DropdownMenuItem(text = { Text("Share with friends") }, onClick = { sharing = true; menuOpen = false })
                     if (onOpenAlbum != null && song.albumId != null) {
                         DropdownMenuItem(text = { Text("Go to movie") }, onClick = { onOpenAlbum(song.albumId); menuOpen = false })

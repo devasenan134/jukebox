@@ -125,6 +125,7 @@ fun SettingsScreen(nav: Nav) {
                         app.activity.clear()
                         app.searches.clearAll()
                         app.likes.clear()
+                        app.mixes.clear()
                         app.social.logout()
                         app.session.clear()
                     }

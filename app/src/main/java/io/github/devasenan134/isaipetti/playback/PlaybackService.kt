@@ -70,6 +70,10 @@ class PlaybackService : MediaSessionService() {
         rememberQueues(player)
         stopAtClipEnds(player)
         listenSync = ListenSync(player, api, app.social.listen, scope)
+        // Mixes by Isai Pettai: learn from skips, and keep stations playing.
+        val socialApi = { app.social.api.takeIf { app.session.social.value != null } }
+        PlayReporter(player, socialApi, listeningTogether = { app.social.listen.joined.value != null }, scope)
+        Stations(player, api, socialApi, scope)
         // Tell friends what's playing (only while it's actually playing).
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {

@@ -41,6 +41,8 @@ import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.SectionTitle
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
 import io.github.devasenan134.isaipetti.ui.library.LikedTile
+import io.github.devasenan134.isaipetti.ui.mixes.mixSections
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -55,6 +57,9 @@ private data class HomeData(
 fun HomeScreen(nav: Nav) {
     val app = LocalApp.current
     val recentlyPlayed by app.activity.items.collectAsStateWithLifecycle()
+    // Mixes by Isai Pettai; worked out again on the server whenever the library or your listening changed.
+    val mixes by app.mixes.home.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { app.mixes.refresh() }
     val loader = rememberLoader("home") {
         // Fetch all rows at the same time instead of one after another.
         coroutineScope {
@@ -68,7 +73,7 @@ fun HomeScreen(nav: Nav) {
 
     Column {
         ScreenHeader("இசைப்பெட்டி") {
-            IconButton(onClick = loader::reload) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
+            IconButton(onClick = { loader.reload(); app.mixes.refresh() }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
             IconButton(onClick = nav.openSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
         }
         LoadableContent(loader) { data ->
@@ -77,6 +82,7 @@ fun HomeScreen(nav: Nav) {
                 // Everything you played lately; until there's some, the movies Navidrome says you played.
                 if (recentlyPlayed.isNotEmpty()) recentRow(recentlyPlayed, nav) { app.player.play(listOf(it)) }
                 else albumRow("Recently played", data.recent, nav)
+                mixes?.let { mixSections(it.sections, nav) }
                 albumRow("Most played", data.frequent, nav)
                 albumRow("Recently added", data.newest, nav)
                 albumRow("Random picks", data.random, nav)
@@ -114,6 +120,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recentRow(items: List
                             RecentActivity.Kind.Composer -> nav.openArtist(item.id)
                             RecentActivity.Kind.Artist -> nav.openSinger(Artist(item.id, item.title, coverArt = item.coverArt, roles = listOf("artist")))
                             RecentActivity.Kind.Liked -> nav.openLikedSongs()
+                            RecentActivity.Kind.Mix -> nav.openMix(item.id)
                         }
                     }
                 }

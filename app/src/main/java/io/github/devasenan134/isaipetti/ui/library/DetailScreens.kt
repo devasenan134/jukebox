@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +53,7 @@ import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.SongRow
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
+import io.github.devasenan134.isaipetti.ui.mixes.recommendedSongs
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -72,7 +74,10 @@ fun AlbumScreen(id: String, nav: Nav) {
                 onPlay = { app.searches.picked(album); app.activity.movie(album) },
                 source = "album:${album.id}",
                 extraAction = {
-                    ResumeButton("album:${album.id}", album.song) { app.searches.picked(album); app.activity.movie(album) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        ResumeButton("album:${album.id}", album.song) { app.searches.picked(album); app.activity.movie(album) }
+                        StationButton { nav.openMix("radio-album-${album.id}") }
+                    }
                 },
                 coverArt = album.coverArt,
                 title = album.name,
@@ -136,6 +141,9 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 onSubtitleClick = null,
                 showCovers = true,
                 nav = nav,
+                footer = if (!mine || playlist.readonly) null else {
+                    { recommendedSongs(playlist, onAdded = { loader.reload(quietly = true); app.myPlaylists.refresh() }) }
+                },
             )
         }
     }
@@ -161,6 +169,13 @@ fun ArtistScreen(id: String, nav: Nav) {
                             modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // By Isai Pettai: their songs with music like theirs, and a station that never ends.
+                        IconButton(onClick = { nav.openMix("composer-${artist.id}") }) {
+                            Icon(painterResource(R.drawable.ic_music_note), contentDescription = "${artist.name} Mix")
+                        }
+                        IconButton(onClick = { nav.openMix("radio-composer-${artist.id}") }) {
+                            Icon(painterResource(R.drawable.ic_radio), contentDescription = "${artist.name} Radio")
+                        }
                         Button(
                             enabled = !shuffling,
                             onClick = {
@@ -208,6 +223,8 @@ internal fun SongList(
     onSubtitleClick: (() -> Unit)?,
     showCovers: Boolean,
     nav: Nav,
+    /** More below the songs, like recommendations. */
+    footer: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
 ) {
     val player = LocalApp.current.player
     val nowPlaying by player.nowPlaying.collectAsStateWithLifecycle()
@@ -263,6 +280,16 @@ internal fun SongList(
                 onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
             )
         }
+        footer?.invoke(this)
+    }
+}
+
+/** "Radio": opens the station by Isai Pettai for a movie, composer or singer. */
+@Composable
+internal fun StationButton(onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick) {
+        Icon(painterResource(R.drawable.ic_radio), contentDescription = null, Modifier.size(18.dp))
+        Text("Radio", Modifier.padding(start = 8.dp))
     }
 }
 

@@ -132,6 +132,7 @@ fun SingerScreen(id: String, name: String, coverArt: String?, nav: Nav) {
                 coverArt = coverArt,
                 title = name,
                 subtitle = "Artist",
+                extraAction = { StationButton { nav.openMix("radio-singer-$id") } },
                 songs = songs,
                 onSubtitleClick = null,
                 showCovers = true,
