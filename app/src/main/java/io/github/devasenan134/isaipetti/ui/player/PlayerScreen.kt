@@ -20,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Share
 import io.github.devasenan134.isaipetti.ui.library.AddToPlaylistSheet
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -149,7 +148,7 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
                             )
                         }
                         now.song?.let { song ->
-                            IconButton(onClick = { addingToPlaylist = true }) { Icon(Icons.Filled.Add, contentDescription = "Add to playlist") }
+                            IconButton(onClick = { addingToPlaylist = true }) { Icon(painterResource(R.drawable.ic_playlist_add), contentDescription = "Save to playlist") }
                             LikeButton(likedSongs.any { it.id == song.id }, onToggle = { app.likes.toggle(song.toSong()) })
                         }
                     }

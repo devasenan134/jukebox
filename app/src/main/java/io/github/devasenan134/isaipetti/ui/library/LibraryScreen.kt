@@ -1,6 +1,14 @@
 package io.github.devasenan134.isaipetti.ui.library
 
 import androidx.compose.foundation.background
+import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.Add
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,13 +63,17 @@ private enum class LibraryFilter(val label: String) { All("All"), Movies("Movies
 @Composable
 fun LibraryScreen(nav: Nav) {
     val app = LocalApp.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
     val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { app.likes.refresh() }
     val credentials by app.session.credentials.collectAsStateWithLifecycle()
     // Playlists you created in Navidrome, next to the ones you liked.
-    val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username) {
+    var reloadOwn by remember { mutableIntStateOf(0) }
+    var creating by remember { mutableStateOf(false) }
+    val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username, reloadOwn) {
         value = runCatching { app.api.playlists().filter { it.owner == credentials?.username } }.getOrDefault(emptyList())
     }
     var filter by rememberSaveable { mutableStateOf(LibraryFilter.All) }
@@ -69,7 +81,19 @@ fun LibraryScreen(nav: Nav) {
     val playlists = likedPlaylists + ownPlaylists.filter { own -> likedPlaylists.none { it.id == own.id } }
 
     Column {
-        ScreenHeader("Your Library")
+        ScreenHeader("Your Library") {
+            IconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, contentDescription = "New playlist") }
+        }
+        if (creating) {
+            NameDialog(title = "New playlist", confirm = "Create", onDismiss = { creating = false }) { name ->
+                scope.launch {
+                    runCatching { app.api.createPlaylist(name) }
+                        .onSuccess { reloadOwn++; nav.openPlaylist(it.id) }
+                        .onFailure { Toast.makeText(context, it.message ?: "Couldn't create it", Toast.LENGTH_SHORT).show() }
+                    creating = false
+                }
+            }
+        }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(LibraryFilter.entries) { f ->
                 FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
