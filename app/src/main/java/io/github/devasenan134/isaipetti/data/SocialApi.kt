@@ -41,6 +41,12 @@ class SocialApi(
     suspend fun registerDevice(pushToken: String) = post<DeviceBody, Unit>("/devices", DeviceBody(pushToken))
     suspend fun unregisterDevice(pushToken: String) = post<DeviceBody, Unit>("/devices/remove", DeviceBody(pushToken))
 
+    /** Your liked playlists, saved with your account on the friends server (Navidrome can't like playlists). */
+    suspend fun likedPlaylists(): List<Playlist> = get<List<PlaylistBody>>("/likes/playlists").map { Playlist(it.id, it.name, coverArt = it.coverArt, songCount = it.songCount) }
+    suspend fun likePlaylist(playlist: Playlist) =
+        send<Unit>("PUT", "/likes/playlists", json.encodeToString(PlaylistBody.serializer(), PlaylistBody(playlist.id, playlist.name, playlist.coverArt, playlist.songCount)))
+    suspend fun unlikePlaylist(id: String) = send<Unit>("DELETE", "/likes/playlists/${java.net.URLEncoder.encode(id, "UTF-8")}", null)
+
     /** Sends a bug report or a feature request ([kind] "bug" or "feature"); the server turns it into a public GitHub issue. */
     suspend fun sendFeedback(kind: String, title: String, description: String, deviceInfo: String?): BugReport =
         post("/bug-reports", FeedbackBody(title, description, deviceInfo, kind))
@@ -115,5 +121,6 @@ class SocialApi(
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)
+    @Serializable private data class PlaylistBody(val id: String, val name: String = "", val coverArt: String? = null, val songCount: Int = 0)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 }

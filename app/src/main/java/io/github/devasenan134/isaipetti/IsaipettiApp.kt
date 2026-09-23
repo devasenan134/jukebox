@@ -71,7 +71,7 @@ class IsaipettiApp : Application() {
         updates = Updates(this, http)
         recent = RecentSongs(this)
         searches = SearchHistory(this)
-        likes = Likes(this, api)
+        likes = Likes(this, api, session) { social.api }
         if (session.credentials.value != null) likes.refresh()
         appScope.launch { updates.checkNowAndThen() }
         Notifications.createChannels(this)
