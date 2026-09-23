@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Isaipetti" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launch_background</item>
+    </style>
+    <color name="launch_background">#FF16131F</color>
+    <color name="launcher_background">#FF1F1A2E</color>
+</resources>
