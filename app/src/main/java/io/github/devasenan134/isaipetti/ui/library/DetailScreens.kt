@@ -32,6 +32,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
+import io.github.devasenan134.isaipetti.ui.components.Loadable
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import io.github.devasenan134.isaipetti.ui.components.songCount
 import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
 import androidx.compose.ui.text.style.TextAlign
@@ -77,15 +80,30 @@ fun AlbumScreen(id: String, nav: Nav) {
 @Composable
 fun PlaylistScreen(id: String, nav: Nav) {
     val app = LocalApp.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val loader = rememberLoader("playlist-$id") { app.api.playlist(id) }
     val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
+    val username = app.session.credentials.value?.username
+    val playlist = (loader.state as? Loadable.Ready)?.value
+    // Only the person who made a playlist can change it (Navidrome checks this too).
+    val mine = playlist != null && playlist.owner == username
     Column {
-        ScreenHeader("", onBack = nav.back)
+        ScreenHeader("", onBack = nav.back) {
+            if (mine) PlaylistOwnerMenu(playlist!!, onChanged = { loader.reload(quietly = true) }, onDeleted = nav.back)
+        }
         LoadableContent(loader) { playlist ->
             SongList(
                 liked = likedPlaylists.any { it.id == playlist.id },
                 onToggleLike = { app.likes.toggle(playlist) },
                 onPlay = { app.recentPlaylists.played(playlist) },
+                onRemoveSong = if (!mine) null else { index ->
+                    scope.launch {
+                        runCatching { app.api.updatePlaylist(playlist.id, removeIndexes = listOf(index)) }
+                            .onSuccess { loader.reload(quietly = true) }
+                            .onFailure { Toast.makeText(context, it.message ?: "Couldn't remove it", Toast.LENGTH_SHORT).show() }
+                    }
+                },
                 coverArt = playlist.coverArt,
                 title = playlist.name,
                 // Who made it, then its description and when it was last updated.
@@ -156,6 +174,8 @@ internal fun SongList(
     liked: Boolean? = null,
     onToggleLike: () -> Unit = {},
     onPlay: () -> Unit = {},
+    /** On a playlist you own: remove the song at this position. */
+    onRemoveSong: ((Int) -> Unit)? = null,
     coverArt: String?,
     title: String,
     subtitle: String,
@@ -216,6 +236,7 @@ internal fun SongList(
                 isCurrent = song.id == nowPlaying.songId,
                 showCover = showCovers,
                 onOpenAlbum = if (showCovers) nav.openAlbum else null,
+                onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
             )
         }
     }

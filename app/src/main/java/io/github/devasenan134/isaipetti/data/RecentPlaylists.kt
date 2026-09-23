@@ -28,6 +28,13 @@ class RecentPlaylists(context: Context) {
         prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
     }
 
+    /** A deleted playlist. */
+    fun forget(id: String) {
+        val list = _playlists.value.filter { it.id != id }
+        _playlists.value = list
+        prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
+    }
+
     fun clear() {
         _playlists.value = emptyList()
         prefs.edit { remove(KEY) }

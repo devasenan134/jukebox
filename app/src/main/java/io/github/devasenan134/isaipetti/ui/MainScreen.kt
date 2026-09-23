@@ -66,6 +66,9 @@ import io.github.devasenan134.isaipetti.ui.library.LibraryScreen
 import io.github.devasenan134.isaipetti.ui.library.LikedSongsScreen
 import io.github.devasenan134.isaipetti.ui.library.PlaylistScreen
 import io.github.devasenan134.isaipetti.ui.library.PlaylistsScreen
+import io.github.devasenan134.isaipetti.ui.library.SingerScreen
+import io.github.devasenan134.isaipetti.ui.library.SingersScreen
+import io.github.devasenan134.isaipetti.data.Artist
 import io.github.devasenan134.isaipetti.ui.player.MiniPlayer
 import io.github.devasenan134.isaipetti.ui.player.PlayerScreen
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
@@ -90,6 +93,8 @@ import kotlinx.serialization.Serializable
 @Serializable object LibraryRoute
 @Serializable object LikedSongsRoute
 @Serializable object PlaylistsRoute
+@Serializable object SingersRoute
+@Serializable data class SingerRoute(val id: String, val name: String, val coverArt: String? = null)
 
 /** Navigation actions that screens can call. */
 class Nav(
@@ -102,6 +107,9 @@ class Nav(
     val openArtists: () -> Unit,
     val openLikedSongs: () -> Unit,
     val openPlaylists: () -> Unit,
+    val openSingers: () -> Unit,
+    /** A singer's songs; a composer's movies ([openArtist]). */
+    val openSinger: (Artist) -> Unit,
     val back: () -> Unit,
 )
 
@@ -131,6 +139,8 @@ fun MainScreen() {
         openArtists = { navController.navigate(ArtistsRoute) },
         openLikedSongs = { navController.navigate(LikedSongsRoute) },
         openPlaylists = { navController.navigate(PlaylistsRoute) },
+        openSingers = { navController.navigate(SingersRoute) },
+        openSinger = { navController.navigate(SingerRoute(it.id, it.name, it.coverArt)) },
         back = { navController.popBackStack() },
     )
 
@@ -233,6 +243,8 @@ fun MainScreen() {
                 screen<LibraryRoute> { LibraryScreen(nav) }
                 screen<LikedSongsRoute> { LikedSongsScreen(nav) }
                 screen<PlaylistsRoute> { PlaylistsScreen(nav) }
+                screen<SingersRoute> { SingersScreen(nav) }
+                screen<SingerRoute> { it.toRoute<SingerRoute>().let { r -> SingerScreen(r.id, r.name, r.coverArt, nav) } }
             }
         }
 

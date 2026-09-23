@@ -66,10 +66,10 @@ import kotlinx.coroutines.delay
 
 /**
  * Search, and browsing:
- *  - before you tap the search bar: Movies, Composers and Playlists boxes, then what you picked
- *    from searches before (songs, movies, composers) and playlists you played;
+ *  - before you tap the search bar: Movies, Composers, Artists and Playlists boxes, then what you picked
+ *    from searches before (songs, movies, composers, artists) and playlists you played;
  *  - with the search bar tapped but empty: your recent searches;
- *  - once you type: results.
+ *  - once you type: live suggestions, then results.
  */
 @Composable
 fun SearchScreen(nav: Nav) {
@@ -89,13 +89,13 @@ fun SearchScreen(nav: Nav) {
     // A search counts for the history once you use it: press search, or open a result.
     val saveSearch = { app.searches.add(query) }
 
-    // Wait until typing pauses for 300 ms before searching. Typing again cancels the pending search.
+    // Search live as you type, once typing pauses for a moment. Typing again cancels the pending search.
     LaunchedEffect(query) {
         if (query.isBlank()) {
             result = SearchResult()
             return@LaunchedEffect
         }
-        delay(300)
+        delay(200)
         try {
             result = app.api.search(query.trim())
             error = null
@@ -130,15 +130,32 @@ fun SearchScreen(nav: Nav) {
         LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
             when {
                 query.isNotBlank() -> {
-                    if (result.artist.isNotEmpty()) {
+                    // Suggestions while typing: matching past searches, then names from the results.
+                    val q = query.trim()
+                    val past = history.filter { it.contains(q, ignoreCase = true) && !it.equals(q, ignoreCase = true) }.take(3)
+                    val names = (result.artist.map { it.name } + result.album.map { it.name } + result.song.map { it.title })
+                        .filter { it.contains(q, ignoreCase = true) && !it.equals(q, ignoreCase = true) }
+                        .distinctBy { it.lowercase() }
+                        .filterNot { name -> past.any { it.equals(name, ignoreCase = true) } }
+                        .take(5)
+                    items(past, key = { "suggest-past-$it" }) { text ->
+                        Suggestion(text, painterResource(R.drawable.ic_history)) { query = text; app.searches.add(text) }
+                    }
+                    items(names, key = { "suggest-$it" }) { text ->
+                        Suggestion(text, rememberVectorPainter(Icons.Filled.Search)) { query = text; app.searches.add(text) }
+                    }
+                    val composers = result.artist.filter { it.isComposer }
+                    val singers = result.artist.filter { !it.isComposer }
+                    if (composers.isNotEmpty()) {
                         item { SectionTitle("Composers") }
-                        items(result.artist, key = { "artist-${it.id}" }) { artist ->
-                            Text(
-                                artist.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = Modifier.fillMaxWidth().clickable { saveSearch(); app.searches.picked(artist); nav.openArtist(artist.id) }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                            )
+                        items(composers, key = { "artist-${it.id}" }) { artist ->
+                            ArtistResult(artist) { saveSearch(); app.searches.picked(artist); nav.openArtist(artist.id) }
+                        }
+                    }
+                    if (singers.isNotEmpty()) {
+                        item { SectionTitle("Artists") }
+                        items(singers, key = { "singer-${it.id}" }) { artist ->
+                            ArtistResult(artist) { saveSearch(); app.searches.picked(artist); nav.openSinger(artist) }
                         }
                     }
                     if (result.album.isNotEmpty()) {
@@ -192,22 +209,27 @@ fun SearchScreen(nav: Nav) {
 
                 else -> {
                     item {
-                        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            BrowseBox("Movies", painterResource(R.drawable.ic_album), MaterialTheme.colorScheme.primaryContainer, nav.openAlbums, Modifier.weight(1f))
-                            BrowseBox(
-                                "Composers",
-                                rememberVectorPainter(Icons.Filled.Person),
-                                MaterialTheme.colorScheme.tertiaryContainer,
-                                nav.openArtists,
-                                Modifier.weight(1f),
-                            )
-                            BrowseBox(
-                                "Playlists",
-                                painterResource(R.drawable.ic_queue),
-                                MaterialTheme.colorScheme.secondaryContainer,
-                                nav.openPlaylists,
-                                Modifier.weight(1f),
-                            )
+                        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                BrowseBox("Movies", painterResource(R.drawable.ic_album), MaterialTheme.colorScheme.primaryContainer, nav.openAlbums, Modifier.weight(1f))
+                                BrowseBox(
+                                    "Composers",
+                                    rememberVectorPainter(Icons.Filled.Person),
+                                    MaterialTheme.colorScheme.tertiaryContainer,
+                                    nav.openArtists,
+                                    Modifier.weight(1f),
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                BrowseBox("Artists", painterResource(R.drawable.ic_music_note), MaterialTheme.colorScheme.secondaryContainer, nav.openSingers, Modifier.weight(1f))
+                                BrowseBox(
+                                    "Playlists",
+                                    painterResource(R.drawable.ic_queue),
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    nav.openPlaylists,
+                                    Modifier.weight(1f),
+                                )
+                            }
                         }
                     }
                     if (searchedSongs.isNotEmpty()) {
@@ -234,11 +256,11 @@ fun SearchScreen(nav: Nav) {
                         }
                     }
                     if (searchedArtists.isNotEmpty()) {
-                        item { SectionTitle("Recently searched composers") }
+                        item { SectionTitle("Recently searched composers and artists") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(searchedArtists, key = { "searched-artist-${it.id}" }) { artist ->
-                                    ComposerCard(artist) { nav.openArtist(artist.id) }
+                                    ComposerCard(artist) { if (artist.isComposer) nav.openArtist(artist.id) else nav.openSinger(artist) }
                                 }
                             }
                         }
@@ -259,14 +281,38 @@ fun SearchScreen(nav: Nav) {
     }
 }
 
-/** A big coloured box that opens a whole section (Movies, Composers). */
+/** A suggestion while typing: tap to search for it. */
+@Composable
+private fun Suggestion(text: String, icon: Painter, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        Text(text, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 16.dp))
+    }
+}
+
+/** A composer or singer in the results, with their picture. */
+@Composable
+private fun ArtistResult(artist: Artist, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Cover(artist.coverArt, Modifier.size(44.dp).clip(CircleShape), size = 150, corner = 22.dp)
+        Text(artist.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
+    }
+}
+
+/** A big coloured box that opens a whole section (Movies, Composers, Artists, Playlists). */
 @Composable
 private fun BrowseBox(label: String, icon: Painter, color: Color, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        modifier.height(88.dp).clip(RoundedCornerShape(12.dp)).background(color).clickable(onClick = onClick).padding(12.dp),
+        modifier.height(80.dp).clip(RoundedCornerShape(12.dp)).background(color).clickable(onClick = onClick).padding(14.dp),
     ) {
-        Text(label, style = MaterialTheme.typography.titleMedium, maxLines = 1, modifier = Modifier.align(Alignment.TopStart))
-        Icon(icon, contentDescription = null, modifier = Modifier.align(Alignment.BottomEnd).size(30.dp))
+        Text(label, style = MaterialTheme.typography.titleLarge, maxLines = 1, modifier = Modifier.align(Alignment.TopStart))
+        Icon(icon, contentDescription = null, modifier = Modifier.align(Alignment.BottomEnd).size(32.dp))
     }
 }
 

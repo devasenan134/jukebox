@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Share
+import io.github.devasenan134.isaipetti.ui.library.AddToPlaylistSheet
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -79,6 +81,7 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
     var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
     var showShare by rememberSaveable { mutableStateOf(false) }
+    var addingToPlaylist by rememberSaveable { mutableStateOf(false) }
     // While the user drags the slider, show where they're dragging instead of the real position.
     var dragging by remember { mutableStateOf<Float?>(null) }
 
@@ -145,7 +148,10 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        now.song?.let { song -> LikeButton(likedSongs.any { it.id == song.id }, onToggle = { app.likes.toggle(song.toSong()) }) }
+                        now.song?.let { song ->
+                            IconButton(onClick = { addingToPlaylist = true }) { Icon(Icons.Filled.Add, contentDescription = "Add to playlist") }
+                            LikeButton(likedSongs.any { it.id == song.id }, onToggle = { app.likes.toggle(song.toSong()) })
+                        }
                     }
 
                     val duration = now.durationMs.coerceAtLeast(1)
@@ -220,4 +226,5 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit) {
 
     if (showQueue) QueueSheet(onDismiss = { showQueue = false })
     if (showShare) now.song?.let { ShareSongSheet(it, onDismiss = { showShare = false }) }
+    if (addingToPlaylist) now.song?.let { AddToPlaylistSheet(it.toSong(), onDismiss = { addingToPlaylist = false }) }
 }

@@ -42,8 +42,9 @@ class LoadViewModel<T>(private val loader: suspend () -> T) : ViewModel() {
         reload()
     }
 
-    fun reload() {
-        state = Loadable.Loading
+    /** Loads again. With [quietly], what's on screen stays until the new data arrives (after an edit). */
+    fun reload(quietly: Boolean = false) {
+        if (!quietly || state !is Loadable.Ready) state = Loadable.Loading
         viewModelScope.launch {
             state = try {
                 Loadable.Ready(loader())
@@ -67,7 +68,7 @@ fun <T> LoadableContent(loader: LoadViewModel<T>, content: @Composable (T) -> Un
         Loadable.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
-        is Loadable.Failed -> ErrorMessage(state.message, onRetry = loader::reload)
+        is Loadable.Failed -> ErrorMessage(state.message, onRetry = { loader.reload() })
         is Loadable.Ready -> content(state.value)
     }
 }

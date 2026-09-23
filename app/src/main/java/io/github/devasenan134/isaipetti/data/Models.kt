@@ -21,6 +21,8 @@ data class Song(
     val coverArt: String? = null,
     /** When you liked it (Navidrome calls it "starred"); null if you haven't. */
     val starred: String? = null,
+    /** Everyone credited as the song's artist (the singers), with their ids. */
+    val artists: List<ArtistRef> = emptyList(),
 )
 
 @Serializable
@@ -43,8 +45,13 @@ data class Artist(
     val name: String = "",
     val albumCount: Int = 0,
     val coverArt: String? = null,
+    /** What they do in the library: "albumartist" (a composer here), "artist" (a singer), "composer", ... */
+    val roles: List<String> = emptyList(),
     val album: List<Album> = emptyList(),
-)
+) {
+    /** Composers have movies of their own; singers only appear on songs. */
+    val isComposer get() = roles.isEmpty() || "albumartist" in roles
+}
 
 @Serializable
 data class Playlist(

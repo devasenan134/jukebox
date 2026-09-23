@@ -45,6 +45,7 @@ import io.github.devasenan134.isaipetti.data.Album
 import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.data.Song
 import io.github.devasenan134.isaipetti.data.toRef
+import io.github.devasenan134.isaipetti.ui.library.AddToPlaylistSheet
 import io.github.devasenan134.isaipetti.ui.social.ShareSongSheet
 import coil3.compose.AsyncImage
 
@@ -129,6 +130,8 @@ fun SongRow(
     isCurrent: Boolean,
     showCover: Boolean = false,
     onOpenAlbum: ((String) -> Unit)? = null,
+    /** Set on a playlist you own: removes this song from it. */
+    onRemoveFromPlaylist: (() -> Unit)? = null,
 ) {
     val app = LocalApp.current
     val player = app.player
@@ -136,7 +139,9 @@ fun SongRow(
     val liked = likedSongs.any { it.id == song.id }
     var menuOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
+    var addingToPlaylist by remember { mutableStateOf(false) }
     if (sharing) ShareSongSheet(song.toRef(), onDismiss = { sharing = false })
+    if (addingToPlaylist) AddToPlaylistSheet(song, onDismiss = { addingToPlaylist = false })
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -186,6 +191,10 @@ fun SongRow(
                 )
                 DropdownMenuItem(text = { Text("Play next") }, onClick = { player.playNext(song); menuOpen = false })
                 DropdownMenuItem(text = { Text("Add to queue") }, onClick = { player.addToQueue(song); menuOpen = false })
+                DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { addingToPlaylist = true; menuOpen = false })
+                onRemoveFromPlaylist?.let { remove ->
+                    DropdownMenuItem(text = { Text("Remove from this playlist") }, onClick = { remove(); menuOpen = false })
+                }
                 DropdownMenuItem(text = { Text("Share with friends") }, onClick = { sharing = true; menuOpen = false })
                 if (onOpenAlbum != null && song.albumId != null) {
                     DropdownMenuItem(text = { Text("Go to movie") }, onClick = { onOpenAlbum(song.albumId); menuOpen = false })
