@@ -176,26 +176,67 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // Groups and people are listed separately, so it's clear who will get it.
+        val groups = targets.filter { it.isGroup }
+        val dms = targets.filter { !it.isGroup }
+        val online = friends.filter { it.online }.map { it.user.id }.toSet()
         LazyColumn(Modifier.padding(bottom = 16.dp)) {
-            items(targets, key = { "c${it.id}" }) { c ->
-                val title = c.title(me)
-                ShareTarget(title, "c${c.id}") { send(shared, title) { c.id } }
+            if (groups.isNotEmpty()) {
+                item { SectionTitle("Groups") }
+                items(groups, key = { "c${it.id}" }) { c ->
+                    val title = c.title(me)
+                    val others = c.members.filter { it.id != me }.map { it.displayName }
+                    ShareTarget(title, "c${c.id}", subtitle = others.joinToString(), group = true) { send(shared, title) { c.id } }
+                }
             }
-            items(newPeople, key = { "f${it.user.id}" }) { f ->
-                ShareTarget(f.user.displayName, f.user.username) { send(shared, f.user.displayName) { social.api.openDm(f.user.id).id } }
+            if (dms.isNotEmpty() || newPeople.isNotEmpty()) {
+                item { SectionTitle("People") }
+                items(dms, key = { "c${it.id}" }) { c ->
+                    val title = c.title(me)
+                    val other = c.members.firstOrNull { it.id != me }
+                    ShareTarget(title, other?.username ?: "c${c.id}", online = other?.id in online) { send(shared, title) { c.id } }
+                }
+                items(newPeople, key = { "f${it.user.id}" }) { f ->
+                    ShareTarget(f.user.displayName, f.user.username, online = f.online) {
+                        send(shared, f.user.displayName) { social.api.openDm(f.user.id).id }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ShareTarget(title: String, key: String, onClick: () -> Unit) {
+private fun ShareTarget(
+    title: String,
+    key: String,
+    subtitle: String? = null,
+    group: Boolean = false,
+    online: Boolean = false,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(title, key, size = 40.dp)
-        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
+        if (group) GroupAvatar(key, size = 40.dp) else Avatar(title, key, size = 40.dp, online = online)
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            subtitle?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** A coloured circle with a group icon, so groups don't look like a person. */
+@Composable
+fun GroupAvatar(key: String, size: Dp = 44.dp) {
+    Box(
+        Modifier.size(size).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size], CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(R.drawable.ic_group), contentDescription = "Group", tint = Color(0xFF1B1726), modifier = Modifier.size(size * 0.55f))
     }
 }
 

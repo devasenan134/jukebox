@@ -170,7 +170,7 @@ private fun ChatList(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Avatar(title, if (c.isGroup) "c${c.id}" else other?.username ?: "", online = !c.isGroup && other?.id in onlineIds)
+                if (c.isGroup) GroupAvatar("c${c.id}") else Avatar(title, other?.username ?: "", online = other?.id in onlineIds)
                 Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                     Text(
                         title,
