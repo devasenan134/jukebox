@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -347,7 +348,9 @@ fun ScreenHeader(
             color = titleColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = if (note == null) Modifier.weight(1f) else Modifier.weight(1f, fill = false),
+            // With a note, the title takes only its own width (capped) and the note fills the rest, so
+            // the actions stay at the right edge. (A non-filling weight would leave a gap after them.)
+            modifier = if (note == null) Modifier.weight(1f) else Modifier.widthIn(max = 160.dp),
         )
         if (note != null) {
             Text(
@@ -357,7 +360,7 @@ fun ScreenHeader(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                modifier = Modifier.weight(1.3f).padding(start = 12.dp, end = 4.dp),
+                modifier = Modifier.weight(1f).padding(start = 12.dp, end = 4.dp),
             )
         }
         actions()
