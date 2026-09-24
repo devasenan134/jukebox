@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -21,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,7 +49,7 @@ import kotlinx.coroutines.launch
 
 /**
  * A group's members, sorted into who's in the jam, who's online and who's offline. The group's
- * owner can also add friends and remove people here.
+ * owner can also rename the group, add friends and remove people here.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +77,7 @@ fun GroupInfoSheet(conversation: Conversation, onDismiss: () -> Unit) {
     val friendsOnline = friends.filter { it.online }.map { it.user.id }.toSet()
     fun online(id: Long) = id == me || id in onlineIds || id in friendsOnline
 
+    var renaming by remember { mutableStateOf(false) }
     var adding by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf<SocialUser?>(null) }
 
@@ -97,11 +100,18 @@ fun GroupInfoSheet(conversation: Conversation, onDismiss: () -> Unit) {
             item {
                 Column(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     GroupAvatar("c${conversation.id}", size = 96.dp, conversation = conversation)
-                    Text(
-                        conversation.name.orEmpty(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
+                    Row(Modifier.padding(top = 12.dp, start = 16.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            conversation.name.orEmpty(),
+                            style = MaterialTheme.typography.headlineSmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (isOwner) {
+                            IconButton(onClick = { renaming = true }) { Icon(Icons.Filled.Edit, contentDescription = "Rename the group") }
+                        }
+                    }
                     Text(
                         "Group · ${conversation.members.size} members",
                         style = MaterialTheme.typography.bodyMedium,
@@ -148,6 +158,12 @@ fun GroupInfoSheet(conversation: Conversation, onDismiss: () -> Unit) {
         }
     }
 
+    if (renaming) {
+        RenameGroupDialog(conversation.name.orEmpty(), onDismiss = { renaming = false }) { name ->
+            renaming = false
+            change({ social.api.renameGroup(conversation.id, name) }, "Group renamed")
+        }
+    }
     if (adding) {
         val candidates = friends.map { it.user }.filter { f -> conversation.members.none { it.id == f.id } }
         AddPeopleDialog(candidates, onDismiss = { adding = false }) { picked ->
@@ -196,6 +212,30 @@ private fun MemberRow(user: SocialUser, isMe: Boolean, online: Boolean, note: St
             IconButton(onClick = onRemove) { Icon(Icons.Filled.Close, contentDescription = "Remove ${user.displayName}") }
         }
     }
+}
+
+/** A new name for the group (up to 50 characters, like when it was made). */
+@Composable
+private fun RenameGroupDialog(current: String, onDismiss: () -> Unit, onRename: (String) -> Unit) {
+    var name by remember { mutableStateOf(current) }
+    val trimmed = name.trim()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename group") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(50) },
+                label = { Text("Group name") },
+                supportingText = { Text("${name.length}/50") },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            Button(onClick = { onRename(trimmed) }, enabled = trimmed.isNotEmpty() && trimmed != current) { Text("Rename") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** Pick friends to add to the group. */
