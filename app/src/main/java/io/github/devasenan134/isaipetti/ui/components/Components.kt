@@ -106,6 +106,13 @@ fun formatTotalDuration(seconds: Int): String {
 /** "1 song", "3,264 songs" */
 fun songCount(n: Int) = if (n == 1) "1 song" else "%,d songs".format(n)
 
+/** "1 like", "12 likes", or "No likes yet". */
+fun likeCount(n: Int) = when (n) {
+    0 -> "No likes yet"
+    1 -> "1 like"
+    else -> "%,d likes".format(n)
+}
+
 /** Album art from Navidrome, with a plain placeholder behind it while loading or if missing. */
 @Composable
 fun Cover(coverArt: String?, modifier: Modifier = Modifier, size: Int = 300, corner: Dp = 8.dp) {

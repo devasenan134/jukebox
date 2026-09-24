@@ -71,6 +71,7 @@ import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.SongRow
 import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
 import io.github.devasenan134.isaipetti.ui.components.songCount
+import io.github.devasenan134.isaipetti.ui.components.likeCount
 
 /** The sections of Your Library, in the order of the chips (swipe between them). */
 private enum class LibraryFilter(val label: String) { All("All"), Playlists("Playlists"), Movies("Movies"), Mine("My Playlists") }
@@ -93,6 +94,10 @@ fun LibraryScreen(nav: Nav) {
     var creating by remember { mutableStateOf(false) }
     val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username, reloadOwn) {
         value = runCatching { app.api.playlists().filter { it.owner == credentials?.username } }.getOrDefault(emptyList())
+    }
+    // How many friends liked each playlist you made (shown only when someone has).
+    val ownLikes by produceState(emptyMap<String, Int>(), ownPlaylists) {
+        value = runCatching { app.social.api.playlistLikeCounts(ownPlaylists.map { it.id }) }.getOrDefault(emptyMap())
     }
     var filter by rememberSaveable { mutableStateOf(LibraryFilter.All) }
     // Liked first (newest like first), then the rest of your own. Every playlist is under Search → Playlists.
@@ -158,7 +163,9 @@ fun LibraryScreen(nav: Nav) {
                     }
                 }
                 playlists.filter { if (mine(it)) showMine else showSaved }.forEach { playlist ->
-                    val subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount)).joinToString(" · ")
+                    val likes = ownLikes[playlist.id]?.takeIf { it > 0 && mine(playlist) }
+                    val subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount), likes?.let(::likeCount))
+                        .joinToString(" · ")
                     add(LibraryEntry("playlist-${playlist.id}", playlist.name, subtitle, { nav.openPlaylist(playlist.id) }) {
                         Cover(playlist.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
                     })

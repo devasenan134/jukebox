@@ -42,6 +42,7 @@ import io.github.devasenan134.isaipetti.ui.components.Loadable
 import androidx.compose.ui.platform.LocalContext
 import android.widget.Toast
 import io.github.devasenan134.isaipetti.ui.components.songCount
+import io.github.devasenan134.isaipetti.ui.components.likeCount
 import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
 import androidx.compose.ui.text.style.TextAlign
 import io.github.devasenan134.isaipetti.ui.components.LikeButton
@@ -108,6 +109,10 @@ fun PlaylistScreen(id: String, nav: Nav) {
     val playlist = (loader.state as? Loadable.Ready)?.value
     // Only the person who made a playlist can change it (Navidrome checks this too).
     val mine = playlist != null && playlist.owner == username
+    // On your own playlist: how many friends liked it (null until known, or if the friends server can't say).
+    val likes by androidx.compose.runtime.produceState<Int?>(null, mine, id) {
+        if (mine) value = runCatching { app.social.api.playlistLikeCounts(listOf(id))[id] }.getOrNull()
+    }
     val tint = rememberPageTint(playlist?.coverArt)
     Column {
         ScreenHeader("", onBack = nav.back, color = tint) {
@@ -137,7 +142,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 coverArt = playlist.coverArt,
                 title = playlist.name,
                 // Who made it, then its description and when it was last updated.
-                subtitle = playlist.owner?.let { "By $it" }.orEmpty(),
+                subtitle = listOfNotNull(playlist.owner?.let { "By $it" }, likes?.let(::likeCount)).joinToString(" · "),
                 details = listOfNotNull(
                     playlist.comment,
                     listOfNotNull(

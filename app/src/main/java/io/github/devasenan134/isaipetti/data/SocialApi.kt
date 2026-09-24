@@ -63,6 +63,9 @@ class SocialApi(
     suspend fun likedPlaylists(): List<Playlist> = get<List<PlaylistBody>>("/likes/playlists").map { Playlist(it.id, it.name, coverArt = it.coverArt, songCount = it.songCount) }
     suspend fun likePlaylist(playlist: Playlist) =
         send<Unit>("PUT", "/likes/playlists", json.encodeToString(PlaylistBody.serializer(), PlaylistBody(playlist.id, playlist.name, playlist.coverArt, playlist.songCount)))
+    /** How many other people liked each of these playlists (for showing likes on your own). */
+    suspend fun playlistLikeCounts(ids: List<String>): Map<String, Int> =
+        if (ids.isEmpty()) emptyMap() else get("/likes/playlists/counts?ids=${ids.joinToString(",") { java.net.URLEncoder.encode(it, "UTF-8") }}")
     suspend fun unlikePlaylist(id: String) = send<Unit>("DELETE", "/likes/playlists/${java.net.URLEncoder.encode(id, "UTF-8")}", null)
 
     // Mixes, playlists and stations by Isai Pettai.
