@@ -42,6 +42,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -224,8 +227,18 @@ fun SongRow(
                 .padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // The song that's playing gets bouncing bars: over its cover, or instead of its track number.
+            val playing = isCurrent && player.nowPlaying.collectAsStateWithLifecycle().value.isPlaying
             if (showCover) {
-                Cover(song.coverArt, Modifier.size(UiSize.SongThumb), size = 150, corner = 4.dp)
+                Box(contentAlignment = Alignment.Center) {
+                    Cover(song.coverArt, Modifier.size(UiSize.SongThumb), size = 150, corner = 4.dp)
+                    if (isCurrent) {
+                        Box(Modifier.size(UiSize.SongThumb).clip(RoundedCornerShape(4.dp)).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.55f)))
+                        PlayingBars(playing, Modifier.size(20.dp))
+                    }
+                }
+            } else if (isCurrent) {
+                Box(Modifier.width(28.dp)) { PlayingBars(playing, Modifier.size(width = 16.dp, height = 16.dp)) }
             } else {
                 Text(
                     song.track?.toString() ?: "",
@@ -379,4 +392,75 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         fontWeight = FontWeight.Bold,
         modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 6.dp),
     )
+}
+
+/**
+ * Three bars bouncing up and down, like a level meter: marks the song that's playing. They rest
+ * (at different heights) while it's paused.
+ */
+@Composable
+fun PlayingBars(playing: Boolean, modifier: Modifier = Modifier, color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary) {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "bars")
+    val heights = listOf(420, 300, 520).mapIndexed { i, period ->
+        if (!playing) return@mapIndexed remember(i) { mutableStateOf(listOf(0.55f, 0.9f, 0.35f)[i]) }
+        transition.animateFloat(
+            initialValue = 0.2f,
+            targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                androidx.compose.animation.core.tween(period, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                androidx.compose.animation.core.RepeatMode.Reverse,
+            ),
+            label = "bar$i",
+        )
+    }
+    androidx.compose.foundation.Canvas(modifier) {
+        val gap = size.width / 7
+        val barWidth = (size.width - gap * 2) / 3
+        heights.forEachIndexed { i, h ->
+            val barHeight = size.height * h.value
+            drawRoundRect(
+                color = color,
+                topLeft = androidx.compose.ui.geometry.Offset(i * (barWidth + gap), size.height - barHeight),
+                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2),
+            )
+        }
+    }
+}
+
+/**
+ * A vinyl record that turns while music plays and rests where it stopped when paused: marks what's
+ * playing now (Home's "Now playing" tile).
+ */
+@Composable
+fun SpinningDisc(spinning: Boolean, modifier: Modifier = Modifier) {
+    val angle = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(spinning) {
+        while (spinning) {
+            angle.animateTo(
+                angle.value + 360f,
+                androidx.compose.animation.core.tween(durationMillis = 3_000, easing = androidx.compose.animation.core.LinearEasing),
+            )
+            angle.snapTo(angle.value % 360f)
+        }
+    }
+    val label = MaterialTheme.colorScheme.primary
+    androidx.compose.foundation.Canvas(modifier.graphicsLayer { rotationZ = angle.value }) {
+        val r = size.minDimension / 2
+        drawCircle(androidx.compose.ui.graphics.Color(0xFF141217), r)
+        // Grooves.
+        listOf(0.92f, 0.8f, 0.68f, 0.56f).forEach {
+            drawCircle(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.10f), r * it, style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.02f))
+        }
+        // A shine across the record, so you can see it turn.
+        drawArc(
+            androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f), startAngle = -60f, sweepAngle = 40f, useCenter = true,
+            topLeft = androidx.compose.ui.geometry.Offset(center.x - r * 0.95f, center.y - r * 0.95f),
+            size = androidx.compose.ui.geometry.Size(r * 1.9f, r * 1.9f),
+        )
+        drawCircle(label, r * 0.34f)
+        // A mark on the label, also to show the turning.
+        drawCircle(androidx.compose.ui.graphics.Color(0xFF141217).copy(alpha = 0.35f), r * 0.07f, center.copy(y = center.y - r * 0.2f))
+        drawCircle(androidx.compose.ui.graphics.Color(0xFF141217), r * 0.06f)
+    }
 }

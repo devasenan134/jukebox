@@ -38,7 +38,13 @@ import io.github.devasenan134.isaipetti.ui.components.AlbumCard
 import io.github.devasenan134.isaipetti.ui.components.ErrorMessage
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
-import kotlinx.coroutines.Job
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.launch
 
 enum class AlbumSort(val label: String, val type: String, val extra: Map<String, Any> = emptyMap()) {
@@ -48,29 +54,16 @@ enum class AlbumSort(val label: String, val type: String, val extra: Map<String,
     Added("Recently added", "newest"),
 }
 
-/** Loads the album grid one page at a time as you scroll, so big libraries stay fast. */
-class AlbumsViewModel(private val api: SubsonicApi) : ViewModel() {
-    var sort by mutableStateOf(AlbumSort.Name)
-        private set
+/** Loads one sort's album grid one page at a time as you scroll, so big libraries stay fast. */
+class AlbumsViewModel(private val api: SubsonicApi, val sort: AlbumSort) : ViewModel() {
     val albums = mutableStateListOf<Album>()
     var loading by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
         private set
     private var endReached = false
-    private var job: Job? = null
 
     init {
-        loadMore()
-    }
-
-    fun changeSort(newSort: AlbumSort) {
-        if (newSort == sort) return
-        sort = newSort
-        job?.cancel()
-        albums.clear()
-        endReached = false
-        loading = false
         loadMore()
     }
 
@@ -78,7 +71,7 @@ class AlbumsViewModel(private val api: SubsonicApi) : ViewModel() {
         if (loading || endReached) return
         loading = true
         error = null
-        job = viewModelScope.launch {
+        viewModelScope.launch {
             try {
                 val page = api.albumList(sort.type, PAGE_SIZE, albums.size, sort.extra)
                 albums += page
@@ -97,10 +90,42 @@ class AlbumsViewModel(private val api: SubsonicApi) : ViewModel() {
     }
 }
 
+/** All movies, in four orders (A–Z, newest, oldest, recently added): swipe sideways between them, or tap a chip. */
 @Composable
 fun AlbumsScreen(nav: Nav) {
+    val scope = rememberCoroutineScope()
+    var selected by rememberSaveable { mutableIntStateOf(0) }
+    val pager = rememberPagerState(initialPage = selected) { AlbumSort.entries.size }
+    LaunchedEffect(pager.currentPage) { selected = pager.currentPage }
+    val chips = rememberLazyListState()
+    // Keep the selected chip in view as you swipe.
+    LaunchedEffect(pager.targetPage) { chips.animateScrollToItem(pager.targetPage) }
+
+    Column {
+        ScreenHeader("Movies", onBack = nav.back)
+        LazyRow(
+            state = chips,
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(AlbumSort.entries) { sort ->
+                FilterChip(
+                    selected = pager.targetPage == sort.ordinal,
+                    onClick = { scope.launch { pager.animateScrollToPage(sort.ordinal) } },
+                    label = { Text(sort.label) },
+                )
+            }
+        }
+        HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }, verticalAlignment = Alignment.Top) { page ->
+            AlbumGrid(AlbumSort.entries[page], nav)
+        }
+    }
+}
+
+@Composable
+private fun AlbumGrid(sort: AlbumSort, nav: Nav) {
     val app = LocalApp.current
-    val vm = viewModel { AlbumsViewModel(app.api) }
+    val vm = viewModel(key = "albums-${sort.name}") { AlbumsViewModel(app.api, sort) }
     val gridState = rememberLazyGridState()
 
     // When the last few cards come into view, fetch the next page.
@@ -111,35 +136,24 @@ fun AlbumsScreen(nav: Nav) {
         }
     }
     LaunchedEffect(nearEnd, vm.albums.size) { if (nearEnd) vm.loadMore() }
-    LaunchedEffect(vm.sort) { gridState.scrollToItem(0) }
 
-    Column {
-        ScreenHeader("Movies", onBack = nav.back)
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(AlbumSort.entries) { sort ->
-                FilterChip(selected = vm.sort == sort, onClick = { vm.changeSort(sort) }, label = { Text(sort.label) })
-            }
+    if (vm.albums.isEmpty() && vm.error != null) {
+        ErrorMessage(vm.error!!, onRetry = vm::loadMore)
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(UiSize.GridCell),
+        state = gridState,
+        contentPadding = PaddingValues(10.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        items(vm.albums, key = { it.id }) { album ->
+            AlbumCard(album, onClick = { nav.openAlbum(album.id) })
         }
-        if (vm.albums.isEmpty() && vm.error != null) {
-            ErrorMessage(vm.error!!, onRetry = vm::loadMore)
-            return@Column
-        }
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(UiSize.GridCell),
-            state = gridState,
-            contentPadding = PaddingValues(10.dp),
-        ) {
-            items(vm.albums, key = { it.id }) { album ->
-                AlbumCard(album, onClick = { nav.openAlbum(album.id) })
-            }
-            if (vm.loading) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
+        if (vm.loading) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
             }
         }

@@ -101,7 +101,10 @@ fun LibraryScreen(nav: Nav) {
     }
     var filter by rememberSaveable { mutableStateOf(LibraryFilter.All) }
     // Liked first (newest like first), then the rest of your own. Every playlist is under Search → Playlists.
-    val playlists = likedPlaylists + ownPlaylists.filter { own -> likedPlaylists.none { it.id == own.id } }
+    // A liked playlist is saved without its owner, so one of your own would look like someone else's
+    // (and leave My Playlists when you like it): use your own copy of it instead.
+    val playlists = likedPlaylists.map { liked -> ownPlaylists.firstOrNull { it.id == liked.id } ?: liked } +
+        ownPlaylists.filter { own -> likedPlaylists.none { it.id == own.id } }
 
     // List or grid, remembered on this phone.
     val prefs = remember { context.getSharedPreferences("library", android.content.Context.MODE_PRIVATE) }

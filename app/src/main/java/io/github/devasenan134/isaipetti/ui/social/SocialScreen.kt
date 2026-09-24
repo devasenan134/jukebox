@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -104,11 +105,16 @@ fun SocialScreen(nav: Nav) {
             )
         }
         val unread = conversations.sumOf { it.unread }
-        PrimaryTabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { TabLabel("Chats", unread) })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { TabLabel("Friends", requests.incoming.size) })
+        // Swipe sideways between Chats and Friends, or tap a tab.
+        val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = tab) { 2 }
+        LaunchedEffect(pager.currentPage) { tab = pager.currentPage }
+        PrimaryTabRow(selectedTabIndex = pager.targetPage) {
+            Tab(selected = pager.targetPage == 0, onClick = { scope.launch { pager.animateScrollToPage(0) } }, text = { TabLabel("Chats", unread) })
+            Tab(selected = pager.targetPage == 1, onClick = { scope.launch { pager.animateScrollToPage(1) } }, text = { TabLabel("Friends", requests.incoming.size) })
         }
-        when (tab) {
+        androidx.compose.foundation.pager.HorizontalPager(
+            pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, verticalAlignment = Alignment.Top,
+        ) { page -> when (page) {
             0 -> ChatList(conversations, social.me?.id, friends, onOpen = { nav.openChat(it.id) }, onNewGroup = { dialog = "group" })
             else -> FriendList(
                 friends = friends,
@@ -120,7 +126,7 @@ fun SocialScreen(nav: Nav) {
                 onRemove = { scope.launch { runCatching { social.api.removeFriend(it.id) }; social.refresh() } },
                 onInvite = { dialog = "invite" },
             )
-        }
+        } }
     }
 
     when (dialog) {
