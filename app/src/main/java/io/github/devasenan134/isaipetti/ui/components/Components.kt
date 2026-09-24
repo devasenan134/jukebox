@@ -185,16 +185,20 @@ fun SongRow(
     if (sharing) ShareSongSheet(song.toRef(), onDismiss = { sharing = false })
     if (addingToPlaylist) AddToPlaylistSheet(song, onDismiss = { addingToPlaylist = false })
     // Swipe right: play next. Swipe left: add to the end of the queue. The row springs back either way.
-    // In someone else's jam, both ask its owner for the song instead (the player says so).
-    // The swipe box can report one swipe twice; act once per swipe.
+    // In someone else's jam, swiping asks its owner instead: right to play it now (skipping the
+    // current song), left to play it next. The swipe box can report one swipe twice; act once per swipe.
     val lastSwipe = remember { longArrayOf(0L) }
+    val joinedJam by app.social.listen.joined.collectAsStateWithLifecycle()
+    val jamOwners by app.social.listen.owners.collectAsStateWithLifecycle()
+    val jamListener = joinedJam?.let { jamOwners[it] }?.let { it != app.social.me?.id } ?: false
     val swipe = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             val now = android.os.SystemClock.uptimeMillis()
             if (value != SwipeToDismissBoxValue.Settled && now - lastSwipe[0] > 600) {
                 lastSwipe[0] = now
                 val requesting = app.social.listen.isListener()
-                if (value == SwipeToDismissBoxValue.StartToEnd) player.playNext(song) else player.addToQueue(song)
+                if (requesting) player.jam?.request(song, playNow = value == SwipeToDismissBoxValue.StartToEnd)
+                else if (value == SwipeToDismissBoxValue.StartToEnd) player.playNext(song) else player.addToQueue(song)
                 if (!requesting) {
                     val text = if (value == SwipeToDismissBoxValue.StartToEnd) "Playing next" else "Added to queue"
                     Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
@@ -205,7 +209,7 @@ fun SongRow(
     )
     SwipeToDismissBox(
         state = swipe,
-        backgroundContent = { SwipeHint(swipe.dismissDirection) },
+        backgroundContent = { SwipeHint(swipe.dismissDirection, requesting = jamListener) },
     ) {
         Row(
             Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).clickable(onClick = onClick)
@@ -278,7 +282,7 @@ fun SongRow(
 
 /** What shows behind a song row while you swipe it. */
 @Composable
-private fun SwipeHint(direction: SwipeToDismissBoxValue) {
+private fun SwipeHint(direction: SwipeToDismissBoxValue, requesting: Boolean) {
     if (direction == SwipeToDismissBoxValue.Settled) return
     val playNext = direction == SwipeToDismissBoxValue.StartToEnd
     Row(
@@ -288,7 +292,13 @@ private fun SwipeHint(direction: SwipeToDismissBoxValue) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(painterResource(R.drawable.ic_queue), contentDescription = null)
-        Text(if (playNext) "Play next" else "Add to queue", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
+        val label = when {
+            requesting && playNext -> "Ask to play now"
+            requesting -> "Ask to play next"
+            playNext -> "Play next"
+            else -> "Add to queue"
+        }
+        Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
     }
 }
 

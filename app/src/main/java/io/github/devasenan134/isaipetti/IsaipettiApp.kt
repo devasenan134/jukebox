@@ -101,10 +101,11 @@ class IsaipettiApp : Application() {
         // Listening along in someone else's jam: controls say who's in charge, and queueing a song asks them.
         player.jam = object : PlayerConnection.Jam {
             override fun isListener() = social.listen.isListener()
-            override fun request(song: Song) {
-                appScope.launch { toast(social.requestSong(song.toRef())) }
+            override fun request(song: Song, playNow: Boolean) {
+                appScope.launch { toast(social.requestSong(song.toRef(), playNow)) }
             }
-            override fun explain() = toast("${social.jamOwnerName() ?: "The host"} controls this jam. Swipe a song to ask for it.")
+            override fun explain() =
+                toast("${social.jamOwnerName() ?: "The host"} controls this jam. Swipe a song right to ask for it now, left to ask for it next.")
         }
         updates = Updates(this, http)
         recent = RecentSongs(this)

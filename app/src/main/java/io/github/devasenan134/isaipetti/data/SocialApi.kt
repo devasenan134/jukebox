@@ -90,9 +90,9 @@ class SocialApi(
     suspend fun createInvite(): Invite = post("/invites", Unit)
     suspend fun invites(): List<Invite> = get("/invites")
 
-    /** While listening together: ask the session's owner to play [song] (it shows in the chat). */
-    suspend fun requestSong(conversationId: Long, song: SongRef): ChatMessage =
-        post("/conversations/$conversationId/listen/requests", SongRequestBody(song))
+    /** While listening together: ask the session's owner to play [song] next, or now if [playNow] (it shows in the chat). */
+    suspend fun requestSong(conversationId: Long, song: SongRef, playNow: Boolean): ChatMessage =
+        post("/conversations/$conversationId/listen/requests", SongRequestBody(song, if (playNow) "now" else "next"))
 
     /** The session's owner accepts or declines a song request. */
     suspend fun answerRequest(conversationId: Long, messageId: Long, accept: Boolean): ChatMessage =
@@ -184,6 +184,6 @@ class SocialApi(
     @Serializable private data class PlaysBody(val events: List<PlayEvent>)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 
-    @Serializable private data class SongRequestBody(val song: SongRef)
+    @Serializable private data class SongRequestBody(val song: SongRef, val mode: String)
     @Serializable private data class SongRequestAnswer(val accept: Boolean)
 }

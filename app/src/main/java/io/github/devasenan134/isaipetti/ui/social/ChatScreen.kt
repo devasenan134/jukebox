@@ -89,12 +89,14 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         if (i >= 0) messages[i] = message else messages.add(message)
     }
 
-    /** The jam's owner answers a song request; an accepted song joins the jam's queue. */
+    /** The jam's owner answers a song request; an accepted song plays right away or joins the jam's queue. */
     fun answerRequest(message: ChatMessage, accept: Boolean) {
         scope.launch {
             try {
                 add(social.api.answerRequest(conversationId, message.id, accept))
-                if (accept) message.song?.let { app.player.queueRequested(it.toSong()) }
+                if (accept) message.song?.let {
+                    if (message.requestMode == "now") app.player.playRequestedNow(it.toSong()) else app.player.queueRequested(it.toSong())
+                }
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Couldn't answer the request", Toast.LENGTH_SHORT).show()
             }
@@ -294,7 +296,8 @@ private fun Bubble(
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 if (message.request != null) {
                     Text(
-                        if (mine) "You asked to play" else "${message.sender.displayName} asked to play",
+                        (if (mine) "You asked to play" else "${message.sender.displayName} asked to play") +
+                            if (message.requestMode == "now") " now" else " next",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 6.dp),
@@ -302,7 +305,7 @@ private fun Bubble(
                 }
                 message.song?.let { SongCard(it, Modifier.padding(bottom = if (message.body.isNotBlank() || message.request != null) 6.dp else 0.dp)) }
                 if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
-                message.request?.let { status -> SongRequestStatus(status, canAnswer, jamOwnerName, onAnswer) }
+                message.request?.let { status -> SongRequestStatus(status, message.requestMode == "now", canAnswer, jamOwnerName, onAnswer) }
                 Text(
                     chatTime(message.createdAt),
                     style = MaterialTheme.typography.labelSmall,
@@ -424,17 +427,17 @@ private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, has
 
 /** Under a song request: Accept/Decline for the jam's owner, or where the request stands for everyone else. */
 @Composable
-private fun SongRequestStatus(status: String, canAnswer: Boolean, ownerName: String?, onAnswer: (Boolean) -> Unit) {
+private fun SongRequestStatus(status: String, playNow: Boolean, canAnswer: Boolean, ownerName: String?, onAnswer: (Boolean) -> Unit) {
     if (canAnswer) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onAnswer(true) }) { Text("Accept") }
+            Button(onClick = { onAnswer(true) }) { Text(if (playNow) "Play now" else "Play next") }
             OutlinedButton(onClick = { onAnswer(false) }) { Text("Decline") }
         }
         return
     }
     Text(
         when (status) {
-            "accepted" -> "✓ Added to the queue"
+            "accepted" -> if (playNow) "✓ Played" else "✓ Added to the queue"
             "declined" -> "Declined"
             "expired" -> "The jam ended before this was answered"
             else -> "Waiting for ${ownerName ?: "the host"}"

@@ -63,7 +63,8 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
      */
     interface Jam {
         fun isListener(): Boolean
-        fun request(song: Song)
+        /** Asks the owner to play [song] next, or right away (skipping the current song) if [playNow]. */
+        fun request(song: Song, playNow: Boolean)
         fun explain()
     }
 
@@ -126,14 +127,14 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
     }
 
     fun playNext(song: Song) {
-        if (jam?.isListener() == true) return jam!!.request(song)
+        if (jam?.isListener() == true) return jam!!.request(song, playNow = false)
         val c = controller ?: return
         if (c.mediaItemCount == 0) return play(listOf(song))
         c.addMediaItem(c.currentMediaItemIndex + 1, song.toMediaItem())
     }
 
     fun addToQueue(song: Song) {
-        if (jam?.isListener() == true) return jam!!.request(song)
+        if (jam?.isListener() == true) return jam!!.request(song, playNow = false)
         val c = controller ?: return
         if (c.mediaItemCount == 0) return play(listOf(song))
         c.addMediaItem(song.toMediaItem())
@@ -153,6 +154,30 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
         val lastWaiting = (current + 1 until c.mediaItemCount).lastOrNull { c.getMediaItemAt(it).mediaId in acceptedRequests }
         c.addMediaItem((lastWaiting ?: current) + 1, song.toMediaItem())
         acceptedRequests += song.id
+    }
+
+    /** The jam's owner accepted a "play it now" request: it goes right after the current song, and we skip to it. */
+    fun playRequestedNow(song: Song) {
+        val c = controller ?: return
+        if (c.mediaItemCount == 0) return play(listOf(song))
+        val next = c.currentMediaItemIndex + 1
+        c.addMediaItem(next, song.toMediaItem())
+        c.seekTo(next, 0)
+        c.play()
+    }
+
+    /** Takes the song at [index] (a [QueueEntry.index]) out of the queue, if it's still [songId]. */
+    fun removeFromQueue(index: Int, songId: String) {
+        if (locked()) return
+        val c = controller ?: return
+        if (index in 0 until c.mediaItemCount && c.getMediaItemAt(index).mediaId == songId) c.removeMediaItem(index)
+    }
+
+    /** Moves the song at [from] to [to] (both player indices, as in [QueueEntry.index]). */
+    fun moveInQueue(from: Int, to: Int) {
+        if (locked()) return
+        val c = controller ?: return
+        if (from != to && from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount) c.moveMediaItem(from, to)
     }
 
     fun togglePlay() {

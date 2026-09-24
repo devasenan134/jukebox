@@ -65,6 +65,8 @@ data class ChatMessage(
     val system: Boolean = false,
     /** For a song request while listening together: "pending", "accepted", "declined" or "expired". Null otherwise. */
     val request: String? = null,
+    /** What a song request asks for: "next" (after the current song) or "now" (skip to it). */
+    val requestMode: String? = null,
 ) {
     /** "Alice left the group" / "You left the group". */
     fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body

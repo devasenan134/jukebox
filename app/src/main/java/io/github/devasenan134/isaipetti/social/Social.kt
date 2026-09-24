@@ -313,13 +313,21 @@ class Social(private val context: Context, private val session: SessionStore, pr
         return _conversations.value.firstOrNull { it.id == id }?.members?.firstOrNull { it.id == owner }?.displayName
     }
 
-    /** Asks the owner of the jam we're in to play [song]. Returns what to tell the user. */
-    suspend fun requestSong(song: SongRef): String {
+    /** When we last asked for a song, to space requests out (the server enforces it too). */
+    private var lastRequestAt = 0L
+
+    /** Asks the owner of the jam we're in to play [song] next, or right away if [playNow]. Returns what to tell the user. */
+    suspend fun requestSong(song: SongRef, playNow: Boolean): String {
         val id = listen.joined.value ?: return "You're not listening together"
+        val wait = lastRequestAt + REQUEST_EVERY_MS - android.os.SystemClock.elapsedRealtime()
+        if (wait > 0) return "Wait ${(wait + 999) / 1000} s before asking again"
+        lastRequestAt = android.os.SystemClock.elapsedRealtime()
         return try {
-            api.requestSong(id, song)
-            "Asked ${jamOwnerName() ?: "the host"} to play ${song.title}"
+            api.requestSong(id, song, playNow)
+            "Asked ${jamOwnerName() ?: "the host"} to play ${song.title} ${if (playNow) "now" else "next"}"
         } catch (e: Exception) {
+            // Nothing reached the owner (unless the server said to slow down): the user can try again at once.
+            if ((e as? io.github.devasenan134.isaipetti.data.SocialException)?.code != 429) lastRequestAt = 0
             e.message ?: "Couldn't send the request"
         }
     }
@@ -354,5 +362,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     private companion object {
         const val TAG = "Social"
+        /** Matches the server's wait between song requests. */
+        const val REQUEST_EVERY_MS = 10_000L
     }
 }
