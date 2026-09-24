@@ -85,6 +85,11 @@ class SocialApi(
 
     suspend fun createInvite(): Invite = post("/invites", Unit)
     suspend fun invites(): List<Invite> = get("/invites")
+
+    /** Whether you're a Navidrome admin (who can see everyone's listening stats). */
+    suspend fun adminAccess(): AdminAccess = get("/admin/access")
+    suspend fun listeningStats(timeZone: String): ListeningStats =
+        get("/admin/stats?tz=" + java.net.URLEncoder.encode(timeZone, "UTF-8"))
     /** Deletes an unused invite: its code stops working. */
     suspend fun deleteInvite(code: String) = send<Unit>("DELETE", "/invites/${enc(code)}", null)
 

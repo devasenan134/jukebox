@@ -75,6 +75,7 @@ import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.mixes.MixScreen
 import io.github.devasenan134.isaipetti.ui.search.SearchScreen
 import io.github.devasenan134.isaipetti.ui.settings.SettingsScreen
+import io.github.devasenan134.isaipetti.ui.settings.StatsScreen
 import io.github.devasenan134.isaipetti.ui.settings.UpdateDialog
 import io.github.devasenan134.isaipetti.ui.social.ChatScreen
 import io.github.devasenan134.isaipetti.ui.social.SocialScreen
@@ -91,6 +92,7 @@ import kotlinx.serialization.Serializable
 @Serializable object SocialRoute
 @Serializable data class ChatRoute(val id: Long)
 @Serializable object SettingsRoute
+@Serializable object StatsRoute
 @Serializable object LibraryRoute
 @Serializable object LikedSongsRoute
 @Serializable object PlaylistsRoute
@@ -105,6 +107,8 @@ class Nav(
     val openPlaylist: (String) -> Unit,
     val openChat: (Long) -> Unit,
     val openSettings: () -> Unit,
+    /** Everyone's listening stats (admins only). */
+    val openStats: () -> Unit,
     val openAlbums: () -> Unit,
     val openArtists: () -> Unit,
     val openLikedSongs: () -> Unit,
@@ -139,6 +143,7 @@ fun MainScreen() {
         openPlaylist = { navController.navigate(PlaylistRoute(it)) },
         openChat = { navController.navigate(ChatRoute(it)) },
         openSettings = { navController.navigate(SettingsRoute) },
+        openStats = { navController.navigate(StatsRoute) },
         openAlbums = { navController.navigate(AlbumsRoute) },
         openArtists = { navController.navigate(ArtistsRoute) },
         openLikedSongs = { navController.navigate(LikedSongsRoute) },
@@ -245,6 +250,7 @@ fun MainScreen() {
                 screen<SocialRoute> { SocialScreen(nav) }
                 screen<ChatRoute> { ChatScreen(it.toRoute<ChatRoute>().id, nav) }
                 screen<SettingsRoute> { SettingsScreen(nav) }
+                screen<StatsRoute> { StatsScreen(nav) }
                 screen<LibraryRoute> { LibraryScreen(nav) }
                 screen<LikedSongsRoute> { LikedSongsScreen(nav) }
                 screen<PlaylistsRoute> { PlaylistsScreen(nav) }

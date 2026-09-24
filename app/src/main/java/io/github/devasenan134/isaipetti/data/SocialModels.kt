@@ -158,3 +158,37 @@ data class ListenLeave(val conversationId: Long) : ClientEvent
 
 @Serializable @SerialName("listenUpdate")
 data class ListenUpdate(val conversationId: Long, val state: ListenState) : ClientEvent
+
+// Admin listening stats (server: Stats.kt). Only Navidrome admins get these.
+
+@Serializable data class AdminAccess(val isAdmin: Boolean = false)
+
+@Serializable data class TopItem(val name: String, val detail: String? = null, val plays: Int, val coverArt: String? = null)
+
+@Serializable
+data class RangeStats(
+    val hours: Double = 0.0,
+    val plays: Int = 0,
+    val topSongs: List<TopItem> = emptyList(),
+    val topMovies: List<TopItem> = emptyList(),
+    val topComposers: List<TopItem> = emptyList(),
+)
+
+@Serializable
+data class UserStats(
+    val username: String,
+    val displayName: String,
+    val lastPlayedAt: Long? = null,
+    /** Keys: "today", "7d", "30d", "all". */
+    val ranges: Map<String, RangeStats> = emptyMap(),
+)
+
+@Serializable data class DayHours(val date: String, val hours: Double)
+
+@Serializable
+data class ListeningStats(
+    val generatedAt: Long,
+    val users: List<UserStats> = emptyList(),
+    val daily: List<DayHours> = emptyList(),
+    val hourOfDay: List<Double> = emptyList(),
+)
