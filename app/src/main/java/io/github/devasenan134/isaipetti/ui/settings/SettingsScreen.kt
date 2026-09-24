@@ -1,5 +1,10 @@
 package io.github.devasenan134.isaipetti.ui.settings
 
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import io.github.devasenan134.isaipetti.data.Appearance
+import io.github.devasenan134.isaipetti.data.ThemeMode
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.ui.res.painterResource
@@ -120,6 +125,8 @@ fun SettingsScreen(nav: Nav) {
                 }
             }
 
+            AppearanceCard()
+
             ChangePasswordCard()
 
             UpdatesCard()
@@ -230,6 +237,51 @@ private fun ChangePasswordCard() {
             (error ?: problem)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
             Button(onClick = ::save, enabled = canSave, modifier = Modifier.fillMaxWidth()) {
                 if (busy) CircularProgressIndicator(Modifier.padding(2.dp), strokeWidth = 2.dp) else Text("Update password")
+            }
+        }
+    }
+}
+
+/** Light, dark or automatic, and optionally the wallpaper's colours (Android 12+). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AppearanceCard() {
+    val appearance = LocalApp.current.appearance
+    val mode by appearance.mode.collectAsStateWithLifecycle()
+    val wallpaper by appearance.wallpaper.collectAsStateWithLifecycle()
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Appearance", style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider()
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                ThemeMode.entries.forEachIndexed { i, option ->
+                    SegmentedButton(
+                        selected = mode == option,
+                        onClick = { appearance.setMode(option) },
+                        shape = SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
+                    ) { Text(option.label) }
+                }
+            }
+            Text(
+                "Auto follows your phone's dark mode setting.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Use wallpaper colours", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (Appearance.wallpaperSupported) "Colours from your wallpaper instead of Graphite & mango"
+                        else "Needs Android 12 or later",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                androidx.compose.material3.Switch(
+                    checked = wallpaper && Appearance.wallpaperSupported,
+                    onCheckedChange = appearance::setWallpaper,
+                    enabled = Appearance.wallpaperSupported,
+                )
             }
         }
     }

@@ -72,7 +72,7 @@ object UiSize {
     /** Pictures in list rows (Your Library, search results for people). */
     val ListThumb = 64.dp
     /** Your Library is a list of many things, so it's more compact: pictures in its rows, and its grid cells (three across). */
-    val LibraryThumb = 60.dp
+    val LibraryThumb = 72.dp
     val LibraryGridCell = 120.dp
     /** Covers in song rows. */
     val SongThumb = 50.dp

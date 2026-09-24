@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.home
 
+import io.github.devasenan134.isaipetti.data.SongRef
 import io.github.devasenan134.isaipetti.ui.components.SongRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.remember
@@ -61,7 +62,8 @@ private data class HomeData(
 fun HomeScreen(nav: Nav) {
     val app = LocalApp.current
     val recentlyPlayed by app.activity.items.collectAsStateWithLifecycle()
-    val recents = remember(recentlyPlayed) { splitRecents(recentlyPlayed) }
+    val playedSongs by app.recent.songs.collectAsStateWithLifecycle()
+    val recents = remember(playedSongs, recentlyPlayed) { splitRecents(playedSongs, recentlyPlayed) }
     val nowPlaying by app.player.nowPlaying.collectAsStateWithLifecycle()
     // Mixes by Isai Pettai; worked out again on the server whenever the library or your listening changed.
     val mixes by app.mixes.home.collectAsStateWithLifecycle()
@@ -87,9 +89,9 @@ fun HomeScreen(nav: Nav) {
                 // 1. Made for you, as tiles.
                 val sections = mixes?.sections.orEmpty()
                 mixSections(sections.filter { it.id == "made-for-you" }, nav)
-                // 2. The songs you played lately, as a list.
+                // 2. Every song you played lately, as a list.
                 if (recents.songs.isNotEmpty()) {
-                    item(key = "recent-songs-title") { SectionTitle("Recent songs") }
+                    item(key = "recent-songs-title") { SectionTitle("Recently Played") }
                     itemsIndexed(recents.songs, key = { _, song -> "recent-song-${song.id}" }) { index, song ->
                         SongRow(
                             song = song,
@@ -100,10 +102,10 @@ fun HomeScreen(nav: Nav) {
                         )
                     }
                 }
-                // 3. Movies, playlists, artists and mixes you played as a whole, as tiles.
+                // 3. "Jump back in": movies, playlists, artists and mixes you played as a whole, as tiles.
                 // Until there's any listening, the movies Navidrome says you played.
                 if (recents.collections.isNotEmpty()) recentRow(recents.collections, nav) { app.player.play(listOf(it)) }
-                else if (recents.songs.isEmpty()) albumRow("Recently played", data.recent, nav)
+                else if (recents.songs.isEmpty()) albumRow("Jump back in", data.recent, nav)
                 mixSections(sections.filter { it.id != "made-for-you" }, nav)
                 albumRow("Most played", data.frequent, nav)
                 albumRow("Recently added", data.newest, nav)
@@ -114,15 +116,16 @@ fun HomeScreen(nav: Nav) {
 }
 
 /**
- * Home's recently played. Songs you started by tapping them (anywhere) are listed; movies, playlists,
- * Liked songs, mixes and artists you started as a whole (Play, Shuffle, Resume) are tiles.
+ * Home's recents. "Recently Played" lists every song that played, however it started (tapped, or next
+ * in a movie, playlist or mix); "Jump back in" has the movies, playlists, Liked songs, mixes and artists
+ * you started as a whole (Play, Shuffle, Resume).
  */
 private data class Recents(val songs: List<Song>, val collections: List<RecentActivity.Item>)
 
 private const val RECENT_SONGS = 6
 
-private fun splitRecents(items: List<RecentActivity.Item>): Recents = Recents(
-    songs = items.mapNotNull { it.song?.toSong() }.take(RECENT_SONGS),
+private fun splitRecents(played: List<SongRef>, items: List<RecentActivity.Item>): Recents = Recents(
+    songs = played.take(RECENT_SONGS).map { it.toSong() },
     collections = items.filter { it.kind != RecentActivity.Kind.Song },
 )
 
@@ -140,11 +143,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.albumRow(title: Strin
     }
 }
 
-/** "Recently played": songs, movies, playlists and Liked songs as squares; composers and artists as circles. */
+/** "Jump back in": movies, playlists, mixes and Liked songs as squares; composers and artists as circles. */
 private fun androidx.compose.foundation.lazy.LazyListScope.recentRow(items: List<RecentActivity.Item>, nav: Nav, playSong: (Song) -> Unit) {
     item(key = "recently-played") {
         Column {
-            SectionTitle("Recently played")
+            SectionTitle("Jump back in")
             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                 items(items, key = { "${it.kind}-${it.id}" }) { item ->
                     RecentTile(item) {

@@ -5,6 +5,7 @@ import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.Likes
 import io.github.devasenan134.isaipetti.data.MyPlaylists
 import io.github.devasenan134.isaipetti.data.Mixes
+import io.github.devasenan134.isaipetti.data.Appearance
 import io.github.devasenan134.isaipetti.data.QueueMemory
 import io.github.devasenan134.isaipetti.data.RecentActivity
 import io.github.devasenan134.isaipetti.data.RecentPlaylists
@@ -55,6 +56,8 @@ class IsaipettiApp : Application() {
         private set
     lateinit var mixes: Mixes
         private set
+    lateinit var appearance: Appearance
+        private set
 
     /** A screen to open, set when the app is launched from a notification. */
     val pendingOpen = MutableStateFlow<PendingOpen?>(null)
@@ -62,6 +65,7 @@ class IsaipettiApp : Application() {
     override fun onCreate() {
         super.onCreate()
         session = SessionStore(this).also { it.load() }
+        appearance = Appearance(this)
         val http = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

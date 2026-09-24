@@ -8,6 +8,12 @@ import androidx.activity.enableEdgeToEdge
 import io.github.devasenan134.isaipetti.push.Notifications
 import io.github.devasenan134.isaipetti.ui.AppRoot
 import io.github.devasenan134.isaipetti.ui.theme.IsaipettiTheme
+import io.github.devasenan134.isaipetti.ui.theme.isAppInDarkTheme
+import android.graphics.Color
+import androidx.activity.SystemBarStyle
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     private val app get() = application as IsaipettiApp
@@ -17,7 +23,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         handleNotificationTap(intent)
         setContent {
-            IsaipettiTheme {
+            val mode by app.appearance.mode.collectAsStateWithLifecycle()
+            val wallpaper by app.appearance.wallpaper.collectAsStateWithLifecycle()
+            // Status and navigation bar icons follow the app's light/dark choice, not just the phone's.
+            val dark = isAppInDarkTheme(mode)
+            LaunchedEffect(dark) {
+                val style = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            IsaipettiTheme(mode, wallpaper) {
                 AppRoot(app)
             }
         }

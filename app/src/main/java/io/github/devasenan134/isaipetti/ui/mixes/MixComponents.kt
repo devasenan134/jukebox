@@ -1,5 +1,7 @@
 package io.github.devasenan134.isaipetti.ui.mixes
 
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.ColorUtils
 import io.github.devasenan134.isaipetti.ui.components.UiSize
 import android.content.Context
 import android.widget.Toast
@@ -52,20 +54,34 @@ import java.time.format.DateTimeFormatter
 fun Mix.tint(): Color = runCatching { Color(android.graphics.Color.parseColor(color)) }.getOrDefault(Color(0xFF7A3E9D))
 
 /**
- * A mix's artwork, made on the phone like Spotify's: its colour, the covers of its first movies
- * (or the composer's or singer's picture, in a circle), the "Isai Pettai" mark and the mix's name.
+ * A mix's artwork, made on the phone. Three looks:
+ * - made for you (Daily Mixes, Discover Weekly...): a colour gradient, like cover art;
+ * - "This Is" and stations: the composer's, singer's or song's picture on a soft pastel;
+ * - everything else (moods, decades, charts): the covers of its first movies.
+ * All carry the "Isai Pettai" mark and the mix's name.
  */
 @Composable
 fun MixCover(mix: Mix, modifier: Modifier = Modifier, size: Dp = 150.dp) {
     val big = size > 120.dp
     val tiny = size < 80.dp // a thumbnail: just the artwork
-    Box(modifier.size(size).clip(RoundedCornerShape(size / 18)).background(mix.tint())) {
+    val tint = mix.tint()
+    val pastel = mix.round || mix.endless
+    val gradient = !pastel && mix.personal
+    val textColor = if (pastel) Color(0xFF1F1B24) else Color.White
+    val background = when {
+        pastel -> Modifier.background(pastelOf(tint))
+        gradient -> Modifier.background(Brush.linearGradient(listOf(glowOf(tint), tint, partnerOf(tint))))
+        else -> Modifier.background(tint)
+    }
+    Box(modifier.size(size).clip(RoundedCornerShape(size / 18)).then(background)) {
         when {
-            mix.round -> Cover(
+            pastel -> Cover(
                 mix.covers.firstOrNull(),
-                Modifier.align(Alignment.Center).padding(bottom = size / 8).size(size * 0.62f).clip(CircleShape),
-                size = 300, corner = size,
+                Modifier.align(Alignment.Center).padding(bottom = if (tiny) 0.dp else size / 6)
+                    .size(size * if (tiny) 0.72f else 0.56f).clip(if (mix.round) CircleShape else RoundedCornerShape(size / 16)),
+                size = 300, corner = if (mix.round) size else size / 16,
             )
+            gradient -> Unit
             mix.covers.size >= 4 -> Column(Modifier.fillMaxSize()) {
                 mix.covers.take(4).chunked(2).forEach { row ->
                     Row(Modifier.weight(1f)) { row.forEach { Cover(it, Modifier.weight(1f).fillMaxSize(), size = 200, corner = 0.dp) } }
@@ -73,32 +89,46 @@ fun MixCover(mix: Mix, modifier: Modifier = Modifier, size: Dp = 150.dp) {
             }
             mix.covers.isNotEmpty() -> Cover(mix.covers.first(), Modifier.fillMaxSize(), size = 400, corner = 0.dp)
         }
-        // Darken towards the bottom so the name stays readable on any cover.
-        if (!mix.round) {
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to mix.tint().copy(alpha = 0.95f))))
+        // Covers get darker towards the bottom so the name stays readable on any picture.
+        if (!pastel && !gradient) {
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to tint.copy(alpha = 0.95f))))
         }
         if (tiny) return@Box
         Row(Modifier.align(Alignment.TopStart).padding(size / 18), verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 painterResource(if (mix.endless) R.drawable.ic_radio else R.drawable.ic_music_note), contentDescription = null,
-                tint = Color.White, modifier = Modifier.size(if (big) 14.dp else 10.dp),
+                tint = textColor, modifier = Modifier.size(if (big) 14.dp else 10.dp),
             )
             Text(
-                "Isai Pettai", color = Color.White, fontWeight = FontWeight.Bold,
+                "Isai Pettai", color = textColor, fontWeight = FontWeight.Bold,
                 fontSize = if (big) 12.sp else 9.sp, modifier = Modifier.padding(start = 3.dp),
             )
         }
         Text(
             mix.title,
-            color = Color.White,
+            color = textColor,
             fontWeight = FontWeight.ExtraBold,
-            fontSize = if (big) 22.sp else 15.sp,
-            lineHeight = if (big) 24.sp else 16.sp,
+            fontSize = if (big) (if (gradient) 26.sp else 20.sp) else 14.sp,
+            lineHeight = if (big) (if (gradient) 28.sp else 22.sp) else 15.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = size / 14, vertical = size / 16),
         )
     }
+}
+
+/** A soft pastel of [color]: the same hue, pale and gentle. */
+private fun pastelOf(color: Color): Color = withHsl(color) { it[1] = 0.55f; it[2] = 0.84f }
+
+/** For gradients: a brighter, warmer neighbour of [color] and a deeper, cooler one. */
+private fun glowOf(color: Color): Color = withHsl(color) { it[0] = (it[0] + 330f) % 360f; it[1] = maxOf(it[1], 0.6f); it[2] = 0.58f }
+private fun partnerOf(color: Color): Color = withHsl(color) { it[0] = (it[0] + 40f) % 360f; it[1] = maxOf(it[1], 0.5f); it[2] = 0.28f }
+
+private fun withHsl(color: Color, change: (FloatArray) -> Unit): Color {
+    val hsl = FloatArray(3)
+    ColorUtils.colorToHSL(color.toArgb(), hsl)
+    change(hsl)
+    return Color(ColorUtils.HSLToColor(hsl))
 }
 
 /** A tile on Home: the artwork, then the mix's one-line description. */
