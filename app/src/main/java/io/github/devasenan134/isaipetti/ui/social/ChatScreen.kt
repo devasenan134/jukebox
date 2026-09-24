@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.clickable
 import io.github.devasenan134.isaipetti.ui.player.QueueSheet
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -169,8 +170,16 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     }
     var showQueue by remember { mutableStateOf(false) }
     if (showQueue) QueueSheet(onDismiss = { showQueue = false })
+    // A group's members: who's in the jam, online, offline (and adding/removing for its owner).
+    var showMembers by remember { mutableStateOf(false) }
+    if (showMembers && conversation?.isGroup == true) GroupInfoSheet(conversation, onDismiss = { showMembers = false })
     Column(Modifier.imePadding()) {
-        ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back, note = jamNote) {
+        ScreenHeader(
+            conversation?.title(me) ?: "Chat",
+            onBack = nav.back,
+            note = jamNote,
+            onTitleClick = if (conversation?.isGroup == true) ({ showMembers = true }) else null,
+        ) {
             // The jam's queue: everyone in it can look, the host can also move and remove songs.
             if (inSession) {
                 IconButton(onClick = { showQueue = true }) {
@@ -206,7 +215,12 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 }
             }
             // The group's ⋮ menu is always the rightmost button.
-            if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, hasPicture = conversation.picture != null, onGone = nav.back)
+            if (conversation?.isGroup == true) {
+                GroupMenu(
+                    conversation.title(me), conversation.createdBy == me, conversationId,
+                    hasPicture = conversation.picture != null, onGone = nav.back, onShowMembers = { showMembers = true },
+                )
+            }
         }
         val subtitle = when {
             conversation == null -> null
@@ -222,7 +236,9 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 color = if (otherFriend?.nowPlaying != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 60.dp, end = 16.dp, bottom = 4.dp),
+                // In a group this line lists the members, so tapping it opens them too.
+                modifier = Modifier.padding(start = 60.dp, end = 16.dp, bottom = 4.dp)
+                    .then(if (conversation?.isGroup == true) Modifier.clickable { showMembers = true } else Modifier),
             )
         }
 
@@ -372,7 +388,7 @@ private fun SystemLine(text: String) {
 
 /** The ⋮ menu of a group chat: leave it, or (for its owner) delete it for everyone. */
 @Composable
-private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, hasPicture: Boolean, onGone: () -> Unit) {
+private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, hasPicture: Boolean, onGone: () -> Unit, onShowMembers: () -> Unit) {
     val social = LocalApp.current.social
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -393,6 +409,7 @@ private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, has
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text(if (isOwner) "Members · add or remove" else "Members") }, onClick = { open = false; onShowMembers() })
             DropdownMenuItem(text = { Text("Change group photo") }, onClick = { open = false; picker.open() })
             DropdownMenuItem(text = { Text("Leave group") }, onClick = { open = false; confirm = "leave" })
             if (isOwner) {

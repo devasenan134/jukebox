@@ -17,6 +17,10 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -106,7 +110,9 @@ fun Avatar(
     user: SocialUser? = null,
 ) {
     val picture = user?.let { LocalApp.current.social.api.avatarUrl(it) }
-    Box {
+    var enlarged by remember { mutableStateOf(false) }
+    if (enlarged && picture != null) PictureViewer(picture, name, onDismiss = { enlarged = false })
+    Box(Modifier.onLongPress(enabled = picture != null) { enlarged = true }) {
         Box(
             Modifier.size(size).clip(CircleShape).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size]),
             contentAlignment = Alignment.Center,
@@ -286,12 +292,49 @@ private fun ShareTarget(
 @Composable
 fun GroupAvatar(key: String, size: Dp = 44.dp, conversation: Conversation? = null) {
     val picture = conversation?.let { LocalApp.current.social.api.groupPictureUrl(it) }
+    var enlarged by remember { mutableStateOf(false) }
+    if (enlarged && picture != null) PictureViewer(picture, conversation?.name.orEmpty(), onDismiss = { enlarged = false })
     Box(
-        Modifier.size(size).clip(CircleShape).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size]),
+        Modifier.onLongPress(enabled = picture != null) { enlarged = true }
+            .size(size).clip(CircleShape).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size]),
         contentAlignment = Alignment.Center,
     ) {
         Icon(painterResource(R.drawable.ic_group), contentDescription = "Group", tint = Color(0xFF1B1726), modifier = Modifier.size(size * 0.55f))
         if (picture != null) FriendsServerPicture(picture, Modifier.matchParentSize())
+    }
+}
+
+/**
+ * Calls [action] on a long press, without taking ordinary taps away from whatever the picture sits
+ * in (a friend's row still opens the chat when tapped).
+ */
+private fun Modifier.onLongPress(enabled: Boolean, action: () -> Unit): Modifier = if (!enabled) this else pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val long = awaitLongPressOrCancellation(down.id) ?: return@awaitEachGesture
+        action()
+        // The press became a long press: swallow the rest of it, so letting go isn't also a tap.
+        long.consume()
+        do {
+            val event = awaitPointerEvent()
+            event.changes.forEach { it.consume() }
+        } while (event.changes.any { it.pressed })
+    }
+}
+
+/** A profile or group picture, large, over everything else. Tap anywhere to close it. */
+@Composable
+private fun PictureViewer(url: String, name: String, onDismiss: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clickable(onClick = onDismiss),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            FriendsServerPicture(url, Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)))
+            if (name.isNotBlank()) {
+                Text(name, style = MaterialTheme.typography.titleLarge, color = Color.White, modifier = Modifier.padding(top = 12.dp))
+            }
+        }
     }
 }
 

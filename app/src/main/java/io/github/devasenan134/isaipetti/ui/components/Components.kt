@@ -333,6 +333,8 @@ fun ScreenHeader(
     titleColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
     /** A short status between the title and the actions, like "Jamming with Alice". */
     note: String? = null,
+    /** Makes the title tappable, e.g. a group chat's name opens its members. */
+    onTitleClick: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {},
 ) {
     Row(
@@ -350,7 +352,8 @@ fun ScreenHeader(
             overflow = TextOverflow.Ellipsis,
             // With a note, the title takes only its own width (capped) and the note fills the rest, so
             // the actions stay at the right edge. (A non-filling weight would leave a gap after them.)
-            modifier = if (note == null) Modifier.weight(1f) else Modifier.widthIn(max = 160.dp),
+            modifier = (if (note == null) Modifier.weight(1f) else Modifier.widthIn(max = 160.dp))
+                .then(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier),
         )
         if (note != null) {
             Text(

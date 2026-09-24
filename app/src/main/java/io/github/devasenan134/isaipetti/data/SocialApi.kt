@@ -122,6 +122,13 @@ class SocialApi(
     suspend fun sendMessage(conversationId: Long, body: String, song: SongRef? = null): ChatMessage =
         post("/conversations/$conversationId/messages", MessageBody(body, song))
     suspend fun deleteConversation(conversationId: Long) = send<Unit>("DELETE", "/conversations/$conversationId", null)
+    /** The group's owner adds friends to it. */
+    suspend fun addMembers(conversationId: Long, userIds: List<Long>): Conversation = post("/conversations/$conversationId/members", UserIdsBody(userIds))
+    /** The group's owner takes someone out of it. */
+    suspend fun removeMember(conversationId: Long, userId: Long): Conversation =
+        send("DELETE", "/conversations/$conversationId/members/$userId", null, Conversation.serializer())
+    /** Which of a chat's members have the app open right now. */
+    suspend fun onlineMembers(conversationId: Long): List<Long> = get("/conversations/$conversationId/online")
     suspend fun leaveGroup(conversationId: Long) = post<Unit, Unit>("/conversations/$conversationId/leave", Unit)
     suspend fun deleteForEveryone(conversationId: Long) = send<Unit>("DELETE", "/conversations/$conversationId/everyone", null)
     suspend fun markRead(conversationId: Long, messageId: Long) =
@@ -177,6 +184,7 @@ class SocialApi(
     @Serializable private data class UsernameBody(val username: String)
     @Serializable private data class UserIdBody(val userId: Long)
     @Serializable private data class GroupBody(val name: String, val memberIds: List<Long>)
+    @Serializable private data class UserIdsBody(val userIds: List<Long>)
     @Serializable private data class MessageBody(val body: String, val song: SongRef?)
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)
