@@ -43,6 +43,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -328,8 +330,13 @@ fun clipOptions(song: SongRef): SongRef {
 
 /**
  * Pick the start and end of a clip on the song's waveform, and preview it. A small pointer above
- * the waveform can be dragged anywhere in the song ("Start here" and "End here" use it); while the
- * preview plays, the pointer follows it.
+ * the waveform shows where the song is and can be dragged anywhere in it ("Start here" and
+ * "End here" use it). Preview plays from the start of the part and stops at its end; the play
+ * button carries on from the pointer.
+ *
+ * Sharing the song that's playing right now (outside listen-together) uses the real player, so the
+ * pointer follows it live. Any other song, or any song while listening together, plays on a
+ * separate preview player, so the queue and the session are left alone.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -338,51 +345,68 @@ private fun ClipPicker(song: SongRef, durationMs: Long, clip: LongRange, onChang
     val player = app.player
     val now by player.nowPlaying.collectAsStateWithLifecycle()
     val joined by app.social.listen.joined.collectAsStateWithLifecycle()
-    // In a listen-together session the music is everyone's: previewing over it would clash, so it waits for a pause.
+    val isCurrent = now.songId == song.id
+    // In a listen-together session the music is everyone's: playing over it would clash, so it waits for a pause.
     val sessionPlaying = joined != null && now.isPlaying
+    val useMain = isCurrent && joined == null
 
-    // The preview plays on its own player, so the queue (and a listen-together session) is left alone.
     val preview = rememberPreviewPlayer(song.id)
-    var previewing by remember { mutableStateOf(false) }
-    var previewEnd by remember { mutableLongStateOf(0L) }
-    // Your own music, paused for the preview, plays again after it.
-    var resumeAfter by remember { mutableStateOf(false) }
-    var pointer by remember(song.id) { mutableLongStateOf(clip.first) }
-    var draggingPointer by remember { mutableStateOf(false) }
+    var previewPlaying by remember { mutableStateOf(false) }
+    // Your own music (another song), paused while you listen here, plays again when the sheet closes.
+    var resumeOnClose by remember { mutableStateOf(false) }
 
-    fun stopPreview() {
-        preview.pause()
-        previewing = false
-        if (resumeAfter) {
-            resumeAfter = false
-            if (!player.nowPlaying.value.isPlaying) player.togglePlay()
-        }
+    val playing = if (useMain) now.isPlaying else previewPlaying
+    fun position(): Long = if (useMain) player.positionMs() else preview.currentPosition
+    fun seek(to: Long) = if (useMain) player.seekTo(to) else preview.seekTo(to)
+    fun pause() {
+        if (useMain) { if (player.nowPlaying.value.isPlaying) player.togglePlay() } else { preview.pause(); previewPlaying = false }
     }
-
-    // Plays to the end of the chosen part, or to the end of the song when starting after it.
-    fun playPreview(from: Long) {
-        if (!previewing && joined == null && player.nowPlaying.value.isPlaying) {
+    fun play() {
+        if (useMain) { if (!player.nowPlaying.value.isPlaying) player.togglePlay(); return }
+        if (joined == null && player.nowPlaying.value.isPlaying) {
             player.togglePlay()
-            resumeAfter = true
+            resumeOnClose = true
         }
-        previewEnd = if (from < clip.last) clip.last else durationMs
         if (preview.playbackState == Player.STATE_IDLE) preview.prepare()
-        preview.seekTo(from)
         preview.play()
-        previewing = true
+        previewPlaying = true
     }
 
-    LaunchedEffect(previewing) {
-        while (previewing) {
-            val at = preview.currentPosition
-            if (!draggingPointer) pointer = at.coerceAtMost(durationMs)
-            if (at >= previewEnd || preview.playbackState == Player.STATE_ENDED) stopPreview()
+    // Start where the song is, if it's the one playing; otherwise at the start of the part.
+    var pointer by remember(song.id) { mutableLongStateOf(if (isCurrent) player.positionMs().coerceIn(0, durationMs) else clip.first) }
+    var draggingPointer by remember { mutableStateOf(false) }
+    // Set while a preview plays: where it stops.
+    var stopAt by remember { mutableStateOf<Long?>(null) }
+
+    // Move the pointer with whatever is playing, and stop a preview at the end of the part.
+    LaunchedEffect(useMain, isCurrent) {
+        while (true) {
+            val following = when {
+                useMain || previewPlaying -> true
+                else -> isCurrent && player.nowPlaying.value.isPlaying // listening together: show the session's place
+            }
+            if (following && !draggingPointer) {
+                val at = (if (useMain || previewPlaying) position() else player.positionMs()).coerceIn(0, durationMs)
+                val end = stopAt
+                if (end != null && at >= end) {
+                    pause()
+                    stopAt = null
+                    seek(end)
+                    pointer = end
+                } else {
+                    pointer = at
+                }
+            }
+            if (!useMain && previewPlaying && preview.playbackState == Player.STATE_ENDED) {
+                previewPlaying = false
+                stopAt = null
+            }
             delay(50)
         }
     }
-    LaunchedEffect(sessionPlaying) { if (sessionPlaying && previewing) stopPreview() }
+    LaunchedEffect(sessionPlaying) { if (sessionPlaying && previewPlaying) { preview.pause(); previewPlaying = false } }
     DisposableEffect(Unit) {
-        onDispose { if (resumeAfter && !player.nowPlaying.value.isPlaying) player.togglePlay() }
+        onDispose { if (resumeOnClose && !player.nowPlaying.value.isPlaying) player.togglePlay() }
     }
 
     // The song's waveform is the slider's track, like picking a part of a song on Instagram.
@@ -399,7 +423,9 @@ private fun ClipPicker(song: SongRef, durationMs: Long, clip: LongRange, onChang
             },
             onRelease = {
                 draggingPointer = false
-                if (previewing) playPreview(pointer)
+                seek(pointer)
+                // Dragged past the end of the part: a preview just keeps playing.
+                stopAt?.let { if (pointer >= it) stopAt = null }
             },
         )
         RangeSlider(
@@ -433,22 +459,52 @@ private fun ClipPicker(song: SongRef, durationMs: Long, clip: LongRange, onChang
             )
             Text(clockTime(clip.last), style = MaterialTheme.typography.bodySmall)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+        val tight = PaddingValues(horizontal = 10.dp)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        ) {
+            // Jump to the start of the part and play it; it stops at the end of the part.
             OutlinedButton(
-                onClick = { if (previewing) stopPreview() else playPreview(clip.first) },
-                enabled = previewing || !sessionPlaying,
+                onClick = {
+                    stopAt = clip.last
+                    seek(clip.first)
+                    pointer = clip.first
+                    play()
+                },
+                enabled = !sessionPlaying,
+                contentPadding = PaddingValues(horizontal = 12.dp),
             ) {
-                Icon(painterResource(if (previewing) R.drawable.ic_pause else R.drawable.ic_play), contentDescription = null, Modifier.size(18.dp))
-                Text(if (previewing) "Stop" else "Preview", Modifier.padding(start = 6.dp))
+                Icon(painterResource(R.drawable.ic_play), contentDescription = null, Modifier.size(18.dp))
+                Text("Preview", Modifier.padding(start = 6.dp))
             }
             TextButton(onClick = {
                 val at = pointer / 1000 * 1000
                 if (at + 1_000 <= durationMs) onChange(at..clip.last.coerceAtLeast(at + 1_000).coerceAtMost(durationMs))
-            }) { Text("Start here") }
+            }, contentPadding = tight) { Text("Start here") }
             TextButton(onClick = {
                 val at = pointer / 1000 * 1000
                 if (at >= 1_000) onChange(clip.first.coerceAtMost(at - 1_000)..at)
-            }) { Text("End here") }
+            }, contentPadding = tight) { Text("End here") }
+            Box(Modifier.weight(1f))
+            // Play on from the pointer (past the end of the part too), or pause.
+            OutlinedIconButton(
+                onClick = {
+                    stopAt = null
+                    if (playing) pause() else {
+                        if (!useMain) preview.seekTo(pointer)
+                        play()
+                    }
+                },
+                enabled = playing || !sessionPlaying,
+            ) {
+                Icon(
+                    painterResource(if (playing) R.drawable.ic_pause else R.drawable.ic_play),
+                    contentDescription = if (playing) "Pause" else "Play",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
         if (sessionPlaying) {
             Text(
@@ -469,7 +525,7 @@ private fun rememberPreviewPlayer(songId: String): ExoPlayer {
         ExoPlayer.Builder(context)
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
-                /* handleAudioFocus = */ false, // the preview pauses your music itself, and plays it again after
+                /* handleAudioFocus = */ false, // the clip picker pauses your music itself, and plays it again after
             )
             .build()
             .apply { setMediaItem(MediaItem.fromUri(api.streamUrl(songId))) }
