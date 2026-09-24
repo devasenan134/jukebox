@@ -66,11 +66,14 @@ import coil3.compose.AsyncImage
 /** Sizes shared by every screen, close to Spotify's on a phone. */
 object UiSize {
     /** Width of a tile in a sideways row (Home, Search), including its padding. */
-    val Tile = 172.dp
+    val Tile = 204.dp
     /** Grids (movies, playlists, Your Library): columns at least this wide, so a phone shows two. */
     val GridCell = 164.dp
     /** Pictures in list rows (Your Library, search results for people). */
     val ListThumb = 64.dp
+    /** Your Library is a list of many things, so it's more compact: pictures in its rows, and its grid cells (three across). */
+    val LibraryThumb = 52.dp
+    val LibraryGridCell = 104.dp
     /** Covers in song rows. */
     val SongThumb = 50.dp
     /** The big picture at the top of a movie, playlist or mix page. */

@@ -46,9 +46,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
- * "Take a photo" or "Choose from your photos" (and optionally "Remove"), for profile pictures and
- * playlist covers. The picture is cropped to a square from its middle and made small before
- * [onPicked] gets it as a JPEG. Show it with [PhotoPicker.open].
+ * "Take a photo" or "Choose from your photos" (and optionally "Remove"), for profile pictures, group
+ * photos and playlist covers. Then the photo opens in [PhotoCropper] to frame it, and [onPicked] gets
+ * the square as a small JPEG. Show it with [PhotoPicker.open].
  */
 class PhotoPicker internal constructor(private val show: () -> Unit) {
     fun open() = show()
@@ -58,6 +58,8 @@ class PhotoPicker internal constructor(private val show: () -> Unit) {
 @Composable
 fun rememberPhotoPicker(
     title: String,
+    /** Pictures shown round (people, groups) get a round guide when cropping. */
+    round: Boolean = false,
     /** Shown as "Remove …" when set (e.g. there's a picture now). */
     onRemove: (() -> Unit)? = null,
     onPicked: suspend (ByteArray) -> Unit,
@@ -65,13 +67,27 @@ fun rememberPhotoPicker(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var sheetOpen by remember { mutableStateOf(false) }
+    // The photo being framed, once it's loaded.
+    var cropping by remember { mutableStateOf<Bitmap?>(null) }
 
     fun use(uri: Uri?) {
         if (uri == null) return
         scope.launch {
-            val jpeg = withContext(Dispatchers.Default) { runCatching { squareJpeg(context, uri) }.getOrNull() }
-            if (jpeg == null) Toast.makeText(context, "Couldn't read that picture", Toast.LENGTH_SHORT).show()
-            else onPicked(jpeg)
+            val photo = withContext(Dispatchers.Default) { runCatching { loadUpright(context, uri) }.getOrNull() }
+            if (photo == null) Toast.makeText(context, "Couldn't read that picture", Toast.LENGTH_SHORT).show()
+            else cropping = photo
+        }
+    }
+
+    cropping?.let { photo ->
+        PhotoCropper(photo, round, onCancel = { cropping = null }) { square ->
+            cropping = null
+            scope.launch {
+                val jpeg = withContext(Dispatchers.Default) {
+                    ByteArrayOutputStream().use { out -> square.compress(Bitmap.CompressFormat.JPEG, 85, out); out.toByteArray() }
+                }
+                onPicked(jpeg)
+            }
         }
     }
 
@@ -121,26 +137,21 @@ private fun SheetOption(icon: Painter, label: String, onClick: () -> Unit) {
     }
 }
 
-/** The middle square of the picture, 640×640 at most, as a JPEG (about 60–120 KB). Upright, whatever the camera's rotation. */
-private fun squareJpeg(context: Context, uri: Uri): ByteArray {
-    val bitmap: Bitmap = if (Build.VERSION.SDK_INT >= 28) {
+/** The photo, upright whatever the camera's rotation, and no bigger than [MAX_LOAD] pixels on its long side. */
+private fun loadUpright(context: Context, uri: Uri): Bitmap {
+    if (Build.VERSION.SDK_INT >= 28) {
         // ImageDecoder turns the photo upright and can shrink it while reading, to save memory.
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
-            val shortSide = minOf(info.size.width, info.size.height)
-            if (shortSide > MAX_SIDE * 2) decoder.setTargetSampleSize(shortSide / (MAX_SIDE * 2))
+        return ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+            val longSide = maxOf(info.size.width, info.size.height)
+            if (longSide > MAX_LOAD) decoder.setTargetSampleSize(longSide / MAX_LOAD)
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
-    } else {
-        @Suppress("DEPRECATION")
-        uprightLegacy(context, uri, MediaStore.Images.Media.getBitmap(context.contentResolver, uri))
     }
-    val side = minOf(bitmap.width, bitmap.height)
-    val square = Bitmap.createBitmap(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side)
-    val scaled = if (side > MAX_SIDE) Bitmap.createScaledBitmap(square, MAX_SIDE, MAX_SIDE, true) else square
-    return ByteArrayOutputStream().use { out ->
-        scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
-        out.toByteArray()
-    }
+    @Suppress("DEPRECATION")
+    val full = MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+    val longSide = maxOf(full.width, full.height)
+    val small = if (longSide > MAX_LOAD) Bitmap.createScaledBitmap(full, full.width * MAX_LOAD / longSide, full.height * MAX_LOAD / longSide, true) else full
+    return uprightLegacy(context, uri, small)
 }
 
 /** Android 8 doesn't turn photos upright on its own; the photo's EXIF data says how. */
@@ -160,4 +171,5 @@ private fun uprightLegacy(context: Context, uri: Uri, bitmap: Bitmap): Bitmap {
     return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
 }
 
-private const val MAX_SIDE = 640
+/** Enough detail to zoom in a little when cropping, without using too much memory. */
+private const val MAX_LOAD = 2048

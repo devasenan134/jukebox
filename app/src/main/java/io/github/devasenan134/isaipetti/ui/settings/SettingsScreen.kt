@@ -75,6 +75,7 @@ fun SettingsScreen(nav: Nav) {
     }
     val picker = rememberPhotoPicker(
         title = "Profile picture",
+        round = true,
         onRemove = if (social?.user?.avatar != null) ({ scope.launch { savePicture({ app.social.api.removeAvatar() }, "Picture removed") } }) else null,
     ) { jpeg -> savePicture({ app.social.api.setAvatar(jpeg) }, "Profile picture updated") }
     val username = credentials?.username.orEmpty()

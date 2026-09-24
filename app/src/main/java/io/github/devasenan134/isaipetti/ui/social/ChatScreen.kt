@@ -328,6 +328,7 @@ private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, has
     }
     val picker = rememberPhotoPicker(
         title = "Group photo",
+        round = true,
         onRemove = if (hasPicture) ({ scope.launch { changePicture({ social.api.removeGroupPicture(conversationId) }, "Group photo removed") } }) else null,
     ) { jpeg -> changePicture({ social.api.setGroupPicture(conversationId, jpeg) }, "Group photo updated") }
 

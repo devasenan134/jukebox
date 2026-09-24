@@ -72,7 +72,8 @@ import io.github.devasenan134.isaipetti.ui.components.SongRow
 import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
 import io.github.devasenan134.isaipetti.ui.components.songCount
 
-private enum class LibraryFilter(val label: String) { All("All"), Movies("Movies"), Playlists("Playlists") }
+/** The sections of Your Library, in the order of the chips (swipe between them). */
+private enum class LibraryFilter(val label: String) { All("All"), Playlists("Playlists"), Mine("My Playlists"), Movies("Movies") }
 
 /** Your Library: liked songs, saved mixes, liked movies, liked playlists and playlists you created. */
 @Composable
@@ -137,10 +138,15 @@ fun LibraryScreen(nav: Nav) {
         HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }) { page ->
             val filter = LibraryFilter.entries[page]
             val madeFor = madeForName()
-            // Everything in one list, in this order: Liked songs, saved mixes, movies, playlists.
+            // "Playlists": mixes and playlists you saved from others. "My Playlists": Liked songs and the ones you made.
+            val mine = { p: Playlist -> p.owner == credentials?.username }
+            val showMine = filter == LibraryFilter.All || filter == LibraryFilter.Mine
+            val showSaved = filter == LibraryFilter.All || filter == LibraryFilter.Playlists
             val entries = buildList {
-                if (filter != LibraryFilter.Movies) {
+                if (showMine) {
                     add(LibraryEntry("liked", "Liked songs", "Playlist · ${songCount(likedSongs.size)}", nav.openLikedSongs) { LikedTile(it) })
+                }
+                if (showSaved) {
                     savedMixes.forEach { mix ->
                         val subtitle = listOfNotNull(
                             if (mix.personal && madeFor != null) "Made for $madeFor" else if (mix.endless) "Station" else "Mix",
@@ -150,43 +156,43 @@ fun LibraryScreen(nav: Nav) {
                         add(LibraryEntry("mix-${mix.id}", mix.title, subtitle, { nav.openMix(mix.id) }, round = mix.round) { MixCover(mix, size = it) })
                     }
                 }
-                if (filter != LibraryFilter.Playlists) {
+                playlists.filter { if (mine(it)) showMine else showSaved }.forEach { playlist ->
+                    val subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount)).joinToString(" · ")
+                    add(LibraryEntry("playlist-${playlist.id}", playlist.name, subtitle, { nav.openPlaylist(playlist.id) }) {
+                        Cover(playlist.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
+                    })
+                }
+                if (filter == LibraryFilter.All || filter == LibraryFilter.Movies) {
                     likedAlbums.forEach { album ->
                         add(LibraryEntry("album-${album.id}", album.name, listOfNotNull("Movie", album.artist).joinToString(" · "), { nav.openAlbum(album.id) }) {
                             Cover(album.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
                         })
                     }
                 }
-                if (filter != LibraryFilter.Movies) {
-                    playlists.forEach { playlist ->
-                        val subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount)).joinToString(" · ")
-                        add(LibraryEntry("playlist-${playlist.id}", playlist.name, subtitle, { nav.openPlaylist(playlist.id) }) {
-                            Cover(playlist.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
-                        })
-                    }
-                }
             }
-            val empty = when (filter) {
-                LibraryFilter.All -> likedSongs.isEmpty() && likedAlbums.isEmpty() && playlists.isEmpty() && savedMixes.isEmpty()
-                LibraryFilter.Movies -> likedAlbums.isEmpty()
-                LibraryFilter.Playlists -> likedSongs.isEmpty() && playlists.isEmpty() && savedMixes.isEmpty()
-            }
+            // Liked songs is always there in All and My Playlists, so "empty" means nothing else is.
+            val empty = entries.none { it.key != "liked" }
             val emptyHint: @Composable () -> Unit = {
                 Text(
-                    "Tap ♡ on songs, movies, playlists and mixes to keep them here.",
+                    when (filter) {
+                        LibraryFilter.Movies -> "Tap ♡ on a movie to keep it here."
+                        LibraryFilter.Playlists -> "Tap ♡ on playlists and mixes to keep them here."
+                        LibraryFilter.Mine -> "Playlists you make show up here. Tap + to make one."
+                        LibraryFilter.All -> "Tap ♡ on songs, movies, playlists and mixes to keep them here."
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),
                 )
             }
             if (grid) {
-                LazyVerticalGrid(columns = GridCells.Adaptive(UiSize.GridCell), contentPadding = PaddingValues(10.dp)) {
+                LazyVerticalGrid(columns = GridCells.Adaptive(UiSize.LibraryGridCell), contentPadding = PaddingValues(8.dp)) {
                     items(entries, key = { it.key }) { entry -> LibraryTile(entry) }
                     if (empty) item(span = { GridItemSpan(maxLineSpan) }) { emptyHint() }
                 }
             } else {
                 LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
                     items(entries, key = { it.key }) { entry ->
-                        LibraryRow(entry.title, entry.subtitle, leading = { entry.art(UiSize.ListThumb) }, onClick = entry.onClick)
+                        LibraryRow(entry.title, entry.subtitle, leading = { entry.art(UiSize.LibraryThumb) }, onClick = entry.onClick)
                     }
                     if (empty) item { emptyHint() }
                 }
