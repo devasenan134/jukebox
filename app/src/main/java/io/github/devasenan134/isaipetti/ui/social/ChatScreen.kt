@@ -154,10 +154,23 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val inSession = joined == conversationId
     // We started the jam here: its button ends it (for everyone).
     val myJam = inSession && jamOwner == me
+    // Who else is in the jam, for the line next to the chat's name.
+    val jammers = conversation?.members.orEmpty().filter { it.id in listeners && it.id != me }.map { it.displayName }
+    val jammerNames = when (jammers.size) {
+        0 -> ""
+        1 -> jammers[0]
+        else -> jammers.dropLast(1).joinToString() + " and " + jammers.last()
+    }
+    val jamNote = when {
+        listeners.isEmpty() -> null
+        inSession && jammers.isEmpty() -> "Your jam · waiting for others"
+        inSession -> "Jamming with $jammerNames"
+        else -> "$jammerNames ${if (jammers.size == 1) "is" else "are"} jamming"
+    }
     var showQueue by remember { mutableStateOf(false) }
     if (showQueue) QueueSheet(onDismiss = { showQueue = false })
     Column(Modifier.imePadding()) {
-        ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back) {
+        ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back, note = jamNote) {
             if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, hasPicture = conversation.picture != null, onGone = nav.back)
             // The jam's queue: everyone in it can look, the host can also move and remove songs.
             if (inSession) {
@@ -166,6 +179,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 }
             }
             if (conversation?.canMessage == true) {
+                // One button, four looks: a record to start a jam, the DJ deck while it's yours (tap to
+                // end it for everyone), headphones while you're in someone else's (tap to leave), and
+                // headphones with a plus when one is on that you haven't joined (tap to join).
+                val (icon, label) = when {
+                    myJam -> R.drawable.ic_jam_dj to "End jam"
+                    inSession -> R.drawable.ic_headphones to "Leave jam"
+                    listeners.isNotEmpty() -> R.drawable.ic_jam_join to "Join jam"
+                    else -> R.drawable.ic_jam to "Start a jam"
+                }
                 IconButton(onClick = {
                     when {
                         myJam -> {
@@ -178,14 +200,9 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     }
                 }) {
                     Icon(
-                        // Your own jam shows the record: tap it to end the jam.
-                        painterResource(if (myJam) R.drawable.ic_jam else R.drawable.ic_headphones),
-                        contentDescription = when {
-                            myJam -> "End jam"
-                            inSession -> "Stop listening together"
-                            else -> "Listen together"
-                        },
-                        tint = if (inSession) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        painterResource(icon),
+                        contentDescription = label,
+                        tint = if (listeners.isNotEmpty()) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                     )
                 }
             }
@@ -208,9 +225,6 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             )
         }
 
-        if (listeners.isNotEmpty() && conversation != null) {
-            ListenBar(conversation.members, listeners, me, inSession, isHost = myJam, onJoin = { listen.join(conversationId) }, onLeave = listen::leave)
-        }
 
         LazyColumn(
             state = listState,
@@ -339,36 +353,6 @@ private fun Bubble(
                     modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
                 )
             }
-        }
-    }
-}
-
-/** "Alice and Bob are listening together · Join", or "Listening together with Alice · Leave" once you're in. */
-@Composable
-private fun ListenBar(members: List<SocialUser>, listeners: List<Long>, me: Long?, inSession: Boolean, isHost: Boolean, onJoin: () -> Unit, onLeave: () -> Unit) {
-    val others = members.filter { it.id in listeners && it.id != me }.map { it.displayName }
-    val names = when (others.size) {
-        0 -> ""
-        1 -> others[0]
-        else -> others.dropLast(1).joinToString() + " and " + others.last()
-    }
-    val text = when {
-        inSession && others.isEmpty() -> "Listening together. Waiting for others to join"
-        inSession -> "Listening together with $names"
-        else -> "$names ${if (others.size == 1) "is" else "are"} listening together"
-    }
-    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(painterResource(R.drawable.ic_headphones), contentDescription = null, Modifier.size(18.dp))
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-            )
-            // The host leaving ends the jam for everyone, so say so.
-            if (inSession) TextButton(onClick = onLeave) { Text(if (isHost) "End jam" else "Leave") } else Button(onClick = onJoin) { Text("Join") }
         }
     }
 }

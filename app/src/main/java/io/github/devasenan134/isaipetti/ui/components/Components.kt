@@ -330,6 +330,8 @@ fun ScreenHeader(
     color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
     /** The title's colour; the normal text colour by default. */
     titleColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
+    /** A short status between the title and the actions, like "Jamming with Alice". */
+    note: String? = null,
     actions: @Composable () -> Unit = {},
 ) {
     Row(
@@ -345,8 +347,19 @@ fun ScreenHeader(
             color = titleColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            modifier = if (note == null) Modifier.weight(1f) else Modifier.weight(1f, fill = false),
         )
+        if (note != null) {
+            Text(
+                note,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.weight(1.3f).padding(start = 12.dp, end = 4.dp),
+            )
+        }
         actions()
     }
 }
