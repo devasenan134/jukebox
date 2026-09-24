@@ -16,6 +16,7 @@ import io.github.devasenan134.isaipetti.data.FriendRequests
 import io.github.devasenan134.isaipetti.data.ListenSessionEvent
 import io.github.devasenan134.isaipetti.data.ListenStateEvent
 import io.github.devasenan134.isaipetti.data.MessageEvent
+import io.github.devasenan134.isaipetti.data.MessageUpdatedEvent
 import io.github.devasenan134.isaipetti.data.NowPlayingUpdate
 import io.github.devasenan134.isaipetti.data.PresenceEvent
 import io.github.devasenan134.isaipetti.data.SessionStore
@@ -291,12 +292,35 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 _conversations.update { list -> list.filter { it.id != event.conversationId } }
                 _removed.emit(event.conversationId)
             }
+            // An answered song request: the open chat replaces the message (same id) with this one.
+            is MessageUpdatedEvent -> {
+                _messages.emit(event.message)
+                refreshConversations()
+            }
             is ListenSessionEvent -> listen.handle(event)
             is ListenStateEvent -> listen.handle(event)
             is FriendAddedEvent, is FriendRemovedEvent -> {
                 refreshFriends()
                 refreshRequests()
             }
+        }
+    }
+
+    /** The name of whoever controls the jam we're in, for messages like "Only Alice can…". */
+    fun jamOwnerName(): String? {
+        val id = listen.joined.value ?: return null
+        val owner = listen.owners.value[id] ?: return null
+        return _conversations.value.firstOrNull { it.id == id }?.members?.firstOrNull { it.id == owner }?.displayName
+    }
+
+    /** Asks the owner of the jam we're in to play [song]. Returns what to tell the user. */
+    suspend fun requestSong(song: SongRef): String {
+        val id = listen.joined.value ?: return "You're not listening together"
+        return try {
+            api.requestSong(id, song)
+            "Asked ${jamOwnerName() ?: "the host"} to play ${song.title}"
+        } catch (e: Exception) {
+            e.message ?: "Couldn't send the request"
         }
     }
 

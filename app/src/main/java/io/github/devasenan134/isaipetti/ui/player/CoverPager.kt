@@ -25,7 +25,7 @@ import coil3.compose.AsyncImage
  * (Next button, song ends) the pager slides to follow.
  */
 @Composable
-fun CoverPager(modifier: Modifier = Modifier) {
+fun CoverPager(modifier: Modifier = Modifier, swipeable: Boolean = true) {
     val player = LocalApp.current.player
     val queue by player.queue.collectAsStateWithLifecycle()
     val (entries, currentIndex) = queue
@@ -51,6 +51,7 @@ fun CoverPager(modifier: Modifier = Modifier) {
     }
 
     HorizontalPager(
+        userScrollEnabled = swipeable,
         state = pagerState,
         pageSpacing = 24.dp,
         key = { entries.getOrNull(it)?.index ?: it },

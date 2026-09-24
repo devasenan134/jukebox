@@ -1,5 +1,8 @@
 package io.github.devasenan134.isaipetti.ui.player
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -38,14 +41,21 @@ import kotlinx.coroutines.launch
 /** The small "now playing" bar above the bottom tabs. Tap it to open the full player. */
 @Composable
 fun MiniPlayer(onOpen: () -> Unit) {
-    val player = LocalApp.current.player
+    val app = LocalApp.current
+    val player = app.player
     val now by player.nowPlaying.collectAsStateWithLifecycle()
     if (now.songId == null) return
+    // In a jam, only its owner controls the music: listeners get a jam icon instead of the buttons.
+    val joined by app.social.listen.joined.collectAsStateWithLifecycle()
+    val owners by app.social.listen.owners.collectAsStateWithLifecycle()
+    val jamOwner = joined?.let { owners[it] }
+    val ownsJam = jamOwner != null && jamOwner == app.social.me?.id
+    val listening = jamOwner != null && !ownsJam
     val position by rememberPosition(now.songId, now.isPlaying, intervalMs = 500)
     val scope = rememberCoroutineScope()
     // How far the bar is dragged sideways. Swipe past the threshold to skip, then it springs back.
     val dragX = remember { Animatable(0f) }
-    val swipe = Modifier.pointerInput(Unit) {
+    val swipe = if (listening) Modifier else Modifier.pointerInput(Unit) {
         val threshold = 80.dp.toPx()
         detectHorizontalDragGestures(
             onDragEnd = {
@@ -93,16 +103,46 @@ fun MiniPlayer(onOpen: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                IconButton(onClick = player::togglePlay) {
-                    Icon(
-                        painterResource(if (now.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
-                        contentDescription = if (now.isPlaying) "Pause" else "Play",
-                    )
-                }
-                IconButton(onClick = player::next) {
-                    Icon(painterResource(R.drawable.ic_skip_next), contentDescription = "Next")
+                if (listening) {
+                    // Nothing to control: the jam's owner does. The icon opens the player.
+                    IconButton(onClick = onOpen) {
+                        Icon(
+                            painterResource(R.drawable.ic_jam),
+                            contentDescription = "Listening together",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                } else {
+                    if (ownsJam) JamSpinner(spinning = now.isPlaying)
+                    IconButton(onClick = player::togglePlay) {
+                        Icon(
+                            painterResource(if (now.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
+                            contentDescription = if (now.isPlaying) "Pause" else "Play",
+                        )
+                    }
+                    IconButton(onClick = player::next) {
+                        Icon(painterResource(R.drawable.ic_skip_next), contentDescription = "Next")
+                    }
                 }
             }
         }
     }
+}
+
+/** A small record that turns while your jam plays (you run it), and rests where it stopped when paused. */
+@Composable
+private fun JamSpinner(spinning: Boolean) {
+    val angle = remember { Animatable(0f) }
+    LaunchedEffect(spinning) {
+        while (spinning) {
+            angle.animateTo(angle.value + 360f, animationSpec = tween(durationMillis = 2_400, easing = LinearEasing))
+            angle.snapTo(angle.value % 360f)
+        }
+    }
+    Icon(
+        painterResource(R.drawable.ic_jam),
+        contentDescription = "You're running a jam",
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(end = 4.dp).size(22.dp).graphicsLayer { rotationZ = angle.value },
+    )
 }

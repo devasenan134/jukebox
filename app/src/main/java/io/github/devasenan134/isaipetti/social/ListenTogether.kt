@@ -15,8 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
 /**
- * Listen together: everyone in a chat's session hears the same music, and anyone in it can play,
- * pause, skip, seek or change the queue for everyone.
+ * Listen together (a "jam"): everyone in a chat's session hears the same music. Whoever started it
+ * owns it and is the only one who can play, pause, skip, seek or change the queue; the others can
+ * ask for a song with a request in the chat.
  *
  * This keeps track of the sessions (for the chat screens) and which one we're in. The playback
  * service does the actual syncing: it applies [remote] to the player and reports our own changes
@@ -34,6 +35,11 @@ class ListenTogether(private val send: (ClientEvent) -> Unit, private val me: ()
     /** Chat id -> who is listening together there. */
     val sessions: StateFlow<Map<Long, List<Long>>> = _sessions
 
+    private val _owners = MutableStateFlow<Map<Long, Long>>(emptyMap())
+
+    /** Chat id -> who controls the session there. */
+    val owners: StateFlow<Map<Long, Long>> = _owners
+
     private val _joined = MutableStateFlow<Long?>(null)
 
     /** The chat whose session we're in, if any. */
@@ -50,9 +56,17 @@ class ListenTogether(private val send: (ClientEvent) -> Unit, private val me: ()
     // Until the server confirms our join, session lists without us are from before it.
     private var confirmed = false
 
+    /** Whether we own the session we're in (false if we're not in one). */
+    fun isOwner(): Boolean = _joined.value?.let { _owners.value[it] == me() } ?: false
+
+    /** In someone else's session: the music follows them and our controls are off. */
+    fun isListener(): Boolean = _joined.value?.let { id -> _owners.value[id]?.let { it != me() } } ?: false
+
     /** Starts a session in a chat with what we're playing now (or joins the one already there). */
     fun start(conversationId: Long) {
         _joined.value = conversationId
+        // We own it unless someone else already started one there (the server's answer corrects this).
+        if (conversationId !in _owners.value) me()?.let { m -> _owners.update { it + (conversationId to m) } }
         confirmed = false
         send(ListenStart(conversationId, currentState()))
     }
@@ -76,20 +90,25 @@ class ListenTogether(private val send: (ClientEvent) -> Unit, private val me: ()
         _joined.value?.let { send(ListenUpdate(it, state)) }
     }
 
-    /** After reconnecting, get back into our session (or restart it with our music if it ended meanwhile). */
+    /**
+     * After reconnecting, get back into our session. The owner restarts it with their music if it
+     * ended meanwhile; a listener only rejoins (a session that ended stays ended).
+     */
     fun onConnected() {
         _joined.value?.let {
             confirmed = false
-            send(ListenStart(it, currentState()))
+            send(if (isOwner()) ListenStart(it, currentState()) else ListenJoin(it))
         }
     }
 
     fun onConversations(conversations: List<Conversation>) {
         _sessions.value = conversations.filter { it.listeners.isNotEmpty() }.associate { it.id to it.listeners }
+        _owners.value = conversations.mapNotNull { c -> c.listenOwner?.takeIf { c.listeners.isNotEmpty() }?.let { c.id to it } }.toMap()
     }
 
     fun handle(event: ListenSessionEvent) {
         _sessions.update { if (event.listeners.isEmpty()) it - event.conversationId else it + (event.conversationId to event.listeners) }
+        _owners.update { if (event.listeners.isEmpty() || event.owner == null) it - event.conversationId else it + (event.conversationId to event.owner) }
         if (event.conversationId == _joined.value && confirmed && me() !in event.listeners) {
             _joined.value = null
             _remote.value = null
