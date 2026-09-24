@@ -247,7 +247,7 @@ fun SearchScreen(nav: Nav) {
                         }
                     }
                     if (searchedArtists.isNotEmpty()) {
-                        item { SectionTitle("Your recent composers and artists") }
+                        item { SectionTitle("Your recent artists") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(searchedArtists, key = { "searched-artist-${it.id}" }) { artist ->

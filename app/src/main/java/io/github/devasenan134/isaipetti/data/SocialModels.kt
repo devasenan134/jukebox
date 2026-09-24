@@ -225,7 +225,7 @@ data class PersonHit(
             )
         ).joinToString(" · ")
 
-    /** As an artist, for "Your recent composers and artists"; lyricists and actors keep their roles. */
+    /** As an artist, for "Your recent artists"; lyricists and actors keep their roles. */
     fun toArtist() = Artist(
         id, name, coverArt = coverArt,
         roles = roles.map { when (it) { "composer" -> "albumartist"; "singer" -> "artist"; else -> it } },

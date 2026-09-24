@@ -194,7 +194,7 @@ fun ArtistScreen(id: String, nav: Nav) {
                             enabled = !shuffling,
                             onClick = {
                                 shuffling = true
-                                app.searches.picked(artist) // shows under "Your recent composers and artists"
+                                app.searches.picked(artist) // shows under "Your recent artists"
                                 app.activity.composer(artist)
                                 scope.launch {
                                     // Fetch every movie's songs in parallel, then shuffle them together.
