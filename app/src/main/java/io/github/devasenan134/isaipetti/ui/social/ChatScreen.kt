@@ -171,7 +171,6 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     if (showQueue) QueueSheet(onDismiss = { showQueue = false })
     Column(Modifier.imePadding()) {
         ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back, note = jamNote) {
-            if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, hasPicture = conversation.picture != null, onGone = nav.back)
             // The jam's queue: everyone in it can look, the host can also move and remove songs.
             if (inSession) {
                 IconButton(onClick = { showQueue = true }) {
@@ -206,6 +205,8 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     )
                 }
             }
+            // The group's ⋮ menu is always the rightmost button.
+            if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, hasPicture = conversation.picture != null, onGone = nav.back)
         }
         val subtitle = when {
             conversation == null -> null
