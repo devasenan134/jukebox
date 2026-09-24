@@ -38,6 +38,24 @@ class SocialApi(
     suspend fun logoutOthers() = post<Unit, Unit>("/auth/logout-others", Unit)
     suspend fun rename(displayName: String): SocialUser = send("PATCH", "/me", json.encodeToString(RenameBody.serializer(), RenameBody(displayName)), SocialUser.serializer())
 
+    /** Sets your profile picture (a JPEG the app already cropped and shrank). Returns you, with its new version. */
+    suspend fun setAvatar(jpeg: ByteArray): SocialUser = sendImage("PUT", "/me/avatar", jpeg, SocialUser.serializer())
+    suspend fun removeAvatar(): SocialUser = send("DELETE", "/me/avatar", null, SocialUser.serializer())
+
+    /** Where [user]'s profile picture is (needs the Authorization header from [authHeader]); null if they have none. */
+    fun avatarUrl(user: SocialUser): String? = user.avatar?.let { v -> baseUrl()?.let { "$it/users/${user.id}/avatar?v=$v" } }
+    fun authHeader(): String? = token()?.let { "Bearer $it" }
+
+    /** A group's photo; anyone in the group can change it. */
+    suspend fun setGroupPicture(conversationId: Long, jpeg: ByteArray): Conversation =
+        sendImage("PUT", "/conversations/$conversationId/picture", jpeg, Conversation.serializer())
+    suspend fun removeGroupPicture(conversationId: Long): Conversation = send("DELETE", "/conversations/$conversationId/picture", null, Conversation.serializer())
+    fun groupPictureUrl(c: Conversation): String? = c.picture?.let { v -> baseUrl()?.let { "$it/conversations/${c.id}/picture?v=$v" } }
+
+    /** A cover for a playlist you made; the friends server stores it in Navidrome. */
+    suspend fun setPlaylistCover(playlistId: String, jpeg: ByteArray) = sendImage<Unit>("PUT", "/playlists/${enc(playlistId)}/cover", jpeg, null)
+    suspend fun removePlaylistCover(playlistId: String) = send<Unit>("DELETE", "/playlists/${enc(playlistId)}/cover", null)
+
     suspend fun registerDevice(pushToken: String) = post<DeviceBody, Unit>("/devices", DeviceBody(pushToken))
     suspend fun unregisterDevice(pushToken: String) = post<DeviceBody, Unit>("/devices/remove", DeviceBody(pushToken))
 
@@ -67,6 +85,8 @@ class SocialApi(
 
     suspend fun createInvite(): Invite = post("/invites", Unit)
     suspend fun invites(): List<Invite> = get("/invites")
+    /** Deletes an unused invite: its code stops working. */
+    suspend fun deleteInvite(code: String) = send<Unit>("DELETE", "/invites/${enc(code)}", null)
 
     suspend fun friends(): List<Friend> = get("/friends")
     suspend fun friendRequests(): FriendRequests = get("/friends/requests")
@@ -105,17 +125,22 @@ class SocialApi(
     private suspend inline fun <reified B, reified T> post(path: String, body: B, authenticated: Boolean = true): T =
         send("POST", path, if (body is Unit) "" else json.encodeToString(serializer<B>(), body), serializer<T>(), authenticated)
 
+    /** Like [send], but the body is a picture instead of JSON. */
+    private suspend fun <T> sendImage(method: String, path: String, jpeg: ByteArray, responseSerializer: KSerializer<T>?): T =
+        send(method, path, null, responseSerializer, bytes = jpeg)
+
     private suspend fun <T> send(
         method: String,
         path: String,
         body: String?,
         responseSerializer: KSerializer<T>? = null,
         authenticated: Boolean = true,
+        bytes: ByteArray? = null,
     ): T = withContext(Dispatchers.IO) {
         val server = baseUrl() ?: throw SocialException("No friends server set. Add one when you log in")
         val builder = Request.Builder().url(server + path)
         if (authenticated) builder.header("Authorization", "Bearer ${token() ?: throw SocialException("Not connected to friends", 401)}")
-        builder.method(method, body?.toRequestBody("application/json".toMediaType()))
+        builder.method(method, bytes?.toRequestBody("image/jpeg".toMediaType()) ?: body?.toRequestBody("application/json".toMediaType()))
         http.newCall(builder.build()).execute().use { response ->
             val text = response.body.string()
             if (!response.isSuccessful) {

@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.social
 
+import io.github.devasenan134.isaipetti.ui.components.rememberPhotoPicker
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.text.style.TextAlign
@@ -132,7 +133,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val inSession = joined == conversationId
     Column(Modifier.imePadding()) {
         ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back) {
-            if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, onGone = nav.back)
+            if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, hasPicture = conversation.picture != null, onGone = nav.back)
             if (conversation?.canMessage == true) {
                 IconButton(onClick = {
                     when {
@@ -313,16 +314,27 @@ private fun SystemLine(text: String) {
 
 /** The ⋮ menu of a group chat: leave it, or (for its owner) delete it for everyone. */
 @Composable
-private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, onGone: () -> Unit) {
+private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, hasPicture: Boolean, onGone: () -> Unit) {
     val social = LocalApp.current.social
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) } // "leave" or "delete"
+    // Anyone in the group can change its photo; the chat shows who did.
+    suspend fun changePicture(change: suspend () -> Unit, done: String) {
+        runCatching { change() }
+            .onSuccess { social.refreshConversationsSoon(); Toast.makeText(context, done, Toast.LENGTH_SHORT).show() }
+            .onFailure { Toast.makeText(context, it.message ?: "Couldn't change the photo", Toast.LENGTH_SHORT).show() }
+    }
+    val picker = rememberPhotoPicker(
+        title = "Group photo",
+        onRemove = if (hasPicture) ({ scope.launch { changePicture({ social.api.removeGroupPicture(conversationId) }, "Group photo removed") } }) else null,
+    ) { jpeg -> changePicture({ social.api.setGroupPicture(conversationId, jpeg) }, "Group photo updated") }
 
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Change group photo") }, onClick = { open = false; picker.open() })
             DropdownMenuItem(text = { Text("Leave group") }, onClick = { open = false; confirm = "leave" })
             if (isOwner) {
                 DropdownMenuItem(

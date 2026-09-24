@@ -1,5 +1,13 @@
 package io.github.devasenan134.isaipetti.ui.social
 
+import io.github.devasenan134.isaipetti.data.Conversation
+import io.github.devasenan134.isaipetti.data.SocialUser
+import coil3.request.ImageRequest
+import coil3.network.httpHeaders
+import coil3.network.NetworkHeaders
+import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.clip
 import android.widget.Toast
 import androidx.compose.foundation.background
 import kotlinx.coroutines.delay
@@ -66,10 +74,18 @@ private val avatarColors = listOf(
 
 /** A coloured circle with the person's first letter, and a green dot when they're online. */
 @Composable
-fun Avatar(name: String, key: String, size: Dp = 44.dp, online: Boolean = false) {
+fun Avatar(
+    name: String,
+    key: String,
+    size: Dp = 44.dp,
+    online: Boolean = false,
+    /** Whose picture to show, if they set one; otherwise the first letter of [name] on a colour. */
+    user: SocialUser? = null,
+) {
+    val picture = user?.let { LocalApp.current.social.api.avatarUrl(it) }
     Box {
         Box(
-            Modifier.size(size).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size], CircleShape),
+            Modifier.size(size).clip(CircleShape).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size]),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -77,6 +93,7 @@ fun Avatar(name: String, key: String, size: Dp = 44.dp, online: Boolean = false)
                 color = Color(0xFF1B1726),
                 style = if (size > 40.dp) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleSmall,
             )
+            if (picture != null) FriendsServerPicture(picture, Modifier.matchParentSize())
         }
         if (online) {
             Box(
@@ -190,7 +207,7 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
                 items(groups, key = { "c${it.id}" }) { c ->
                     val title = c.title(me)
                     val others = c.members.filter { it.id != me }.map { it.displayName }
-                    ShareTarget(title, "c${c.id}", subtitle = others.joinToString(), group = true) { send(shared, title) { c.id } }
+                    ShareTarget(title, "c${c.id}", conversation = c, subtitle = others.joinToString(), group = true) { send(shared, title) { c.id } }
                 }
             }
             if (dms.isNotEmpty() || newPeople.isNotEmpty()) {
@@ -198,10 +215,10 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
                 items(dms, key = { "c${it.id}" }) { c ->
                     val title = c.title(me)
                     val other = c.members.firstOrNull { it.id != me }
-                    ShareTarget(title, other?.username ?: "c${c.id}", online = other?.id in online) { send(shared, title) { c.id } }
+                    ShareTarget(title, other?.username ?: "c${c.id}", user = other, online = other?.id in online) { send(shared, title) { c.id } }
                 }
                 items(newPeople, key = { "f${it.user.id}" }) { f ->
-                    ShareTarget(f.user.displayName, f.user.username, online = f.online) {
+                    ShareTarget(f.user.displayName, f.user.username, user = f.user, online = f.online) {
                         send(shared, f.user.displayName) { social.api.openDm(f.user.id).id }
                     }
                 }
@@ -214,6 +231,8 @@ fun ShareSongSheet(song: SongRef, onDismiss: () -> Unit) {
 private fun ShareTarget(
     title: String,
     key: String,
+    user: SocialUser? = null,
+    conversation: Conversation? = null,
     subtitle: String? = null,
     group: Boolean = false,
     online: Boolean = false,
@@ -223,7 +242,7 @@ private fun ShareTarget(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (group) GroupAvatar(key, size = 40.dp) else Avatar(title, key, size = 40.dp, online = online)
+        if (group) GroupAvatar(key, size = 40.dp, conversation = conversation) else Avatar(title, key, size = 40.dp, online = online, user = user)
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.takeIf { it.isNotBlank() }?.let {
@@ -235,13 +254,28 @@ private fun ShareTarget(
 
 /** A coloured circle with a group icon, so groups don't look like a person. */
 @Composable
-fun GroupAvatar(key: String, size: Dp = 44.dp) {
+fun GroupAvatar(key: String, size: Dp = 44.dp, conversation: Conversation? = null) {
+    val picture = conversation?.let { LocalApp.current.social.api.groupPictureUrl(it) }
     Box(
-        Modifier.size(size).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size], CircleShape),
+        Modifier.size(size).clip(CircleShape).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size]),
         contentAlignment = Alignment.Center,
     ) {
         Icon(painterResource(R.drawable.ic_group), contentDescription = "Group", tint = Color(0xFF1B1726), modifier = Modifier.size(size * 0.55f))
+        if (picture != null) FriendsServerPicture(picture, Modifier.matchParentSize())
     }
+}
+
+/** A picture kept on the friends server (it needs the login with the request). Its address changes with each new picture. */
+@Composable
+private fun FriendsServerPicture(url: String, modifier: Modifier) {
+    val context = LocalContext.current
+    val api = LocalApp.current.social.api
+    val request = remember(url) {
+        ImageRequest.Builder(context).data(url)
+            .httpHeaders(NetworkHeaders.Builder().apply { api.authHeader()?.let { set("Authorization", it) } }.build())
+            .build()
+    }
+    AsyncImage(request, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier)
 }
 
 /**

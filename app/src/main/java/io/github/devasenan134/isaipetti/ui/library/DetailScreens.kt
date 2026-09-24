@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -53,6 +54,9 @@ import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.SongRow
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
+import io.github.devasenan134.isaipetti.ui.components.rememberPageTint
+import io.github.devasenan134.isaipetti.ui.components.pageGradient
+import androidx.compose.foundation.background
 import io.github.devasenan134.isaipetti.ui.mixes.recommendedSongs
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -65,10 +69,12 @@ fun AlbumScreen(id: String, nav: Nav) {
     val app = LocalApp.current
     val loader = rememberLoader("album-$id") { app.api.album(id) }
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
+    val tint = rememberPageTint((loader.state as? Loadable.Ready)?.value?.coverArt)
     Column {
-        ScreenHeader("", onBack = nav.back)
+        ScreenHeader("", onBack = nav.back, color = tint)
         LoadableContent(loader) { album ->
             SongList(
+                tint = tint,
                 liked = likedAlbums.any { it.id == album.id },
                 onToggleLike = { app.likes.toggle(album) },
                 onPlay = { app.searches.picked(album); app.activity.movie(album) },
@@ -102,12 +108,15 @@ fun PlaylistScreen(id: String, nav: Nav) {
     val playlist = (loader.state as? Loadable.Ready)?.value
     // Only the person who made a playlist can change it (Navidrome checks this too).
     val mine = playlist != null && playlist.owner == username
+    val tint = rememberPageTint(playlist?.coverArt)
     Column {
-        ScreenHeader("", onBack = nav.back) {
+        ScreenHeader("", onBack = nav.back, color = tint) {
             if (mine) PlaylistOwnerMenu(playlist!!, onChanged = { loader.reload(quietly = true) }, onDeleted = nav.back)
         }
         LoadableContent(loader) { playlist ->
             SongList(
+                tint = tint,
+                ownPlaylist = if (mine) playlist.name else null,
                 liked = likedPlaylists.any { it.id == playlist.id },
                 onToggleLike = { app.likes.toggle(playlist) },
                 onPlay = { app.recentPlaylists.played(playlist); app.activity.playlist(playlist) },
@@ -159,9 +168,14 @@ fun ArtistScreen(id: String, nav: Nav) {
 
     Column {
         LoadableContent(loader) { artist ->
-            ScreenHeader(artist.name, onBack = nav.back)
+            val tint = rememberPageTint(artist.coverArt ?: artist.album.firstOrNull()?.coverArt)
+            ScreenHeader(artist.name, onBack = nav.back, color = tint)
             val albums = artist.album.sortedByDescending { it.year ?: 0 }
-            LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), contentPadding = PaddingValues(10.dp)) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(UiSize.GridCell),
+                contentPadding = PaddingValues(10.dp),
+                modifier = Modifier.background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to tint, 0.45f to MaterialTheme.colorScheme.background)),
+            ) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -225,13 +239,20 @@ internal fun SongList(
     nav: Nav,
     /** More below the songs, like recommendations. */
     footer: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
+    /** The page's colour, faded behind the header (see PageTint.kt). */
+    tint: androidx.compose.ui.graphics.Color? = null,
+    /** Set on a playlist you made (its name), so its songs' ✓ doesn't just say they're in it. */
+    ownPlaylist: String? = null,
 ) {
     val player = LocalApp.current.player
     val nowPlaying by player.nowPlaying.collectAsStateWithLifecycle()
     LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Cover(coverArt, Modifier.size(220.dp), size = 600, corner = 12.dp)
+            Column(
+                Modifier.fillMaxWidth().then(if (tint != null) Modifier.pageGradient(tint) else Modifier).padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Cover(coverArt, Modifier.size(UiSize.HeaderArt), size = 600, corner = 12.dp)
                 Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 16.dp))
                 if (subtitle.isNotEmpty()) {
                     val style = MaterialTheme.typography.bodyLarge
@@ -278,6 +299,7 @@ internal fun SongList(
                 showCover = showCovers,
                 onOpenAlbum = if (showCovers) nav.openAlbum else null,
                 onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
+                inOwnPlaylist = ownPlaylist,
             )
         }
         footer?.invoke(this)

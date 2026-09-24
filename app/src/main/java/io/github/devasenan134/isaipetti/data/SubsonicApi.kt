@@ -104,10 +104,22 @@ class SubsonicApi(
     }
 
     suspend fun playlists(): List<Playlist> =
-        get("getPlaylists").decode<Playlists>("playlists")?.playlist.orEmpty()
+        get("getPlaylists").decode<Playlists>("playlists")?.playlist.orEmpty().map { it.withFreshCover() }
 
     suspend fun playlist(id: String): Playlist =
-        get("getPlaylist", mapOf("id" to id)).decode<Playlist>("playlist") ?: throw SubsonicException("Playlist not found")
+        (get("getPlaylist", mapOf("id" to id)).decode<Playlist>("playlist") ?: throw SubsonicException("Playlist not found")).withFreshCover()
+
+    /**
+     * Navidrome keeps a playlist's cover id ("pl-<id>") the same when its picture changes, so phones would
+     * keep showing the old one. Adding when it last changed ("pl-<id>_<hex>", which Navidrome accepts)
+     * gives a new picture a new address.
+     */
+    private fun Playlist.withFreshCover(): Playlist {
+        val art = coverArt ?: return this
+        if (!art.startsWith("pl-") || '_' in art) return this
+        val version = changed?.let { runCatching { java.time.Instant.parse(it).epochSecond }.getOrNull() } ?: return this
+        return copy(coverArt = art + "_" + java.lang.Long.toHexString(version))
+    }
 
     suspend fun songDetails(id: String): SongDetails =
         get("getSong", mapOf("id" to id)).decode<SongDetails>("song") ?: throw SubsonicException("Song not found")

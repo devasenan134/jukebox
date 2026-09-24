@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -23,7 +24,7 @@ fun PlaylistsScreen(nav: Nav) {
     Column {
         ScreenHeader("Playlists", onBack = nav.back)
         LoadableContent(loader) { playlists ->
-            LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), contentPadding = PaddingValues(10.dp)) {
+            LazyVerticalGrid(columns = GridCells.Adaptive(UiSize.GridCell), contentPadding = PaddingValues(10.dp)) {
                 items(playlists, key = { it.id }) { playlist ->
                     PlaylistCard(playlist, onClick = { nav.openPlaylist(playlist.id) }, modifier = Modifier)
                 }

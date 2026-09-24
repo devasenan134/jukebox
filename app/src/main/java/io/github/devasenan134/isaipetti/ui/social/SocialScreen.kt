@@ -124,7 +124,7 @@ fun SocialScreen(nav: Nav) {
     }
 
     when (dialog) {
-        "invite" -> InviteDialog(onDismiss = { dialog = null })
+        "invite" -> InvitesDialog(onDismiss = { dialog = null })
         "add" -> AddFriendDialog(onDismiss = { dialog = null })
         "group" -> NewGroupDialog(friends, onDismiss = { dialog = null }, onCreated = {
             dialog = null
@@ -170,7 +170,7 @@ private fun ChatList(
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (c.isGroup) GroupAvatar("c${c.id}") else Avatar(title, other?.username ?: "", online = other?.id in onlineIds)
+                if (c.isGroup) GroupAvatar("c${c.id}", conversation = c) else Avatar(title, other?.username ?: "", online = other?.id in onlineIds, user = other)
                 Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                     Text(
                         title,
@@ -289,7 +289,7 @@ private fun PersonRow(
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Avatar(user.displayName, user.username, online = online)
+        Avatar(user.displayName, user.username, online = online, user = user)
         Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
             Text(user.displayName, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
@@ -311,57 +311,6 @@ private fun EmptyHint(text: String) {
         textAlign = TextAlign.Center,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
-    )
-}
-
-/** Creates a one-time code and offers to share it (WhatsApp, SMS, …). */
-@Composable
-private fun InviteDialog(onDismiss: () -> Unit) {
-    val app = LocalApp.current
-    val social = app.social
-    val context = LocalContext.current
-    var invite by remember { mutableStateOf<Invite?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) {
-        try {
-            invite = social.api.createInvite()
-        } catch (e: Exception) {
-            error = e.message
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Invite a friend") },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                when {
-                    error != null -> Text(error!!, color = MaterialTheme.colorScheme.error)
-                    invite == null -> CircularProgressIndicator()
-                    else -> {
-                        Text(invite!!.code, fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text(
-                            "Works once, for 7 days. They'll become your friend automatically when they sign up.",
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            val code = invite?.code
-            Button(enabled = code != null, onClick = {
-                // The app has no servers built in, so the invite says what to type.
-                val creds = app.session.credentials.value
-                val text = "Join me on Isaipetti! Install the app, tap \"Got an invite code? Sign up\" and enter:\n" +
-                    "Music server: ${creds?.server.orEmpty().removePrefix("https://")}\n" +
-                    "Friends server: ${creds?.socialServer.orEmpty().removePrefix("https://")}\n" +
-                    "Invite code: $code"
-                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share invite"))
-            }) { Text("Share") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
 

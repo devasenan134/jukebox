@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.mixes
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -71,7 +72,7 @@ private fun RecommendedSongs(playlist: Playlist, onAdded: () -> Unit) {
                 Modifier.fillMaxWidth().clickable { app.player.play(listOf(song)) }.padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Cover(song.coverArt, Modifier.size(44.dp), size = 100, corner = 4.dp)
+                Cover(song.coverArt, Modifier.size(UiSize.SongThumb), size = 150, corner = 4.dp)
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(song.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(

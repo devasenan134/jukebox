@@ -48,6 +48,8 @@ data class Mix(
     val updatedAt: Long = 0,
     /** A station: more songs are added as it plays. */
     val endless: Boolean = false,
+    /** Picked for your taste: shown as "Made for <your name>". */
+    val personal: Boolean = false,
     val songs: List<MixSong> = emptyList(),
 ) {
     /** What the player remembers a queue was started from. Stations keep growing while this is playing. */

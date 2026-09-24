@@ -6,7 +6,13 @@ import kotlinx.serialization.Serializable
 // These mirror the companion server's JSON (server/src/.../Models.kt and Hub.kt).
 
 @Serializable
-data class SocialUser(val id: Long, val username: String, val displayName: String)
+data class SocialUser(
+    val id: Long,
+    val username: String,
+    val displayName: String,
+    /** When their profile picture was set (its version), or null if they have none. */
+    val avatar: Long? = null,
+)
 
 /**
  * A song as shared between friends. Navidrome ids are the same for everyone, so anyone can play it.
@@ -76,6 +82,8 @@ data class Conversation(
     val listeners: List<Long> = emptyList(),
     /** The group's owner, the only one who can delete it for everyone. */
     val createdBy: Long? = null,
+    /** When the group's photo was set (its version), or null if it has none. */
+    val picture: Long? = null,
 ) {
     val isGroup get() = kind == "group"
 

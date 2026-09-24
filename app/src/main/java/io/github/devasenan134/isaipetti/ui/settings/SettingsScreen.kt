@@ -1,5 +1,15 @@
 package io.github.devasenan134.isaipetti.ui.settings
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import io.github.devasenan134.isaipetti.R
+import io.github.devasenan134.isaipetti.ui.components.rememberPhotoPicker
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -53,6 +63,20 @@ fun SettingsScreen(nav: Nav) {
     val social by app.session.social.collectAsStateWithLifecycle()
     var renaming by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // Profile picture: kept on the friends server, so friends see it too.
+    suspend fun savePicture(change: suspend () -> io.github.devasenan134.isaipetti.data.SocialUser, done: String) {
+        runCatching { change() }
+            .onSuccess { user ->
+                app.session.social.value?.let { app.session.saveSocial(io.github.devasenan134.isaipetti.data.SocialSession(it.token, user)) }
+                Toast.makeText(context, done, Toast.LENGTH_SHORT).show()
+            }
+            .onFailure { Toast.makeText(context, it.message ?: "Couldn't change your picture", Toast.LENGTH_SHORT).show() }
+    }
+    val picker = rememberPhotoPicker(
+        title = "Profile picture",
+        onRemove = if (social?.user?.avatar != null) ({ scope.launch { savePicture({ app.social.api.removeAvatar() }, "Picture removed") } }) else null,
+    ) { jpeg -> savePicture({ app.social.api.setAvatar(jpeg) }, "Profile picture updated") }
     val username = credentials?.username.orEmpty()
     val displayName = social?.user?.displayName ?: username
 
@@ -65,7 +89,18 @@ fun SettingsScreen(nav: Nav) {
             // Profile
             Card(Modifier.fillMaxWidth()) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(displayName, username, size = 56.dp)
+                    // Tap the picture to change it (needs the friends server, where it's kept).
+                    Box(Modifier.clip(CircleShape).clickable(enabled = social != null) { picker.open() }) {
+                        Avatar(displayName, username, size = 72.dp, user = social?.user)
+                        if (social != null) {
+                            Icon(
+                                painterResource(R.drawable.ic_camera), contentDescription = "Change profile picture",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.align(Alignment.BottomEnd).size(24.dp)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape).padding(4.dp),
+                            )
+                        }
+                    }
                     Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                         Text(displayName, style = MaterialTheme.typography.titleLarge)
                         Text("@$username", color = MaterialTheme.colorScheme.onSurfaceVariant)

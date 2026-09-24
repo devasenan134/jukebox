@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.home
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -98,7 +99,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.albumRow(title: Strin
             SectionTitle(title)
             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                 items(albums, key = { it.id }) { album ->
-                    AlbumCard(album, onClick = { nav.openAlbum(album.id) }, modifier = Modifier.width(140.dp))
+                    AlbumCard(album, onClick = { nav.openAlbum(album.id) }, modifier = Modifier.width(UiSize.Tile))
                 }
             }
         }
@@ -133,11 +134,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.recentRow(items: List
 private fun RecentTile(item: RecentActivity.Item, onClick: () -> Unit) {
     val round = item.kind == RecentActivity.Kind.Composer || item.kind == RecentActivity.Kind.Artist
     Column(
-        Modifier.width(140.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp),
+        Modifier.width(UiSize.Tile).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start,
     ) {
         when {
-            item.kind == RecentActivity.Kind.Liked -> LikedTile(128.dp)
+            item.kind == RecentActivity.Kind.Liked -> LikedTile(UiSize.Tile - 12.dp)
             round -> Cover(item.coverArt, Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape), size = 300, corner = 64.dp)
             else -> Cover(item.coverArt, Modifier.fillMaxWidth().aspectRatio(1f))
         }

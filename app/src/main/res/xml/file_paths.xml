@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Files the app shares with other apps: only downloaded updates, for Android's installer. -->
+<!-- Files the app shares with other apps: downloaded updates, for Android's installer, and the
+     file the camera app saves a new photo into (for profile pictures and playlist covers). -->
 <paths>
     <cache-path name="updates" path="updates/" />
+    <cache-path name="photos" path="photos/" />
 </paths>

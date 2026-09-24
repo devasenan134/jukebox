@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.mixes
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -40,6 +41,7 @@ import io.github.devasenan134.isaipetti.data.Mix
 import io.github.devasenan134.isaipetti.data.MixSection
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.Cover
+import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.SectionTitle
 import java.time.Instant
 import java.time.LocalDate
@@ -102,8 +104,8 @@ fun MixCover(mix: Mix, modifier: Modifier = Modifier, size: Dp = 150.dp) {
 /** A tile on Home: the artwork, then the mix's one-line description. */
 @Composable
 fun MixCard(mix: Mix, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.width(152.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
-        MixCover(mix, size = 140.dp)
+    Column(modifier.width(UiSize.Tile).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
+        MixCover(mix, size = UiSize.Tile - 12.dp)
         Text(
             mix.subtitle,
             style = MaterialTheme.typography.bodySmall,
@@ -121,13 +123,22 @@ fun LazyListScope.mixSections(sections: List<MixSection>, nav: Nav) {
         if (section.mixes.isEmpty()) continue
         item(key = "mixes-${section.id}") {
             Column {
-                SectionTitle(section.title)
+                // "Made for Devs", like Spotify's "Made For <name>".
+                val name = madeForName()
+                SectionTitle(if (section.id == "made-for-you" && name != null) "Made for $name" else section.title)
                 LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                     items(section.mixes, key = { it.id }) { mix -> MixCard(mix, onClick = { nav.openMix(mix.id) }) }
                 }
             }
         }
     }
+}
+
+/** Your name for "Made for …": your name on the friends server, or else your username. */
+@Composable
+fun madeForName(): String? {
+    val app = LocalApp.current
+    return app.social.me?.displayName?.takeIf { it.isNotBlank() } ?: app.session.credentials.value?.username
 }
 
 /** "Updated today", "Updated yesterday", "Updated 12 Sep". */

@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -127,7 +128,7 @@ fun AlbumsScreen(nav: Nav) {
             return@Column
         }
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(150.dp),
+            columns = GridCells.Adaptive(UiSize.GridCell),
             state = gridState,
             contentPadding = PaddingValues(10.dp),
         ) {

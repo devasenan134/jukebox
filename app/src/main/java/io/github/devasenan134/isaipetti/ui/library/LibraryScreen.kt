@@ -1,5 +1,16 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.material.icons.automirrored.filled.List
+import io.github.devasenan134.isaipetti.ui.mixes.madeForName
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.background
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +61,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.R
 import io.github.devasenan134.isaipetti.data.Playlist
 import io.github.devasenan134.isaipetti.ui.Nav
+import io.github.devasenan134.isaipetti.ui.components.rememberPageTint
+import io.github.devasenan134.isaipetti.ui.components.pageGradient
 import io.github.devasenan134.isaipetti.ui.mixes.MixCover
 import io.github.devasenan134.isaipetti.data.MIX_AUTHOR
 import io.github.devasenan134.isaipetti.ui.components.Cover
@@ -84,8 +97,19 @@ fun LibraryScreen(nav: Nav) {
     // Liked first (newest like first), then the rest of your own. Every playlist is under Search → Playlists.
     val playlists = likedPlaylists + ownPlaylists.filter { own -> likedPlaylists.none { it.id == own.id } }
 
+    // List or grid, remembered on this phone.
+    val prefs = remember { context.getSharedPreferences("library", android.content.Context.MODE_PRIVATE) }
+    var grid by remember { mutableStateOf(prefs.getBoolean("grid", false)) }
+
     Column {
         ScreenHeader("Your Library") {
+            IconButton(onClick = {
+                grid = !grid
+                prefs.edit().putBoolean("grid", grid).apply()
+            }) {
+                if (grid) Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Show as list")
+                else Icon(painterResource(R.drawable.ic_grid), contentDescription = "Show as grid")
+            }
             IconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, contentDescription = "New playlist") }
         }
         if (creating) {
@@ -98,71 +122,102 @@ fun LibraryScreen(nav: Nav) {
                 }
             }
         }
+        // Swipe sideways between All, Movies and Playlists, or tap a chip.
+        val pager = rememberPagerState(initialPage = filter.ordinal) { LibraryFilter.entries.size }
+        LaunchedEffect(pager.currentPage) { filter = LibraryFilter.entries[pager.currentPage] }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(LibraryFilter.entries) { f ->
-                FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
+                FilterChip(
+                    selected = pager.targetPage == f.ordinal,
+                    onClick = { scope.launch { pager.animateScrollToPage(f.ordinal) } },
+                    label = { Text(f.label) },
+                )
             }
         }
-        LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-            if (filter != LibraryFilter.Movies) {
-                item {
-                    LibraryRow(
-                        title = "Liked songs",
-                        subtitle = "Playlist · ${likedSongs.size} songs",
-                        leading = { LikedTile(56.dp) },
-                        onClick = nav.openLikedSongs,
-                    )
-                }
-            }
-            if (filter != LibraryFilter.Movies) {
-                items(savedMixes, key = { "mix-${it.id}" }) { mix ->
-                    LibraryRow(
-                        title = mix.title,
-                        subtitle = listOfNotNull(
-                            if (mix.endless) "Station" else "Mix",
+        HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }) { page ->
+            val filter = LibraryFilter.entries[page]
+            val madeFor = madeForName()
+            // Everything in one list, in this order: Liked songs, saved mixes, movies, playlists.
+            val entries = buildList {
+                if (filter != LibraryFilter.Movies) {
+                    add(LibraryEntry("liked", "Liked songs", "Playlist · ${songCount(likedSongs.size)}", nav.openLikedSongs) { LikedTile(it) })
+                    savedMixes.forEach { mix ->
+                        val subtitle = listOfNotNull(
+                            if (mix.personal && madeFor != null) "Made for $madeFor" else if (mix.endless) "Station" else "Mix",
                             "by $MIX_AUTHOR",
                             if (mix.endless || mix.songCount == 0) null else songCount(mix.songCount),
-                        ).joinToString(" · "),
-                        leading = { MixCover(mix, size = 56.dp) },
-                        onClick = { nav.openMix(mix.id) },
-                    )
+                        ).joinToString(" · ")
+                        add(LibraryEntry("mix-${mix.id}", mix.title, subtitle, { nav.openMix(mix.id) }, round = mix.round) { MixCover(mix, size = it) })
+                    }
                 }
-            }
-            if (filter != LibraryFilter.Playlists) {
-                items(likedAlbums, key = { "album-${it.id}" }) { album ->
-                    LibraryRow(
-                        title = album.name,
-                        subtitle = listOfNotNull("Movie", album.artist).joinToString(" · "),
-                        leading = { Cover(album.coverArt, Modifier.size(56.dp), size = 150, corner = 6.dp) },
-                        onClick = { nav.openAlbum(album.id) },
-                    )
+                if (filter != LibraryFilter.Playlists) {
+                    likedAlbums.forEach { album ->
+                        add(LibraryEntry("album-${album.id}", album.name, listOfNotNull("Movie", album.artist).joinToString(" · "), { nav.openAlbum(album.id) }) {
+                            Cover(album.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
+                        })
+                    }
                 }
-            }
-            if (filter != LibraryFilter.Movies) {
-                items(playlists, key = { "playlist-${it.id}" }) { playlist ->
-                    LibraryRow(
-                        title = playlist.name,
-                        subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount)).joinToString(" · "),
-                        leading = { Cover(playlist.coverArt, Modifier.size(56.dp), size = 150, corner = 6.dp) },
-                        onClick = { nav.openPlaylist(playlist.id) },
-                    )
+                if (filter != LibraryFilter.Movies) {
+                    playlists.forEach { playlist ->
+                        val subtitle = listOfNotNull("Playlist", playlist.owner?.let { "by $it" }, songCount(playlist.songCount)).joinToString(" · ")
+                        add(LibraryEntry("playlist-${playlist.id}", playlist.name, subtitle, { nav.openPlaylist(playlist.id) }) {
+                            Cover(playlist.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
+                        })
+                    }
                 }
             }
             val empty = when (filter) {
                 LibraryFilter.All -> likedSongs.isEmpty() && likedAlbums.isEmpty() && playlists.isEmpty() && savedMixes.isEmpty()
                 LibraryFilter.Movies -> likedAlbums.isEmpty()
-                LibraryFilter.Playlists -> likedSongs.isEmpty() && playlists.isEmpty()
+                LibraryFilter.Playlists -> likedSongs.isEmpty() && playlists.isEmpty() && savedMixes.isEmpty()
             }
-            if (empty) {
-                item {
-                    Text(
-                        "Tap ♡ on songs, movies and playlists to keep them here.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp),
-                    )
+            val emptyHint: @Composable () -> Unit = {
+                Text(
+                    "Tap ♡ on songs, movies, playlists and mixes to keep them here.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+            if (grid) {
+                LazyVerticalGrid(columns = GridCells.Adaptive(UiSize.GridCell), contentPadding = PaddingValues(10.dp)) {
+                    items(entries, key = { it.key }) { entry -> LibraryTile(entry) }
+                    if (empty) item(span = { GridItemSpan(maxLineSpan) }) { emptyHint() }
+                }
+            } else {
+                LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                    items(entries, key = { it.key }) { entry ->
+                        LibraryRow(entry.title, entry.subtitle, leading = { entry.art(UiSize.ListThumb) }, onClick = entry.onClick)
+                    }
+                    if (empty) item { emptyHint() }
                 }
             }
         }
+    }
+}
+
+/** One thing in Your Library, shown as a row or a tile. [art] draws its picture at a given size. */
+private class LibraryEntry(
+    val key: String,
+    val title: String,
+    val subtitle: String,
+    val onClick: () -> Unit,
+    val round: Boolean = false,
+    val art: @Composable (Dp) -> Unit,
+)
+
+/** Grid view: a big picture with the name and what it is below. */
+@Composable
+private fun LibraryTile(entry: LibraryEntry) {
+    Column(Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = entry.onClick).padding(6.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) { entry.art(maxWidth) }
+        Text(entry.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
+        Text(
+            entry.subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -174,12 +229,13 @@ fun LikedSongsScreen(nav: Nav) {
     val songs by app.likes.songs.collectAsStateWithLifecycle()
     val nowPlaying by player.nowPlaying.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { app.likes.refresh() }
+    val tint = rememberPageTint(MaterialTheme.colorScheme.primary)
     Column {
-        ScreenHeader("", onBack = nav.back)
+        ScreenHeader("", onBack = nav.back, color = tint)
         LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
             item {
-                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    LikedTile(180.dp)
+                Column(Modifier.fillMaxWidth().pageGradient(tint).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    LikedTile(UiSize.HeaderArt)
                     Text("Liked songs", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 16.dp))
                     Text(
                         "${songCount(songs.size)} · ${formatTotalDuration(songs.sumOf { it.duration })}",
@@ -215,6 +271,7 @@ fun LikedSongsScreen(nav: Nav) {
                     isCurrent = song.id == nowPlaying.songId,
                     showCover = true,
                     onOpenAlbum = nav.openAlbum,
+                    inLikedSongs = true,
                 )
             }
         }

@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.mixes
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +48,8 @@ import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.SongRow
 import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
+import io.github.devasenan134.isaipetti.ui.components.rememberPageTint
+import io.github.devasenan134.isaipetti.ui.components.pageGradient
 import io.github.devasenan134.isaipetti.ui.components.songCount
 import kotlinx.coroutines.launch
 
@@ -60,9 +63,10 @@ fun MixScreen(id: String, nav: Nav) {
     val followed by app.mixes.followed.collectAsStateWithLifecycle()
     val nowPlaying by app.player.nowPlaying.collectAsStateWithLifecycle()
     var menuOpen by remember { mutableStateOf(false) }
+    val tint = rememberPageTint((loader.state as? io.github.devasenan134.isaipetti.ui.components.Loadable.Ready)?.value?.tint())
 
     Column {
-        ScreenHeader("", onBack = nav.back) {
+        ScreenHeader("", onBack = nav.back, color = tint) {
             val mix = (loader.state as? io.github.devasenan134.isaipetti.ui.components.Loadable.Ready)?.value
             if (mix != null && !mix.endless && mix.songs.isNotEmpty()) {
                 Box {
@@ -87,14 +91,15 @@ fun MixScreen(id: String, nav: Nav) {
             }
             LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
                 item {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        MixCover(mix, size = 220.dp)
+                    Column(Modifier.fillMaxWidth().pageGradient(tint).padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        MixCover(mix, size = UiSize.HeaderArt)
                         Text(mix.title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 16.dp))
                         // The author, like "Made for you by Spotify".
                         Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(painterResource(R.drawable.ic_music_note), contentDescription = null, tint = mix.tint(), modifier = Modifier.size(16.dp))
+                            val madeFor = madeForName()
                             Text(
-                                "By $MIX_AUTHOR",
+                                (if (mix.personal && madeFor != null) "Made for $madeFor · " else "") + "By $MIX_AUTHOR",
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(start = 4.dp),

@@ -38,6 +38,7 @@ import io.github.devasenan134.isaipetti.ui.components.LoadableContent
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
+import io.github.devasenan134.isaipetti.ui.components.rememberPageTint
 import kotlinx.coroutines.launch
 
 /** Loads singers a page at a time as you scroll (a big library has thousands). */
@@ -121,10 +122,12 @@ fun SingersScreen(nav: Nav) {
 fun SingerScreen(id: String, name: String, coverArt: String?, nav: Nav) {
     val app = LocalApp.current
     val loader = rememberLoader("singer-$id") { app.api.songsBy(id, name).sortedBy { it.title.lowercase() } }
+    val tint = rememberPageTint(coverArt)
     Column {
-        ScreenHeader("", onBack = nav.back)
+        ScreenHeader("", onBack = nav.back, color = tint)
         LoadableContent(loader) { songs ->
             SongList(
+                tint = tint,
                 onPlay = {
                     app.searches.picked(Artist(id, name, coverArt = coverArt, roles = listOf("artist")))
                     app.activity.artist(id, name, coverArt)

@@ -63,6 +63,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import coil3.compose.AsyncImage
 
+/** Sizes shared by every screen, close to Spotify's on a phone. */
+object UiSize {
+    /** Width of a tile in a sideways row (Home, Search), including its padding. */
+    val Tile = 172.dp
+    /** Grids (movies, playlists, Your Library): columns at least this wide, so a phone shows two. */
+    val GridCell = 164.dp
+    /** Pictures in list rows (Your Library, search results for people). */
+    val ListThumb = 64.dp
+    /** Covers in song rows. */
+    val SongThumb = 50.dp
+    /** The big picture at the top of a movie, playlist or mix page. */
+    val HeaderArt = 256.dp
+}
+
 /** Lets any screen reach the app-wide objects (API, player) without passing them down by hand. */
 val LocalApp = staticCompositionLocalOf<IsaipettiApp> { error("LocalApp not provided") }
 
@@ -120,7 +134,7 @@ fun AlbumCard(album: Album, onClick: () -> Unit, modifier: Modifier = Modifier) 
 }
 
 @Composable
-fun PlaylistCard(playlist: Playlist, modifier: Modifier = Modifier.width(140.dp), onClick: () -> Unit) {
+fun PlaylistCard(playlist: Playlist, modifier: Modifier = Modifier.width(UiSize.Tile), onClick: () -> Unit) {
     Column(modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
         Cover(playlist.coverArt, Modifier.fillMaxWidth().aspectRatio(1f))
         Spacer(Modifier.height(6.dp))
@@ -146,6 +160,10 @@ fun SongRow(
     onOpenAlbum: ((String) -> Unit)? = null,
     /** Set on a playlist you own: removes this song from it. */
     onRemoveFromPlaylist: (() -> Unit)? = null,
+    /** On the Liked songs page every song is liked, so the ✓ only means "also in one of your playlists". */
+    inLikedSongs: Boolean = false,
+    /** On a playlist you made (its name) every song is in it, so the ✓ only means "also liked, or in another of your playlists". */
+    inOwnPlaylist: String? = null,
 ) {
     val app = LocalApp.current
     val player = app.player
@@ -154,7 +172,7 @@ fun SongRow(
     val liked = likedSongs.any { it.id == song.id }
     // Saved = liked or in one of your playlists; shown with a check mark like Spotify.
     val inPlaylists by app.myPlaylists.songs.collectAsStateWithLifecycle()
-    val saved = liked || !inPlaylists[song.id].isNullOrEmpty()
+    val saved = (liked && !inLikedSongs) || inPlaylists[song.id].orEmpty().any { it != inOwnPlaylist }
     val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -188,7 +206,7 @@ fun SongRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showCover) {
-                Cover(song.coverArt, Modifier.size(44.dp), size = 100, corner = 4.dp)
+                Cover(song.coverArt, Modifier.size(UiSize.SongThumb), size = 150, corner = 4.dp)
             } else {
                 Text(
                     song.track?.toString() ?: "",
@@ -281,9 +299,15 @@ fun LikeButton(liked: Boolean, onToggle: () -> Unit, modifier: Modifier = Modifi
 
 /** Screen title with an optional back arrow. */
 @Composable
-fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, actions: @Composable () -> Unit = {}) {
+fun ScreenHeader(
+    title: String,
+    onBack: (() -> Unit)? = null,
+    /** The page's colour behind the bar (see PageTint.kt); none by default. */
+    color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
+    actions: @Composable () -> Unit = {},
+) {
     Row(
-        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = if (onBack == null) 16.dp else 4.dp),
+        Modifier.fillMaxWidth().background(color).height(56.dp).padding(horizontal = if (onBack == null) 16.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onBack != null) {
@@ -305,7 +329,8 @@ fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, actions: @Composab
 fun SectionTitle(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 6.dp),
     )
 }

@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.search
 
+import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -163,7 +164,7 @@ fun SearchScreen(nav: Nav) {
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(result.album, key = { it.id }) { album ->
-                                    AlbumCard(album, onClick = { saveSearch(); app.searches.picked(album); nav.openAlbum(album.id) }, modifier = Modifier.width(140.dp))
+                                    AlbumCard(album, onClick = { saveSearch(); app.searches.picked(album); nav.openAlbum(album.id) }, modifier = Modifier.width(UiSize.Tile))
                                 }
                             }
                         }
@@ -250,7 +251,7 @@ fun SearchScreen(nav: Nav) {
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(searchedAlbums, key = { "searched-album-${it.id}" }) { album ->
-                                    AlbumCard(album, onClick = { nav.openAlbum(album.id) }, modifier = Modifier.width(140.dp))
+                                    AlbumCard(album, onClick = { nav.openAlbum(album.id) }, modifier = Modifier.width(UiSize.Tile))
                                 }
                             }
                         }
@@ -300,7 +301,7 @@ private fun ArtistResult(artist: Artist, onClick: () -> Unit) {
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Cover(artist.coverArt, Modifier.size(44.dp).clip(CircleShape), size = 150, corner = 22.dp)
+        Cover(artist.coverArt, Modifier.size(UiSize.SongThumb).clip(CircleShape), size = 150, corner = 25.dp)
         Text(artist.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
     }
 }

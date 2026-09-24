@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import io.github.devasenan134.isaipetti.ui.components.rememberPhotoPicker
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -247,10 +248,24 @@ fun PlaylistOwnerMenu(playlist: Playlist, onChanged: () -> Unit, onDeleted: () -
         }
     }
 
+    // A cover of your own: the friends server stores it in Navidrome (the phone can't, with only a music login).
+    val coverPicker = rememberPhotoPicker(
+        title = "Playlist cover",
+        onRemove = { change({ app.social.api.removePlaylistCover(playlist.id) }, "Back to the automatic cover") },
+    ) { jpeg -> change({ app.social.api.setPlaylistCover(playlist.id, jpeg) }, "Cover updated") }
+
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Playlist options") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Rename") }, onClick = { open = false; renaming = true })
+            DropdownMenuItem(
+                text = { Text("Change cover") },
+                onClick = {
+                    open = false
+                    if (app.session.social.value == null) Toast.makeText(context, "Covers need the friends server. Add it when you log in", Toast.LENGTH_LONG).show()
+                    else coverPicker.open()
+                },
+            )
             DropdownMenuItem(
                 text = { Text(if (playlist.public) "Make private" else "Make public") },
                 onClick = {
