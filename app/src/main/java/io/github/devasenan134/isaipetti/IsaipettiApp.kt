@@ -1,5 +1,7 @@
 package io.github.devasenan134.isaipetti
 
+import io.github.devasenan134.isaipetti.data.toRef
+import io.github.devasenan134.isaipetti.data.Song
 import android.app.Application
 import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.Likes
@@ -96,6 +98,14 @@ class IsaipettiApp : Application() {
         // Notifications can wake the app before any screen opens: start Firebase from the saved settings first.
         PushSetup.startSaved(this)
         social = Social(this, session, http)
+        // Listening along in someone else's jam: controls say who's in charge, and queueing a song asks them.
+        player.jam = object : PlayerConnection.Jam {
+            override fun isListener() = social.listen.isListener()
+            override fun request(song: Song) {
+                appScope.launch { toast(social.requestSong(song.toRef())) }
+            }
+            override fun explain() = toast("${social.jamOwnerName() ?: "The host"} controls this jam. Swipe a song to ask for it.")
+        }
         updates = Updates(this, http)
         recent = RecentSongs(this)
         recentPlaylists = RecentPlaylists(this)
@@ -119,3 +129,5 @@ sealed interface PendingOpen {
     data class Chat(val conversationId: Long) : PendingOpen
     data object Friends : PendingOpen
 }
+
+private fun IsaipettiApp.toast(text: String) = android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()

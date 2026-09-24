@@ -63,6 +63,8 @@ data class ChatMessage(
     val createdAt: Long,
     /** A line about the chat itself, like "left the group". */
     val system: Boolean = false,
+    /** For a song request while listening together: "pending", "accepted", "declined" or "expired". Null otherwise. */
+    val request: String? = null,
 ) {
     /** "Alice left the group" / "You left the group". */
     fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body
@@ -80,6 +82,8 @@ data class Conversation(
     val canMessage: Boolean = true,
     /** Who is listening together in this chat right now. */
     val listeners: List<Long> = emptyList(),
+    /** Who started (and controls) the listening session, if there is one. */
+    val listenOwner: Long? = null,
     /** The group's owner, the only one who can delete it for everyone. */
     val createdBy: Long? = null,
     /** When the group's photo was set (its version), or null if it has none. */
@@ -128,9 +132,13 @@ data class ListenState(
     val updatedAt: Long = 0,
 )
 
-/** Who is listening together in a chat; an empty list means the session ended. */
+/** Who is listening together in a chat, and who controls it; an empty list means the session ended. */
 @Serializable @SerialName("listenSession")
-data class ListenSessionEvent(val conversationId: Long, val listeners: List<Long>) : SocialEvent
+data class ListenSessionEvent(val conversationId: Long, val listeners: List<Long>, val owner: Long? = null) : SocialEvent
+
+/** A message changed after it was sent (a song request was accepted or declined). */
+@Serializable @SerialName("messageUpdated")
+data class MessageUpdatedEvent(val message: ChatMessage) : SocialEvent
 
 /** The session's playback changed (by [by]), or we just joined. */
 @Serializable @SerialName("listenState")

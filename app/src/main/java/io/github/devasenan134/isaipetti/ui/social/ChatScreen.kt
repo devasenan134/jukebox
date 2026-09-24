@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import io.github.devasenan134.isaipetti.data.SocialUser
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -72,6 +73,9 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val conversations by social.conversations.collectAsStateWithLifecycle()
     val friends by social.friends.collectAsStateWithLifecycle()
     val conversation = conversations.firstOrNull { it.id == conversationId }
+    val joinedJam by social.listen.joined.collectAsStateWithLifecycle()
+    val jamOwners by social.listen.owners.collectAsStateWithLifecycle()
+    val jamOwner = jamOwners[conversationId]
 
     val messages = remember { mutableStateListOf<ChatMessage>() }
     var hasOlder by remember { mutableStateOf(false) }
@@ -80,7 +84,21 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val listState = rememberLazyListState()
 
     fun add(message: ChatMessage) {
-        if (messages.none { it.id == message.id }) messages.add(message)
+        // A message we already have comes back when it changes (an answered song request): replace it.
+        val i = messages.indexOfFirst { it.id == message.id }
+        if (i >= 0) messages[i] = message else messages.add(message)
+    }
+
+    /** The jam's owner answers a song request; an accepted song joins the jam's queue. */
+    fun answerRequest(message: ChatMessage, accept: Boolean) {
+        scope.launch {
+            try {
+                add(social.api.answerRequest(conversationId, message.id, accept))
+                if (accept) message.song?.let { app.player.queueRequested(it.toSong()) }
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Couldn't answer the request", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // Load the latest page, then follow new messages live while this screen is open.
@@ -184,7 +202,16 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 // Show the sender's name in groups when a new person starts talking.
                 val olderNeighbour = newestFirst.getOrNull(i + 1)
                 val showName = conversation?.isGroup == true && message.sender.id != me && olderNeighbour?.sender?.id != message.sender.id
-                if (message.system) SystemLine(message.systemText(me)) else Bubble(message, mine = message.sender.id == me, showName = showName)
+                if (message.system) SystemLine(message.systemText(me))
+                else Bubble(
+                    message,
+                    mine = message.sender.id == me,
+                    showName = showName,
+                    // Only the jam's owner answers requests, while the jam is on.
+                    canAnswer = message.request == "pending" && message.sender.id != me && jamOwner == me && joinedJam == conversationId,
+                    jamOwnerName = conversation?.members?.firstOrNull { it.id == jamOwner }?.displayName,
+                    onAnswer = { accept -> answerRequest(message, accept) },
+                )
             }
             if (hasOlder) {
                 item {
@@ -239,7 +266,14 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
 }
 
 @Composable
-private fun Bubble(message: ChatMessage, mine: Boolean, showName: Boolean) {
+private fun Bubble(
+    message: ChatMessage,
+    mine: Boolean,
+    showName: Boolean,
+    canAnswer: Boolean = false,
+    jamOwnerName: String? = null,
+    onAnswer: (Boolean) -> Unit = {},
+) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
         if (showName) {
             Text(
@@ -258,8 +292,17 @@ private fun Bubble(message: ChatMessage, mine: Boolean, showName: Boolean) {
             modifier = Modifier.widthIn(max = 300.dp),
         ) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                message.song?.let { SongCard(it, Modifier.padding(bottom = if (message.body.isNotBlank()) 6.dp else 0.dp)) }
+                if (message.request != null) {
+                    Text(
+                        if (mine) "You asked to play" else "${message.sender.displayName} asked to play",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                message.song?.let { SongCard(it, Modifier.padding(bottom = if (message.body.isNotBlank() || message.request != null) 6.dp else 0.dp)) }
                 if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
+                message.request?.let { status -> SongRequestStatus(status, canAnswer, jamOwnerName, onAnswer) }
                 Text(
                     chatTime(message.createdAt),
                     style = MaterialTheme.typography.labelSmall,
@@ -377,4 +420,26 @@ private fun GroupMenu(title: String, isOwner: Boolean, conversationId: Long, has
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }
+}
+
+/** Under a song request: Accept/Decline for the jam's owner, or where the request stands for everyone else. */
+@Composable
+private fun SongRequestStatus(status: String, canAnswer: Boolean, ownerName: String?, onAnswer: (Boolean) -> Unit) {
+    if (canAnswer) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onAnswer(true) }) { Text("Accept") }
+            OutlinedButton(onClick = { onAnswer(false) }) { Text("Decline") }
+        }
+        return
+    }
+    Text(
+        when (status) {
+            "accepted" -> "✓ Added to the queue"
+            "declined" -> "Declined"
+            "expired" -> "The jam ended before this was answered"
+            else -> "Waiting for ${ownerName ?: "the host"}"
+        },
+        style = MaterialTheme.typography.labelMedium,
+        color = if (status == "accepted") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }

@@ -90,6 +90,13 @@ class SocialApi(
     suspend fun createInvite(): Invite = post("/invites", Unit)
     suspend fun invites(): List<Invite> = get("/invites")
 
+    /** While listening together: ask the session's owner to play [song] (it shows in the chat). */
+    suspend fun requestSong(conversationId: Long, song: SongRef): ChatMessage =
+        post("/conversations/$conversationId/listen/requests", SongRequestBody(song))
+
+    /** The session's owner accepts or declines a song request. */
+    suspend fun answerRequest(conversationId: Long, messageId: Long, accept: Boolean): ChatMessage =
+        post("/conversations/$conversationId/listen/requests/$messageId", SongRequestAnswer(accept))
     /** Whether you're a Navidrome admin (who can see everyone's listening stats). */
     suspend fun adminAccess(): AdminAccess = get("/admin/access")
     suspend fun listeningStats(timeZone: String): ListeningStats =
@@ -176,4 +183,7 @@ class SocialApi(
     @Serializable private data class RecommendBody(val songIds: List<String>, val count: Int, val page: Int)
     @Serializable private data class PlaysBody(val events: List<PlayEvent>)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
+
+    @Serializable private data class SongRequestBody(val song: SongRef)
+    @Serializable private data class SongRequestAnswer(val accept: Boolean)
 }

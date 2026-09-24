@@ -13,9 +13,10 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * Keeps the player in step with a listen-together session, both ways:
- *  - changes from the others (a new queue, skip, seek, play/pause) are applied to our player;
- *  - changes we make are sent to them.
+ * Keeps the player in step with a listen-together session:
+ *  - changes from the session's owner (a new queue, skip, seek, play/pause) are applied to our player;
+ *  - if we own the session, changes we make are sent to the others;
+ *  - if someone else owns it, changes made on this phone (say, pause on the lock screen) are undone.
  *
  * Shuffle is off during a session, so everyone's queue plays in the same order. Pauses that only
  * concern this phone (a phone call, unplugged headphones) aren't sent. A song ending on its own
@@ -61,7 +62,11 @@ class ListenSync(
         // Called once after each batch of the callbacks above.
         override fun onEvents(player: Player, events: Player.Events) {
             if (!changed && !queueChanged) return
-            if (listen.joined.value != null) listen.update(snapshot(includeQueue = queueChanged))
+            if (listen.joined.value != null) {
+                // Someone else runs this jam: snap back to their music instead of changing it for everyone.
+                if (listen.isListener()) listen.remote.value?.let(::apply)
+                else listen.update(snapshot(includeQueue = queueChanged))
+            }
             changed = false
             queueChanged = false
         }

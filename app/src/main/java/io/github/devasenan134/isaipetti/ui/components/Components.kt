@@ -185,18 +185,20 @@ fun SongRow(
     if (sharing) ShareSongSheet(song.toRef(), onDismiss = { sharing = false })
     if (addingToPlaylist) AddToPlaylistSheet(song, onDismiss = { addingToPlaylist = false })
     // Swipe right: play next. Swipe left: add to the end of the queue. The row springs back either way.
+    // In someone else's jam, both ask its owner for the song instead (the player says so).
+    // The swipe box can report one swipe twice; act once per swipe.
+    val lastSwipe = remember { longArrayOf(0L) }
     val swipe = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            when (value) {
-                SwipeToDismissBoxValue.StartToEnd -> {
-                    player.playNext(song)
-                    Toast.makeText(context, "Playing next", Toast.LENGTH_SHORT).show()
+            val now = android.os.SystemClock.uptimeMillis()
+            if (value != SwipeToDismissBoxValue.Settled && now - lastSwipe[0] > 600) {
+                lastSwipe[0] = now
+                val requesting = app.social.listen.isListener()
+                if (value == SwipeToDismissBoxValue.StartToEnd) player.playNext(song) else player.addToQueue(song)
+                if (!requesting) {
+                    val text = if (value == SwipeToDismissBoxValue.StartToEnd) "Playing next" else "Added to queue"
+                    Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
                 }
-                SwipeToDismissBoxValue.EndToStart -> {
-                    player.addToQueue(song)
-                    Toast.makeText(context, "Added to queue", Toast.LENGTH_SHORT).show()
-                }
-                SwipeToDismissBoxValue.Settled -> Unit
             }
             false
         },

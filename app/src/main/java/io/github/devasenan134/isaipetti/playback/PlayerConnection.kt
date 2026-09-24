@@ -57,6 +57,29 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
         override fun onEvents(player: Player, events: Player.Events) = refresh()
     }
 
+    /**
+     * Listening along in someone else's jam: the music follows its owner, so controls do nothing
+     * (and say why), and "play next" / "add to queue" ask the owner instead. Set by the app.
+     */
+    interface Jam {
+        fun isListener(): Boolean
+        fun request(song: Song)
+        fun explain()
+    }
+
+    var jam: Jam? = null
+
+    /** True (after explaining) when controls are off because someone else runs the jam. */
+    private fun locked(): Boolean {
+        val j = jam ?: return false
+        if (!j.isListener()) return false
+        j.explain()
+        return true
+    }
+
+    /** Accepted song requests still waiting to play, so they play in the order they were accepted. */
+    private val acceptedRequests = mutableListOf<String>()
+
     fun connect() {
         if (controllerFuture != null) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -81,6 +104,7 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
 
     /** Plays [songs]. [source] (e.g. "playlist:<id>") lets the app remember where you left off in it. */
     fun play(songs: List<Song>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) {
+        if (locked()) return
         val c = controller ?: return
         if (songs.isEmpty()) return
         c.shuffleModeEnabled = shuffle
@@ -92,6 +116,7 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
 
     /** Plays just the shared part of a song: starts at the clip's start and pauses at its end. Play again to hear the rest. */
     fun playClip(clip: SongRef) {
+        if (locked()) return
         val c = controller ?: return
         val start = clip.clipStartMs ?: return play(listOf(clip.toSong()))
         c.shuffleModeEnabled = false
@@ -101,18 +126,37 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
     }
 
     fun playNext(song: Song) {
+        if (jam?.isListener() == true) return jam!!.request(song)
         val c = controller ?: return
         if (c.mediaItemCount == 0) return play(listOf(song))
         c.addMediaItem(c.currentMediaItemIndex + 1, song.toMediaItem())
     }
 
     fun addToQueue(song: Song) {
+        if (jam?.isListener() == true) return jam!!.request(song)
         val c = controller ?: return
         if (c.mediaItemCount == 0) return play(listOf(song))
         c.addMediaItem(song.toMediaItem())
     }
 
+    /**
+     * The jam's owner accepted a song request: it plays after the current song and any requests
+     * accepted before it, so requests play in the order they were accepted.
+     */
+    fun queueRequested(song: Song) {
+        val c = controller ?: return
+        if (c.mediaItemCount == 0) return play(listOf(song))
+        val current = c.currentMediaItemIndex
+        // Forget requests that already played (they're at or behind the current song now).
+        val upcoming = (current + 1 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }
+        acceptedRequests.retainAll(upcoming.toSet())
+        val lastWaiting = (current + 1 until c.mediaItemCount).lastOrNull { c.getMediaItemAt(it).mediaId in acceptedRequests }
+        c.addMediaItem((lastWaiting ?: current) + 1, song.toMediaItem())
+        acceptedRequests += song.id
+    }
+
     fun togglePlay() {
+        if (locked()) return
         val c = controller ?: return
         if (c.isPlaying) c.pause() else {
             if (c.playbackState == Player.STATE_IDLE) c.prepare()
@@ -124,25 +168,27 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
     /** Stops playback and empties the queue (used when logging out). */
     fun stop() = controller?.run { stop(); clearMediaItems() } ?: Unit
 
-    fun next() = controller?.seekToNext() ?: Unit
-    fun previous() = controller?.seekToPrevious() ?: Unit
-    fun seekTo(positionMs: Long) = controller?.seekTo(positionMs) ?: Unit
-    fun jumpTo(index: Int) = controller?.run { seekTo(index, 0); play() } ?: Unit
+    fun next() = if (locked()) Unit else controller?.seekToNext() ?: Unit
+    fun previous() = if (locked()) Unit else controller?.seekToPrevious() ?: Unit
+    fun seekTo(positionMs: Long) = if (locked()) Unit else controller?.seekTo(positionMs) ?: Unit
+    fun jumpTo(index: Int) = if (locked()) Unit else controller?.run { seekTo(index, 0); play() } ?: Unit
 
     /** Moves to another song in the queue, keeping the current play/pause state (used by swiping). */
-    fun skipTo(index: Int) = controller?.seekTo(index, 0) ?: Unit
+    fun skipTo(index: Int) = if (locked()) Unit else controller?.seekTo(index, 0) ?: Unit
 
     /** Always the previous song. The previous button instead restarts the current song if it's past 3 seconds. */
-    fun previousSong() = controller?.seekToPreviousMediaItem() ?: Unit
-    fun nextSong() = controller?.seekToNextMediaItem() ?: Unit
+    fun previousSong() = if (locked()) Unit else controller?.seekToPreviousMediaItem() ?: Unit
+    fun nextSong() = if (locked()) Unit else controller?.seekToNextMediaItem() ?: Unit
 
     fun toggleShuffle() {
+        if (locked()) return
         val c = controller ?: return
         c.shuffleModeEnabled = !c.shuffleModeEnabled
     }
 
     /** off -> repeat all -> repeat one -> off */
     fun cycleRepeat() {
+        if (locked()) return
         val c = controller ?: return
         c.repeatMode = when (c.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL

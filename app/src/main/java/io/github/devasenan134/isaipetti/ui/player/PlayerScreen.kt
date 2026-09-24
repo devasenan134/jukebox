@@ -100,6 +100,11 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
     val now by player.nowPlaying.collectAsStateWithLifecycle()
     val listen = app.social.listen
     val joined by listen.joined.collectAsStateWithLifecycle()
+    val owners by listen.owners.collectAsStateWithLifecycle()
+    val me = app.social.me?.id
+    val jamOwner = joined?.let { owners[it] }
+    // In someone else's jam the music follows them: the controls here are off.
+    val listening = jamOwner != null && jamOwner != me
     val conversations by app.social.conversations.collectAsStateWithLifecycle()
     val position by rememberPosition(now.songId, now.isPlaying)
     val lyrics by rememberLyrics(now.songId)
@@ -180,13 +185,21 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
                         }
                     }
 
-                    // In a listen-together session, everything you do here changes the music for everyone.
+                    // In a jam, the owner's changes here reach everyone; listeners just follow along.
                     joined?.let { id ->
-                        val chat = conversations.firstOrNull { it.id == id }?.title(app.social.me?.id) ?: "a chat"
+                        val conversation = conversations.firstOrNull { it.id == id }
+                        val chat = conversation?.title(me) ?: "a chat"
+                        val ownerName = conversation?.members?.firstOrNull { it.id == jamOwner }?.displayName
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Icon(painterResource(R.drawable.ic_headphones), contentDescription = null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                             Text(
-                                "Listening together in $chat",
+                                // A DM is named after the other person, so "in <chat>" is only for groups.
+                                when {
+                                    jamOwner == me -> if (conversation?.isGroup == true) "Your jam in $chat" else "Your jam with $chat"
+                                    ownerName != null && conversation?.isGroup == true -> "$ownerName's jam in $chat · they control the music"
+                                    ownerName != null -> "$ownerName's jam · they control the music"
+                                    else -> "Listening together in $chat"
+                                },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 maxLines = 1,
@@ -199,9 +212,9 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
 
                     Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
                         if (showLyrics) {
-                            LyricsView(lyrics, position, onSeek = player::seekTo, modifier = Modifier.fillMaxSize())
+                            LyricsView(lyrics, position, onSeek = { if (!listening) player.seekTo(it) }, modifier = Modifier.fillMaxSize())
                         } else {
-                            CoverPager(Modifier.fillMaxWidth())
+                            CoverPager(Modifier.fillMaxWidth(), swipeable = !listening)
                         }
                     }
 
@@ -234,6 +247,7 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
                     Slider(
                         value = dragging ?: (position.toFloat() / duration).coerceIn(0f, 1f),
                         onValueChange = { dragging = it },
+                        enabled = !listening,
                         onValueChangeFinished = {
                             dragging?.let { player.seekTo((it * duration).toLong()) }
                             dragging = null
@@ -261,20 +275,20 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
                                 tint = if (now.shuffle && joined == null) active else LocalContentColor.current,
                             )
                         }
-                        IconButton(onClick = player::previous) {
+                        IconButton(onClick = player::previous, enabled = !listening) {
                             Icon(painterResource(R.drawable.ic_skip_previous), contentDescription = "Previous", Modifier.size(36.dp))
                         }
-                        FilledIconButton(onClick = player::togglePlay, modifier = Modifier.size(72.dp)) {
+                        FilledIconButton(onClick = player::togglePlay, enabled = !listening, modifier = Modifier.size(72.dp)) {
                             Icon(
                                 painterResource(if (now.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),
                                 contentDescription = if (now.isPlaying) "Pause" else "Play",
                                 modifier = Modifier.size(40.dp),
                             )
                         }
-                        IconButton(onClick = player::next) {
+                        IconButton(onClick = player::next, enabled = !listening) {
                             Icon(painterResource(R.drawable.ic_skip_next), contentDescription = "Next", Modifier.size(36.dp))
                         }
-                        IconButton(onClick = player::cycleRepeat) {
+                        IconButton(onClick = player::cycleRepeat, enabled = !listening) {
                             Icon(
                                 painterResource(if (now.repeatMode == Player.REPEAT_MODE_ONE) R.drawable.ic_repeat_one else R.drawable.ic_repeat),
                                 contentDescription = "Repeat",
