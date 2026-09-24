@@ -3,6 +3,12 @@ package io.github.devasenan134.isaipetti
 import io.github.devasenan134.isaipetti.data.toRef
 import io.github.devasenan134.isaipetti.data.Song
 import android.app.Application
+import android.os.Build
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.gif.AnimatedImageDecoder
+import coil3.gif.GifDecoder
 import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.Likes
 import io.github.devasenan134.isaipetti.data.MyPlaylists
@@ -30,7 +36,7 @@ import java.util.concurrent.TimeUnit
  * Created once when the app process starts. It holds the app-wide objects that
  * screens and the playback service share (a very small hand-made "dependency container").
  */
-class IsaipettiApp : Application() {
+class IsaipettiApp : Application(), SingletonImageLoader.Factory {
     private val appScope = MainScope()
 
     lateinit var session: SessionStore
@@ -66,6 +72,11 @@ class IsaipettiApp : Application() {
 
     /** A screen to open, set when the app is launched from a notification. */
     val pendingOpen = MutableStateFlow<PendingOpen?>(null)
+
+    /** Coil (pictures everywhere in the app), able to play GIFs and animated stickers in chats. */
+    override fun newImageLoader(context: PlatformContext): ImageLoader = ImageLoader.Builder(context)
+        .components { add(if (Build.VERSION.SDK_INT >= 28) AnimatedImageDecoder.Factory() else GifDecoder.Factory()) }
+        .build()
 
     override fun onCreate() {
         super.onCreate()

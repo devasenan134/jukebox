@@ -16,6 +16,7 @@ import io.github.devasenan134.isaipetti.data.FriendRequests
 import io.github.devasenan134.isaipetti.data.ListenSessionEvent
 import io.github.devasenan134.isaipetti.data.ListenStateEvent
 import io.github.devasenan134.isaipetti.data.MessageEvent
+import io.github.devasenan134.isaipetti.data.ConversationUpdatedEvent
 import io.github.devasenan134.isaipetti.data.MessageUpdatedEvent
 import io.github.devasenan134.isaipetti.data.NowPlayingUpdate
 import io.github.devasenan134.isaipetti.data.PresenceEvent
@@ -288,6 +289,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 refreshConversations()
             }
             is FriendRequestEvent -> refreshRequests()
+            is ConversationUpdatedEvent -> refreshConversations()
             is ConversationRemovedEvent -> {
                 _conversations.update { list -> list.filter { it.id != event.conversationId } }
                 _removed.emit(event.conversationId)

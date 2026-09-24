@@ -193,7 +193,7 @@ private fun ChatList(
                     ) else Text(
                         c.lastMessage?.let { m ->
                             val who = if (m.sender.id == me) "You: " else if (c.isGroup) "${m.sender.displayName}: " else ""
-                            if (m.system) m.systemText(me) else who + (m.song?.let { "♪ ${it.title}${it.clipLabel}" + if (m.body.isNotBlank()) " – ${m.body}" else "" } ?: m.body)
+                            if (m.system) m.systemText(me) else who + m.summary()
                         } ?: if (c.isGroup) c.members.joinToString { it.displayName } else "Say hi 👋",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

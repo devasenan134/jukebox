@@ -137,20 +137,20 @@ private fun SheetOption(icon: Painter, label: String, onClick: () -> Unit) {
     }
 }
 
-/** The photo, upright whatever the camera's rotation, and no bigger than [MAX_LOAD] pixels on its long side. */
-private fun loadUpright(context: Context, uri: Uri): Bitmap {
+/** The photo, upright whatever the camera's rotation, and not much bigger than [maxSide] pixels on its long side. */
+internal fun loadUpright(context: Context, uri: Uri, maxSide: Int = MAX_LOAD): Bitmap {
     if (Build.VERSION.SDK_INT >= 28) {
         // ImageDecoder turns the photo upright and can shrink it while reading, to save memory.
         return ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
             val longSide = maxOf(info.size.width, info.size.height)
-            if (longSide > MAX_LOAD) decoder.setTargetSampleSize(longSide / MAX_LOAD)
+            if (longSide > maxSide) decoder.setTargetSampleSize(longSide / maxSide)
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
         }
     }
     @Suppress("DEPRECATION")
     val full = MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
     val longSide = maxOf(full.width, full.height)
-    val small = if (longSide > MAX_LOAD) Bitmap.createScaledBitmap(full, full.width * MAX_LOAD / longSide, full.height * MAX_LOAD / longSide, true) else full
+    val small = if (longSide > maxSide) Bitmap.createScaledBitmap(full, full.width * maxSide / longSide, full.height * maxSide / longSide, true) else full
     return uprightLegacy(context, uri, small)
 }
 

@@ -123,6 +123,35 @@ class SocialApi(
     suspend fun sendMessage(conversationId: Long, body: String, song: SongRef? = null, replyTo: Long? = null): ChatMessage =
         post("/conversations/$conversationId/messages", MessageBody(body, song, replyTo))
     suspend fun deleteConversation(conversationId: Long) = send<Unit>("DELETE", "/conversations/$conversationId", null)
+    /**
+     * Sends a photo, GIF or sticker ([bytes] as JPEG, PNG, WebP or GIF, [width] × [height] pixels),
+     * with an optional caption, as a reply if [replyTo] is set.
+     */
+    suspend fun sendImage(
+        conversationId: Long, bytes: ByteArray, mime: String, kind: String, width: Int, height: Int, caption: String = "", replyTo: Long? = null,
+    ): ChatMessage {
+        val query = "kind=$kind&width=$width&height=$height&caption=${enc(caption)}" + (replyTo?.let { "&replyTo=$it" } ?: "")
+        return send("POST", "/conversations/$conversationId/images?$query", null, ChatMessage.serializer(), bytes = bytes, mime = mime)
+    }
+
+    /** A message's picture file and its type (for saving it to the phone). */
+    suspend fun downloadImage(message: ChatMessage): Pair<ByteArray, String> = withContext(Dispatchers.IO) {
+        val url = imageUrl(message) ?: throw SocialException("No friends server set")
+        val request = Request.Builder().url(url).header("Authorization", authHeader() ?: throw SocialException("Not connected to friends", 401)).build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw SocialException("Couldn't get the picture (${response.code})", response.code)
+            response.body.bytes() to (response.header("Content-Type") ?: "image/jpeg")
+        }
+    }
+
+    /** Where a message's picture is (needs the Authorization header from [authHeader]). */
+    fun imageUrl(message: ChatMessage): String? = baseUrl()?.let { "$it/conversations/${message.conversationId}/messages/${message.id}/image" }
+
+    /** Pins a message to the top of the chat for [hours] (24, 168 or 720), or unpins it. */
+    suspend fun pin(conversationId: Long, messageId: Long, hours: Int): Conversation = post("/conversations/$conversationId/pins", PinBody(messageId, hours))
+    suspend fun unpin(conversationId: Long, messageId: Long): Conversation =
+        send("DELETE", "/conversations/$conversationId/pins/$messageId", null, Conversation.serializer())
+
     /** The group's owner renames it. */
     suspend fun renameGroup(conversationId: Long, name: String): Conversation =
         send("PUT", "/conversations/$conversationId/name", json.encodeToString(NameBody.serializer(), NameBody(name)), Conversation.serializer())
@@ -166,11 +195,12 @@ class SocialApi(
         responseSerializer: KSerializer<T>? = null,
         authenticated: Boolean = true,
         bytes: ByteArray? = null,
+        mime: String = "image/jpeg",
     ): T = withContext(Dispatchers.IO) {
         val server = baseUrl() ?: throw SocialException("No friends server set. Add one when you log in")
         val builder = Request.Builder().url(server + path)
         if (authenticated) builder.header("Authorization", "Bearer ${token() ?: throw SocialException("Not connected to friends", 401)}")
-        builder.method(method, bytes?.toRequestBody("image/jpeg".toMediaType()) ?: body?.toRequestBody("application/json".toMediaType()))
+        builder.method(method, bytes?.toRequestBody(mime.toMediaType()) ?: body?.toRequestBody("application/json".toMediaType()))
         http.newCall(builder.build()).execute().use { response ->
             val text = response.body.string()
             if (!response.isSuccessful) {
@@ -190,6 +220,7 @@ class SocialApi(
     @Serializable private data class GroupBody(val name: String, val memberIds: List<Long>)
     @Serializable private data class UserIdsBody(val userIds: List<Long>)
     @Serializable private data class NameBody(val name: String)
+    @Serializable private data class PinBody(val messageId: Long, val hours: Int)
     @Serializable private data class MessageBody(val body: String, val song: SongRef?, val replyTo: Long? = null)
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)

@@ -18,8 +18,8 @@ android {
         applicationId = "io.github.devasenan134.isaipetti"
         minSdk = 26
         targetSdk = 36
-        versionCode = 36
-        versionName = "0.7.0"
+        versionCode = 37
+        versionName = "0.8.0"
 
         // Where the app looks for new versions (GitHub Releases).
         buildConfigField("String", "GITHUB_REPO", "\"${privateSetting("ISAIPETTI_GITHUB_REPO") ?: "devasenan134/isaipetti"}\"")
@@ -82,6 +82,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.coil.gif)
     implementation(libs.androidx.palette) // colours from cover art, for the player's background
 
     implementation(platform(libs.firebase.bom))

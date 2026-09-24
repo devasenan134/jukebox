@@ -45,7 +45,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,9 +86,28 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.core.content.FileProvider
+import java.io.File
 
 private const val PAGE = 50
 
+// Receiving GIFs and stickers from the keyboard (contentReceiver) is still marked experimental.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(conversationId: Long, nav: Nav) {
     val app = LocalApp.current
@@ -106,7 +124,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
 
     val messages = remember { mutableStateListOf<ChatMessage>() }
     var hasOlder by remember { mutableStateOf(false) }
-    var draft by rememberSaveable { mutableStateOf("") }
+    val draft = rememberTextFieldState()
     var sending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // The message being replied to (swipe a message right, or long-press it), shown above the text box.
@@ -114,6 +132,11 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val input = remember { FocusRequester() }
     // A message the chat just jumped to (tapping a reply's quote), lit up for a moment.
     var highlighted by remember { mutableStateOf<Long?>(null) }
+    // A photo or GIF picked from the gallery or camera, waiting for its caption; a picture on its way.
+    var outgoing by remember { mutableStateOf<OutgoingImage?>(null) }
+    var uploading by remember { mutableStateOf(false) }
+    // The photo or GIF open full screen.
+    var viewing by remember { mutableStateOf<ChatMessage?>(null) }
 
     fun add(message: ChatMessage) {
         // A message we already have comes back when it changes (an answered song request): replace it.
@@ -182,13 +205,59 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         }
     }
 
+    /** Sends a photo, GIF or sticker (as a reply, if one is being written). */
+    fun sendPicture(image: OutgoingImage, caption: String) {
+        uploading = true
+        val replyTo = replyingTo?.id
+        scope.launch {
+            try {
+                add(social.api.sendImage(conversationId, image.bytes, image.mime, image.kind, image.width, image.height, caption, replyTo))
+                if (replyingTo?.id == replyTo) replyingTo = null
+                social.refreshConversationsSoon()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Couldn't send the picture", Toast.LENGTH_SHORT).show()
+            }
+            uploading = false
+        }
+    }
+
+    fun picked(uri: android.net.Uri?) {
+        if (uri == null) return
+        scope.launch {
+            val image = prepareChatPicture(context, uri)
+            if (image == null) Toast.makeText(context, "Couldn't read that picture, or it's over 5 MB", Toast.LENGTH_SHORT).show()
+            outgoing = image
+        }
+    }
+    // Android's photo picker (no permission needed; GIFs included), or the camera app.
+    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { picked(it) }
+    val photoFile = remember { File(File(context.cacheDir, "photos").apply { mkdirs() }, "chat-camera.jpg") }
+    val photoUri = remember { FileProvider.getUriForFile(context, "${context.packageName}.files", photoFile) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken -> if (taken) picked(photoUri) }
+
+    fun pin(message: Long, hours: Int) {
+        scope.launch {
+            runCatching { social.api.pin(conversationId, message, hours) }
+                .onSuccess { social.refreshConversationsSoon() }
+                .onFailure { Toast.makeText(context, it.message ?: "Couldn't pin it", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
+    fun unpin(message: Long) {
+        scope.launch {
+            runCatching { social.api.unpin(conversationId, message) }
+                .onSuccess { social.refreshConversationsSoon(); Toast.makeText(context, "Unpinned", Toast.LENGTH_SHORT).show() }
+                .onFailure { Toast.makeText(context, it.message ?: "Couldn't unpin it", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
     fun send(body: String, song: SongRef? = null) {
         sending = true
         scope.launch {
             try {
                 add(social.api.sendMessage(conversationId, body, song, replyingTo?.id))
                 replyingTo = null
-                if (song == null) draft = ""
+                if (song == null) draft.clearText()
                 social.refreshConversationsSoon()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Couldn't send", Toast.LENGTH_SHORT).show()
@@ -292,6 +361,19 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     .then(if (conversation?.isGroup == true) Modifier.clickable { showMembers = true } else Modifier),
             )
         }
+        // Pins that haven't run out (the server drops them too, but the chat may have been open a while).
+        val pins = conversation?.pins.orEmpty().filter { it.expiresAt > System.currentTimeMillis() }
+        val pinnedIds = pins.map { it.message.id }.toSet()
+        PinnedBar(pins, me, onJump = ::jumpTo, onUnpin = ::unpin)
+        viewing?.let { ImageViewer(it, if (it.sender.id == me) "You" else it.sender.displayName, onDismiss = { viewing = null }) }
+        outgoing?.let { image ->
+            SendPictureDialog(
+                image,
+                replyingTo = replyingTo?.let { if (it.sender.id == me) "yourself" else it.sender.displayName },
+                onSend = { caption -> outgoing = null; sendPicture(image, caption) },
+                onDismiss = { outgoing = null },
+            )
+        }
 
 
         LazyColumn(
@@ -306,7 +388,11 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 // Show the sender's name in groups when a new person starts talking.
                 val olderNeighbour = newestFirst.getOrNull(i + 1)
                 val showName = conversation?.isGroup == true && message.sender.id != me && olderNeighbour?.sender?.id != message.sender.id
-                if (message.system) SystemLine(message.systemText(me))
+                if (message.system) SystemLine(
+                    message.systemText(me),
+                    // "… pinned a message" goes to that message.
+                    onClick = message.replyTo?.takeIf { !it.hidden }?.let { quote -> { jumpTo(quote.id) } },
+                )
                 else Bubble(
                     message,
                     mine = message.sender.id == me,
@@ -319,6 +405,10 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     highlighted = highlighted == message.id,
                     onReply = if (conversation?.canMessage == true) ({ reply(message) }) else null,
                     onQuoteClick = ::jumpTo,
+                    pinned = message.id in pinnedIds,
+                    onPin = if (conversation?.canMessage == true) ({ hours -> pin(message.id, hours) }) else null,
+                    onUnpin = { unpin(message.id) },
+                    onOpenPicture = { viewing = message },
                 )
             }
             if (hasOlder) {
@@ -358,7 +448,25 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 IconButton(onClick = { replyingTo = null }) { Icon(Icons.Filled.Close, contentDescription = "Cancel reply") }
             }
         }
+        if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp))
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // A photo or GIF from the phone, or a new photo from the camera.
+            var attaching by remember { mutableStateOf(false) }
+            Box {
+                IconButton(enabled = !uploading, onClick = { attaching = true }) {
+                    Icon(painterResource(R.drawable.ic_photo), contentDescription = "Send a photo")
+                }
+                DropdownMenu(expanded = attaching, onDismissRequest = { attaching = false }) {
+                    DropdownMenuItem(text = { Text("Photo or GIF from gallery") }, onClick = {
+                        attaching = false
+                        gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    })
+                    DropdownMenuItem(text = { Text("Take a photo") }, onClick = {
+                        attaching = false
+                        runCatching { camera.launch(photoUri) }.onFailure { Toast.makeText(context, "No camera app found", Toast.LENGTH_SHORT).show() }
+                    })
+                }
+            }
             // Share what's playing or a recently played song, whole or just a part.
             var sharingMusic by remember { mutableStateOf(false) }
             IconButton(enabled = !sending, onClick = { sharingMusic = true }) {
@@ -373,14 +481,26 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 )
             }
             OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
+                state = draft,
                 placeholder = { Text("Message") },
-                maxLines = 4,
+                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
                 shape = RoundedCornerShape(24.dp),
-                modifier = Modifier.weight(1f).focusRequester(input),
+                modifier = Modifier.weight(1f).focusRequester(input)
+                    // GIFs and stickers from the keyboard (Gboard, Samsung's keyboard…) are sent right away.
+                    .contentReceiver { content ->
+                        if (!content.hasMediaType(MediaType.Image)) return@contentReceiver content
+                        val description = content.clipMetadata.clipDescription
+                        val mime = (0 until description.mimeTypeCount).map(description::getMimeType).firstOrNull { it.startsWith("image/") }
+                        content.consume { item ->
+                            val uri = item.uri ?: return@consume false
+                            val image = readKeyboardImage(context, uri, mime)
+                            if (image == null) Toast.makeText(context, "Couldn't send that, or it's over 5 MB", Toast.LENGTH_SHORT).show()
+                            else sendPicture(image, "")
+                            true
+                        }
+                    },
             )
-            IconButton(enabled = draft.isNotBlank() && !sending, onClick = { send(draft.trim()) }) {
+            IconButton(enabled = draft.text.isNotBlank() && !sending, onClick = { send(draft.text.toString().trim()) }) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
         }
@@ -399,6 +519,10 @@ private fun Bubble(
     highlighted: Boolean = false,
     onReply: (() -> Unit)? = null,
     onQuoteClick: (Long) -> Unit = {},
+    pinned: Boolean = false,
+    onPin: ((hours: Int) -> Unit)? = null,
+    onUnpin: () -> Unit = {},
+    onOpenPicture: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -407,6 +531,9 @@ private fun Bubble(
     val replyAt = with(LocalDensity.current) { 64.dp.toPx() }
     val swipe = remember { Animatable(0f) }
     var menu by remember { mutableStateOf(false) }
+    var choosingPin by remember { mutableStateOf(false) }
+    if (choosingPin && onPin != null) PinDialog(onPin = { choosingPin = false; onPin(it) }, onDismiss = { choosingPin = false })
+    val sticker = message.image?.isSticker == true
     val flash by animateColorAsState(
         if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
         label = "highlight",
@@ -449,13 +576,18 @@ private fun Bubble(
             }
             Box {
                 Surface(
-                    color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    // A sticker stands on its own, without a bubble.
+                    color = when {
+                        sticker -> Color.Transparent
+                        mine -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
                     shape = RoundedCornerShape(
                         topStart = 18.dp, topEnd = 18.dp,
                         bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp,
                     ),
                     modifier = Modifier.widthIn(max = 300.dp).pointerInput(message.id, onReply != null) {
-                        detectTapGestures(onLongPress = { if (onReply != null || message.body.isNotBlank()) menu = true })
+                        detectTapGestures(onLongPress = { if (onReply != null || message.body.isNotBlank() || pinned) menu = true })
                     },
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -465,6 +597,19 @@ private fun Bubble(
                                 Modifier.padding(bottom = 6.dp)
                                     .then(if (quote.hidden) Modifier else Modifier.clickable { onQuoteClick(quote.id) }),
                             )
+                        }
+                        message.image?.let {
+                            ChatPicture(
+                                message,
+                                Modifier.chatPictureSize(message)
+                                    .then(if (sticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+                                    .combinedClickable(
+                                        onClick = { if (!sticker) onOpenPicture() },
+                                        onLongClick = { if (onReply != null || message.body.isNotBlank() || pinned) menu = true },
+                                    ),
+                                contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
+                            )
+                            if (message.body.isNotBlank()) androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
                         }
                         if (message.request != null) {
                             Text(
@@ -495,6 +640,8 @@ private fun Bubble(
                 // Long-press a message: reply to it, or copy what it says.
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (onReply != null) DropdownMenuItem(text = { Text("Reply") }, onClick = { menu = false; onReply() })
+                    if (pinned) DropdownMenuItem(text = { Text("Unpin") }, onClick = { menu = false; onUnpin() })
+                    else if (onPin != null) DropdownMenuItem(text = { Text("Pin") }, onClick = { menu = false; choosingPin = true })
                     if (message.body.isNotBlank()) {
                         DropdownMenuItem(text = { Text("Copy text") }, onClick = {
                             menu = false
@@ -537,13 +684,15 @@ private fun Quote(quote: ReplyQuote, me: Long?, modifier: Modifier = Modifier, h
 
 /** A line about the chat itself, like "Alice left the group". */
 @Composable
-private fun SystemLine(text: String) {
+private fun SystemLine(text: String, onClick: (() -> Unit)? = null) {
     Text(
         text,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (onClick != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 6.dp),
     )
 }
 

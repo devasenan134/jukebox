@@ -340,7 +340,7 @@ private fun PictureViewer(url: String, name: String, onDismiss: () -> Unit) {
 
 /** A picture kept on the friends server (it needs the login with the request). Its address changes with each new picture. */
 @Composable
-private fun FriendsServerPicture(url: String, modifier: Modifier) {
+internal fun FriendsServerPicture(url: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Crop, description: String? = null) {
     val context = LocalContext.current
     val api = LocalApp.current.social.api
     val request = remember(url) {
@@ -348,7 +348,7 @@ private fun FriendsServerPicture(url: String, modifier: Modifier) {
             .httpHeaders(NetworkHeaders.Builder().apply { api.authHeader()?.let { set("Authorization", it) } }.build())
             .build()
     }
-    AsyncImage(request, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier)
+    AsyncImage(request, contentDescription = description, contentScale = contentScale, modifier = modifier)
 }
 
 /**

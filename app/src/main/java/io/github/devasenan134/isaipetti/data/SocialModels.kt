@@ -69,13 +69,38 @@ data class ChatMessage(
     val requestMode: String? = null,
     /** The message this one replies to, quoted. */
     val replyTo: ReplyQuote? = null,
+    /** A photo, GIF or sticker; [body] is then its caption. */
+    val image: ChatImage? = null,
 ) {
     /** "Alice left the group" / "You left the group". */
     fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body
 
     /** What a reply to this message quotes. */
-    fun quote() = ReplyQuote(id, sender, body, song)
+    fun quote() = ReplyQuote(id, sender, body, song, imageKind = image?.kind)
+
+    /** One line about it for the chat list: its text, song or picture. */
+    fun summary() = when {
+        image != null -> imageLabel(image.kind) + if (body.isNotBlank()) " – $body" else ""
+        song != null -> "♪ ${song.title}${song.clipLabel}" + if (body.isNotBlank()) " – $body" else ""
+        else -> body
+    }
 }
+
+/** A picture in a message. [kind] is "photo", "gif" or "sticker"; [width] × [height] is its size in pixels. */
+@Serializable
+data class ChatImage(val kind: String, val width: Int, val height: Int) {
+    val isSticker get() = kind == "sticker"
+}
+
+fun imageLabel(kind: String) = when (kind) {
+    "gif" -> "GIF"
+    "sticker" -> "Sticker"
+    else -> "📷 Photo"
+}
+
+/** A message pinned to the top of a chat until [expiresAt]. */
+@Serializable
+data class Pin(val message: ReplyQuote, val pinnedBy: SocialUser, val pinnedAt: Long, val expiresAt: Long)
 
 /**
  * The message a reply quotes. [hidden] when it's from before you joined the group (or cleared the
@@ -88,10 +113,13 @@ data class ReplyQuote(
     val body: String = "",
     val song: SongRef? = null,
     val hidden: Boolean = false,
+    /** Set when it's a picture: "photo", "gif" or "sticker". */
+    val imageKind: String? = null,
 ) {
-    /** One line about what it said: its text, or the song it shared. */
+    /** One line about what it said: its text, or the song or picture it shared. */
     val preview get() = when {
         hidden -> "Earlier message"
+        imageKind != null -> imageLabel(imageKind) + if (body.isNotBlank()) " – $body" else ""
         body.isNotBlank() -> body
         song != null -> "♪ ${song.title}${song.clipLabel}"
         else -> ""
@@ -116,6 +144,8 @@ data class Conversation(
     val createdBy: Long? = null,
     /** When the group's photo was set (its version), or null if it has none. */
     val picture: Long? = null,
+    /** Pinned messages, newest first (the app also hides ones that ran out since it last asked). */
+    val pins: List<Pin> = emptyList(),
 ) {
     val isGroup get() = kind == "group"
 
@@ -141,6 +171,10 @@ data class FriendAddedEvent(val friend: Friend) : SocialEvent
 
 @Serializable @SerialName("friendRemoved")
 data class FriendRemovedEvent(val userId: Long) : SocialEvent
+
+/** Something about a chat changed that isn't a new message (a pin was removed). */
+@Serializable @SerialName("conversationUpdated")
+data class ConversationUpdatedEvent(val conversationId: Long) : SocialEvent
 
 /** A group was deleted for everyone. */
 @Serializable @SerialName("conversationRemoved")
