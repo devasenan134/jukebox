@@ -3,6 +3,7 @@ package io.github.devasenan134.isaipetti
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import io.github.devasenan134.isaipetti.push.Notifications
@@ -22,6 +23,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         handleNotificationTap(intent)
+        // Back with nowhere left to go closes the app, and the music with it. (Screens and the
+        // player handle Back themselves first; this only runs when none of them does. Home still
+        // leaves the music playing.)
+        onBackPressedDispatcher.addCallback(this) {
+            app.player.stop()
+            finish()
+        }
         setContent {
             val mode by app.appearance.mode.collectAsStateWithLifecycle()
             val wallpaper by app.appearance.wallpaper.collectAsStateWithLifecycle()

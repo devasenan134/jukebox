@@ -90,6 +90,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo) = session
 
+    /** The app was swiped away from recent apps: stop the music too, and the notification with it. */
+    @OptIn(UnstableApi::class)
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        pauseAllPlayersAndStopSelf()
+    }
+
     override fun onDestroy() {
         app.social.onPlayback(null, false)
         // Without a player there's nothing to keep in sync.

@@ -87,10 +87,14 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
         val future = MediaController.Builder(context, token).buildAsync()
         controllerFuture = future
         future.addListener({
-            controller = runCatching { future.get() }.getOrNull()?.also {
-                it.addListener(listener)
-                refresh()
-            }
+            // Disconnected again before this finished (the app went back to the background): drop it.
+            if (controllerFuture !== future) return@addListener
+            val c = runCatching { future.get() }.getOrNull() ?: return@addListener
+            c.addListener(listener)
+            // Set it before refreshing: refresh() reads [controller], and it's what catches the
+            // screens up on songs that changed while the app was in the background.
+            controller = c
+            refresh()
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -190,7 +194,10 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
         }
     }
 
-    /** Stops playback and empties the queue (used when logging out). */
+    /**
+     * Stops playback and empties the queue (when logging out, or closing the app with Back). An
+     * empty player also takes its notification away; with a queue left, the notification stays.
+     */
     fun stop() = controller?.run { stop(); clearMediaItems() } ?: Unit
 
     fun next() = if (locked()) Unit else controller?.seekToNext() ?: Unit
