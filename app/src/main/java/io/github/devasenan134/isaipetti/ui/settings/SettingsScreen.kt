@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -124,6 +125,8 @@ fun SettingsScreen(nav: Nav) {
                     TextButton(onClick = { renaming = true }, enabled = social != null) { Text("Edit") }
                 }
             }
+
+            if (social != null) ListeningStatsCard(onOpen = nav.openStats)
 
             AppearanceCard()
 
@@ -331,4 +334,22 @@ private fun RenameDialog(current: String, onDismiss: () -> Unit, onSaved: () -> 
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** Only shown to Navidrome admins: the server says whether you are one. */
+@Composable
+private fun ListeningStatsCard(onOpen: () -> Unit) {
+    val app = LocalApp.current
+    val isAdmin by produceState(false) { value = runCatching { app.social.api.adminAccess().isAdmin }.getOrDefault(false) }
+    if (!isAdmin) return
+    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Listening stats", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "How much everyone listens, and what. Only admins see this.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
