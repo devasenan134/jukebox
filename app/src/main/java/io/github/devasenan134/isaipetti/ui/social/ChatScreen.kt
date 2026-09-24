@@ -104,6 +104,10 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.text.font.FontStyle
 import kotlinx.coroutines.flow.drop
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -149,6 +153,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     var uploading by remember { mutableStateOf(false) }
     // The photo or GIF open full screen.
     var viewing by remember { mutableStateOf<ChatMessage?>(null) }
+    // Voice messages: recording one, and playing them.
+    val voicePlayer = rememberVoicePlayer(scope)
+    val recorder = remember { VoiceRecorder(context) }
+    var recording by remember { mutableStateOf(false) }
+    DisposableEffect(recorder) { onDispose { recorder.cancel() } }
+    // Searching this chat (the search box and results replace the messages).
+    var searching by remember { mutableStateOf(false) }
+    // The message being forwarded (the chat picker is open).
+    var forwarding by remember { mutableStateOf<ChatMessage?>(null) }
     // Your message whose text is being changed (the text box holds the new text), or being deleted.
     var editing by remember { mutableStateOf<ChatMessage?>(null) }
     var deleting by remember { mutableStateOf<ChatMessage?>(null) }
@@ -198,7 +211,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         onDispose { social.openConversationId = null }
     }
     // Jump to the newest message when one arrives (the list is drawn bottom-up).
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(0) }
+    // (Only for a new message at the bottom, not when older ones load at the top.)
+    LaunchedEffect(messages.lastOrNull()?.id) { if (messages.isNotEmpty()) listState.animateScrollToItem(0) }
+
+    /** Loads the page of messages before the oldest one shown. */
+    suspend fun loadOlder() {
+        val older = runCatching { social.api.messages(conversationId, before = messages.firstOrNull()?.id) }.getOrDefault(emptyList())
+        messages.addAll(0, older.filter { o -> messages.none { it.id == o.id } })
+        hasOlder = older.size == PAGE
+    }
 
     fun reply(message: ChatMessage) {
         replyingTo = message
@@ -220,6 +241,19 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         }
     }
 
+    /** Goes to a message, loading older pages first if it isn't loaded yet (a search result from long ago). */
+    fun findAndJump(id: Long) {
+        scope.launch {
+            var pages = 0
+            while (messages.none { it.id == id } && hasOlder && pages < 40) {
+                loadOlder()
+                pages++
+            }
+            if (pages > 0) delay(100) // let the list lay out the older messages first
+            jumpTo(id)
+        }
+    }
+
     /** Sends a photo, GIF or sticker (as a reply, if one is being written). */
     fun sendPicture(image: OutgoingImage, caption: String) {
         uploading = true
@@ -233,6 +267,52 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 Toast.makeText(context, e.message ?: "Couldn't send the picture", Toast.LENGTH_SHORT).show()
             }
             uploading = false
+        }
+    }
+
+    /** Stops recording and sends it (as a reply, if one is being written). */
+    fun finishRecording() {
+        if (!recording) return
+        recording = false
+        val (bytes, length) = recorder.finish() ?: run {
+            Toast.makeText(context, "Too short. Tap the mic, speak, then tap send", Toast.LENGTH_SHORT).show()
+            return
+        }
+        uploading = true
+        val replyTo = replyingTo?.id
+        scope.launch {
+            try {
+                add(social.api.sendVoice(conversationId, bytes, length, replyTo))
+                if (replyingTo?.id == replyTo) replyingTo = null
+                social.refreshConversationsSoon()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Couldn't send the voice message", Toast.LENGTH_SHORT).show()
+            }
+            uploading = false
+        }
+    }
+
+    fun startRecording() {
+        voicePlayer.stop()
+        runCatching { recorder.start(onMaxReached = { finishRecording() }) }
+            .onSuccess { recording = true }
+            .onFailure { micProblem(context, it) }
+    }
+
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startRecording()
+        else Toast.makeText(context, "Voice messages need the microphone. You can allow it in Android's settings", Toast.LENGTH_LONG).show()
+    }
+
+    fun forward(message: ChatMessage, to: List<Long>) {
+        scope.launch {
+            runCatching { social.api.forward(conversationId, message.id, to) }
+                .onSuccess { sent ->
+                    sent.filter { it.conversationId == conversationId }.forEach(::add)
+                    social.refreshConversationsSoon()
+                    Toast.makeText(context, if (to.size == 1) "Forwarded" else "Forwarded to ${to.size} chats", Toast.LENGTH_SHORT).show()
+                }
+                .onFailure { Toast.makeText(context, it.message ?: "Couldn't forward it", Toast.LENGTH_SHORT).show() }
         }
     }
 
@@ -354,6 +434,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             note = jamNote,
             onTitleClick = if (conversation?.isGroup == true) ({ showMembers = true }) else null,
         ) {
+            IconButton(onClick = { searching = !searching }) { Icon(Icons.Filled.Search, contentDescription = "Search this chat") }
             // The jam's queue: everyone in it can look, the host can also move and remove songs.
             if (inSession) {
                 IconButton(onClick = { showQueue = true }) {
@@ -480,6 +561,19 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             )
         }
 
+        forwarding?.let { target ->
+            ForwardDialog(onForward = { to -> forwarding = null; forward(target, to) }, onDismiss = { forwarding = null })
+        }
+        if (searching) {
+            ChatSearch(
+                conversationId, me,
+                onPick = { id -> searching = false; findAndJump(id) },
+                onClose = { searching = false },
+                modifier = Modifier.weight(1f),
+            )
+            return@Column
+        }
+
         LazyColumn(
             state = listState,
             reverseLayout = true,
@@ -512,22 +606,18 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     pinned = message.id in pinnedIds,
                     onPin = if (conversation?.canMessage == true && !message.deleted) ({ hours -> pin(message.id, hours) }) else null,
                     onReact = if (conversation?.canMessage == true && !message.deleted) ({ emoji -> react(message, emoji) }) else null,
-                    onEdit = if (message.isOwnEditable(me) && message.song == null) ({ startEditing(message) }) else null,
+                    onEdit = if (message.isOwnEditable(me) && message.song == null && message.voiceMs == null) ({ startEditing(message) }) else null,
                     onDelete = if (message.isOwnEditable(me)) ({ deleting = message }) else null,
                     seenLabel = if (message.id == lastMine?.id) seenLabel else null,
                     onUnpin = { unpin(message.id) },
                     onOpenPicture = { viewing = message },
+                    onForward = if (!message.deleted) ({ forwarding = message }) else null,
+                    voicePlayer = voicePlayer,
                 )
             }
             if (hasOlder) {
                 item {
-                    TextButton(onClick = {
-                        scope.launch {
-                            val older = runCatching { social.api.messages(conversationId, before = messages.firstOrNull()?.id) }.getOrDefault(emptyList())
-                            messages.addAll(0, older.filter { o -> messages.none { it.id == o.id } })
-                            hasOlder = older.size == PAGE
-                        }
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Load earlier messages") }
+                    TextButton(onClick = { scope.launch { loadOlder() } }, modifier = Modifier.fillMaxWidth()) { Text("Load earlier messages") }
                 }
             }
         }
@@ -566,6 +656,10 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             }
         }
         if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp))
+        if (recording) {
+            RecordingBar(recorder, onCancel = { recorder.cancel(); recording = false }, onSend = ::finishRecording)
+            return@Column
+        }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // A photo or GIF from the phone, or a new photo from the camera.
             var attaching by remember { mutableStateOf(false) }
@@ -618,7 +712,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     },
             )
             val editingNow = editing
-            IconButton(
+            if (editingNow == null && draft.text.isBlank()) {
+                // Nothing typed: the button records a voice message instead.
+                IconButton(enabled = !uploading, onClick = {
+                    val allowed = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                    if (allowed) startRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                }) {
+                    Icon(painterResource(R.drawable.ic_mic), contentDescription = "Record a voice message")
+                }
+            } else IconButton(
                 // A picture's caption can be emptied; other messages need some text.
                 enabled = !sending && (draft.text.isNotBlank() || editingNow?.image != null),
                 onClick = { if (editingNow != null) saveEdit(editingNow, draft.text.toString().trim()) else send(draft.text.toString().trim()) },
@@ -649,6 +751,8 @@ private fun Bubble(
     onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     seenLabel: String? = null,
+    onForward: (() -> Unit)? = null,
+    voicePlayer: VoicePlayer? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -662,7 +766,7 @@ private fun Bubble(
     val sticker = message.image?.isSticker == true
     val myReaction = message.reactions.firstOrNull { me in it.userIds }?.emoji
     // Long-press opens the menu when there's something in it.
-    val hasMenu = !message.deleted && (onReply != null || onReact != null || message.body.isNotBlank() || pinned || onDelete != null)
+    val hasMenu = !message.deleted && (onReply != null || onReact != null || message.body.isNotBlank() || pinned || onDelete != null || onForward != null)
     val flash by animateColorAsState(
         if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
         label = "highlight",
@@ -720,6 +824,15 @@ private fun Bubble(
                     },
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        if (message.forwarded && !message.deleted) {
+                            Text(
+                                "↪ Forwarded",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontStyle = FontStyle.Italic,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 4.dp),
+                            )
+                        }
                         message.replyTo?.let { quote ->
                             Quote(
                                 quote, me,
@@ -749,6 +862,7 @@ private fun Bubble(
                                 modifier = Modifier.padding(bottom = 6.dp),
                             )
                         }
+                        if (message.voiceMs != null && voicePlayer != null) VoiceMessage(message, voicePlayer)
                         message.song?.let {
                             SongCard(
                                 it,
@@ -799,6 +913,7 @@ private fun Bubble(
                             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Message", message.body))
                         })
                     }
+                    if (onForward != null) DropdownMenuItem(text = { Text("Forward") }, onClick = { menu = false; onForward() })
                     if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
                     if (onDelete != null) {
                         DropdownMenuItem(text = { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() })

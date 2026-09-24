@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice messages in chats (asked for the first time you record one). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Installing app updates downloaded from GitHub (Android asks the user first). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

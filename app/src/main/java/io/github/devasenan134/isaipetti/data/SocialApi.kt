@@ -144,6 +144,31 @@ class SocialApi(
         }
     }
 
+    /** Sends a voice message (an .m4a recording, [durationMs] long), as a reply if [replyTo] is set. */
+    suspend fun sendVoice(conversationId: Long, bytes: ByteArray, durationMs: Long, replyTo: Long? = null): ChatMessage {
+        val query = "durationMs=$durationMs" + (replyTo?.let { "&replyTo=$it" } ?: "")
+        return send("POST", "/conversations/$conversationId/voice?$query", null, ChatMessage.serializer(), bytes = bytes, mime = "audio/mp4")
+    }
+
+    /** A voice message's recording, saved into [into] (the app keeps them in its cache). */
+    suspend fun downloadVoice(message: ChatMessage, into: java.io.File) = withContext(Dispatchers.IO) {
+        val url = baseUrl()?.let { "$it/conversations/${message.conversationId}/messages/${message.id}/voice" } ?: throw SocialException("No friends server set")
+        val request = Request.Builder().url(url).header("Authorization", authHeader() ?: throw SocialException("Not connected to friends", 401)).build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw SocialException("Couldn't get the recording (${response.code})", response.code)
+            val part = java.io.File(into.path + ".part")
+            part.outputStream().use { out -> response.body.byteStream().copyTo(out) }
+            part.renameTo(into)
+        }
+    }
+
+    /** Forwards a message to other chats of yours; returns the new messages. */
+    suspend fun forward(conversationId: Long, messageId: Long, to: List<Long>): List<ChatMessage> =
+        post("/conversations/$conversationId/messages/$messageId/forward", ForwardBody(to))
+
+    /** Messages of a chat whose text or shared song matches [query], newest first. */
+    suspend fun search(conversationId: Long, query: String): List<ChatMessage> = get("/conversations/$conversationId/search?q=${enc(query)}")
+
     /** Where a message's picture is (needs the Authorization header from [authHeader]). */
     fun imageUrl(message: ChatMessage): String? = baseUrl()?.let { "$it/conversations/${message.conversationId}/messages/${message.id}/image" }
 
@@ -236,6 +261,7 @@ class SocialApi(
     @Serializable private data class PinBody(val messageId: Long, val hours: Int)
     @Serializable private data class EditBody(val body: String)
     @Serializable private data class ReactBody(val emoji: String)
+    @Serializable private data class ForwardBody(val conversationIds: List<Long>)
     @Serializable private data class MessageBody(val body: String, val song: SongRef?, val replyTo: Long? = null)
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)

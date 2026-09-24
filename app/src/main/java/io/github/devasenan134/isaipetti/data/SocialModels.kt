@@ -77,6 +77,10 @@ data class ChatMessage(
     val editedAt: Long? = null,
     /** Its sender deleted it for everyone. */
     val deleted: Boolean = false,
+    /** A voice message, this long. */
+    val voiceMs: Long? = null,
+    /** Forwarded from another chat. */
+    val forwarded: Boolean = false,
 ) {
     /** Your own ordinary message: one you can edit and delete. */
     fun isOwnEditable(me: Long?) = sender.id == me && !system && !deleted && request == null
@@ -85,12 +89,13 @@ data class ChatMessage(
     fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body
 
     /** What a reply to this message quotes. */
-    fun quote() = ReplyQuote(id, sender, body, song, imageKind = image?.kind)
+    fun quote() = ReplyQuote(id, sender, body, song, imageKind = image?.kind, voiceMs = voiceMs)
 
     /** One line about it for the chat list: its text, song or picture. */
     fun summary() = when {
         deleted -> "This message was deleted"
         image != null -> imageLabel(image.kind) + if (body.isNotBlank()) " – $body" else ""
+        voiceMs != null -> voiceLabel(voiceMs)
         song != null -> "♪ ${song.title}${song.clipLabel}" + if (body.isNotBlank()) " – $body" else ""
         else -> body
     }
@@ -106,6 +111,8 @@ data class ChatMessage(
 data class ChatImage(val kind: String, val width: Int, val height: Int) {
     val isSticker get() = kind == "sticker"
 }
+
+fun voiceLabel(ms: Long) = "🎤 Voice message (${clockTime(ms)})"
 
 fun imageLabel(kind: String) = when (kind) {
     "gif" -> "GIF"
@@ -132,11 +139,14 @@ data class ReplyQuote(
     val imageKind: String? = null,
     /** The quoted message was deleted since. */
     val deleted: Boolean = false,
+    /** Set when it's a voice message: how long it is. */
+    val voiceMs: Long? = null,
 ) {
     /** One line about what it said: its text, or the song or picture it shared. */
     val preview get() = when {
         hidden -> "Earlier message"
         deleted -> "Deleted message"
+        voiceMs != null -> voiceLabel(voiceMs)
         imageKind != null -> imageLabel(imageKind) + if (body.isNotBlank()) " – $body" else ""
         body.isNotBlank() -> body
         song != null -> "♪ ${song.title}${song.clipLabel}"
