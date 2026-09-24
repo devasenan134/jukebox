@@ -192,3 +192,60 @@ data class ListeningStats(
     val daily: List<DayHours> = emptyList(),
     val hourOfDay: List<Double> = emptyList(),
 )
+
+// Search by Isai Pettai (the friends server): forgives spelling, and knows lyricists and actors.
+
+/** A composer, artist (singer), lyricist or actor. Actors' ids start with "actor-" (they aren't in Navidrome). */
+@Serializable
+data class PersonHit(
+    val id: String,
+    val name: String,
+    /** "composer", "singer", "lyricist", "actor". */
+    val roles: List<String> = emptyList(),
+    val coverArt: String? = null,
+    val songCount: Int = 0,
+    val movieCount: Int = 0,
+) {
+    /** "Actor · Lyricist · 45 movies" */
+    val description get() = (
+        roles.map { when (it) { "composer" -> "Composer"; "singer" -> "Artist"; "lyricist" -> "Lyricist"; else -> "Actor" } } +
+            listOfNotNull(
+                if ("actor" in roles || "composer" in roles) movieCount.takeIf { it > 0 }?.let { if (it == 1) "1 movie" else "$it movies" }
+                else songCount.takeIf { it > 0 }?.let { if (it == 1) "1 song" else "$it songs" },
+            )
+        ).joinToString(" · ")
+
+    /** As an artist, for "Your recent composers and artists"; lyricists and actors keep their roles. */
+    fun toArtist() = Artist(
+        id, name, coverArt = coverArt,
+        roles = roles.map { when (it) { "composer" -> "albumartist"; "singer" -> "artist"; else -> it } },
+    )
+}
+
+@Serializable
+data class MovieHit(
+    val id: String,
+    val name: String,
+    val year: Int? = null,
+    val composer: String? = null,
+    val coverArt: String? = null,
+    val songCount: Int = 0,
+    /** Why it was found when it isn't the name, e.g. "Starring Vijay". */
+    val reason: String? = null,
+) {
+    fun toAlbum() = Album(id = id, name = name, artist = reason ?: composer, coverArt = coverArt, songCount = songCount, year = year)
+}
+
+@Serializable
+data class SongHit(val song: MixSong, val reason: String? = null)
+
+@Serializable
+data class LibrarySearchResults(
+    val people: List<PersonHit> = emptyList(),
+    val movies: List<MovieHit> = emptyList(),
+    val songs: List<SongHit> = emptyList(),
+)
+
+/** A lyricist's or actor's page: the movies they wrote for or acted in, and the songs. */
+@Serializable
+data class PersonPage(val person: PersonHit, val movies: List<MovieHit> = emptyList(), val songs: List<MixSong> = emptyList())

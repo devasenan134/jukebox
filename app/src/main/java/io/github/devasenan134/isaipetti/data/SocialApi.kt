@@ -68,6 +68,10 @@ class SocialApi(
     // Mixes, playlists and stations by Isai Pettai.
     suspend fun mixes(): HomeMixes = get("/mixes")
     suspend fun mix(id: String): Mix = get("/mixes/${enc(id)}")
+
+    /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
+    suspend fun search(query: String): LibrarySearchResults = get("/search?q=${enc(query)}")
+    suspend fun person(id: String): PersonPage = get("/search/people/${enc(id)}")
     suspend fun followedMixes(): List<Mix> = get("/mixes/followed")
     suspend fun followMix(id: String) = send<Unit>("PUT", "/mixes/${enc(id)}/follow", "")
     suspend fun unfollowMix(id: String) = send<Unit>("DELETE", "/mixes/${enc(id)}/follow", null)

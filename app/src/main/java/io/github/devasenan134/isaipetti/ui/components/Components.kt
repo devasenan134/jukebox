@@ -167,6 +167,8 @@ fun SongRow(
     inLikedSongs: Boolean = false,
     /** On a playlist you made (its name) every song is in it, so the ✓ only means "also liked, or in another of your playlists". */
     inOwnPlaylist: String? = null,
+    /** Replaces the line under the title, e.g. "Lyrics by Vairamuthu · Guru" in search. */
+    note: String? = null,
 ) {
     val app = LocalApp.current
     val player = app.player
@@ -228,7 +230,7 @@ fun SongRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    listOfNotNull(song.artist, if (showCover) song.album else null).joinToString(" · "),
+                    note ?: listOfNotNull(song.artist, if (showCover) song.album else null).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

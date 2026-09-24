@@ -239,6 +239,8 @@ internal fun SongList(
     nav: Nav,
     /** More below the songs, like recommendations. */
     footer: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
+    /** More between the header and the songs, like a person's movies. */
+    aboveSongs: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
     /** The page's colour, faded behind the header (see PageTint.kt). */
     tint: androidx.compose.ui.graphics.Color? = null,
     /** Set on a playlist you made (its name), so its songs' ✓ doesn't just say they're in it. */
@@ -292,6 +294,7 @@ internal fun SongList(
                 extraAction?.let { Box(Modifier.padding(top = 8.dp)) { it() } }
             }
         }
+        aboveSongs?.invoke(this)
         itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
             SongRow(
                 song = song,

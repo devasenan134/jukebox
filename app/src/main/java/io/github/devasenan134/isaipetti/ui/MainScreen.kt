@@ -67,6 +67,7 @@ import io.github.devasenan134.isaipetti.ui.library.LikedSongsScreen
 import io.github.devasenan134.isaipetti.ui.library.PlaylistScreen
 import io.github.devasenan134.isaipetti.ui.library.PlaylistsScreen
 import io.github.devasenan134.isaipetti.ui.library.SingerScreen
+import io.github.devasenan134.isaipetti.ui.library.PersonScreen
 import io.github.devasenan134.isaipetti.ui.library.SingersScreen
 import io.github.devasenan134.isaipetti.data.Artist
 import io.github.devasenan134.isaipetti.ui.player.MiniPlayer
@@ -99,6 +100,7 @@ import kotlinx.serialization.Serializable
 @Serializable object SingersRoute
 @Serializable data class MixRoute(val id: String)
 @Serializable data class SingerRoute(val id: String, val name: String, val coverArt: String? = null)
+@Serializable data class PersonRoute(val id: String, val name: String, val coverArt: String? = null)
 
 /** Navigation actions that screens can call. */
 class Nav(
@@ -114,7 +116,7 @@ class Nav(
     val openLikedSongs: () -> Unit,
     val openPlaylists: () -> Unit,
     val openSingers: () -> Unit,
-    /** A singer's songs; a composer's movies ([openArtist]). */
+    /** A singer's songs (a lyricist's or actor's page for them); a composer's movies ([openArtist]). */
     val openSinger: (Artist) -> Unit,
     /** A mix, playlist or station by Isai Pettai. */
     val openMix: (String) -> Unit,
@@ -149,7 +151,11 @@ fun MainScreen() {
         openLikedSongs = { navController.navigate(LikedSongsRoute) },
         openPlaylists = { navController.navigate(PlaylistsRoute) },
         openSingers = { navController.navigate(SingersRoute) },
-        openSinger = { navController.navigate(SingerRoute(it.id, it.name, it.coverArt)) },
+        openSinger = {
+            // Lyricists and actors (found in search) have their own page, with movies and songs.
+            if ("lyricist" in it.roles || "actor" in it.roles) navController.navigate(PersonRoute(it.id, it.name, it.coverArt))
+            else navController.navigate(SingerRoute(it.id, it.name, it.coverArt))
+        },
         openMix = { navController.navigate(MixRoute(it)) },
         back = { navController.popBackStack() },
     )
@@ -257,6 +263,7 @@ fun MainScreen() {
                 screen<SingersRoute> { SingersScreen(nav) }
                 screen<MixRoute> { MixScreen(it.toRoute<MixRoute>().id, nav) }
                 screen<SingerRoute> { it.toRoute<SingerRoute>().let { r -> SingerScreen(r.id, r.name, r.coverArt, nav) } }
+                screen<PersonRoute> { it.toRoute<PersonRoute>().let { r -> PersonScreen(r.id, r.name, r.coverArt, nav) } }
             }
         }
 
