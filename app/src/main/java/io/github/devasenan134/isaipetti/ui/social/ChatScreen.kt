@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import io.github.devasenan134.isaipetti.ui.player.QueueSheet
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -151,20 +152,39 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     val joined by listen.joined.collectAsStateWithLifecycle()
     val listeners = sessions[conversationId].orEmpty()
     val inSession = joined == conversationId
+    // We started the jam here: its button ends it (for everyone).
+    val myJam = inSession && jamOwner == me
+    var showQueue by remember { mutableStateOf(false) }
+    if (showQueue) QueueSheet(onDismiss = { showQueue = false })
     Column(Modifier.imePadding()) {
         ScreenHeader(conversation?.title(me) ?: "Chat", onBack = nav.back) {
             if (conversation?.isGroup == true) GroupMenu(conversation.title(me), conversation.createdBy == me, conversationId, hasPicture = conversation.picture != null, onGone = nav.back)
+            // The jam's queue: everyone in it can look, the host can also move and remove songs.
+            if (inSession) {
+                IconButton(onClick = { showQueue = true }) {
+                    Icon(painterResource(R.drawable.ic_queue), contentDescription = "Jam queue")
+                }
+            }
             if (conversation?.canMessage == true) {
                 IconButton(onClick = {
                     when {
+                        myJam -> {
+                            listen.leave()
+                            Toast.makeText(context, "Jam ended", Toast.LENGTH_SHORT).show()
+                        }
                         inSession -> listen.leave()
                         listeners.isEmpty() -> listen.start(conversationId)
                         else -> listen.join(conversationId)
                     }
                 }) {
                     Icon(
-                        painterResource(R.drawable.ic_headphones),
-                        contentDescription = if (inSession) "Stop listening together" else "Listen together",
+                        // Your own jam shows the record: tap it to end the jam.
+                        painterResource(if (myJam) R.drawable.ic_jam else R.drawable.ic_headphones),
+                        contentDescription = when {
+                            myJam -> "End jam"
+                            inSession -> "Stop listening together"
+                            else -> "Listen together"
+                        },
                         tint = if (inSession) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                     )
                 }
@@ -189,7 +209,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         }
 
         if (listeners.isNotEmpty() && conversation != null) {
-            ListenBar(conversation.members, listeners, me, inSession, onJoin = { listen.join(conversationId) }, onLeave = listen::leave)
+            ListenBar(conversation.members, listeners, me, inSession, isHost = myJam, onJoin = { listen.join(conversationId) }, onLeave = listen::leave)
         }
 
         LazyColumn(
@@ -303,7 +323,13 @@ private fun Bubble(
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
                 }
-                message.song?.let { SongCard(it, Modifier.padding(bottom = if (message.body.isNotBlank() || message.request != null) 6.dp else 0.dp)) }
+                message.song?.let {
+                    SongCard(
+                        it,
+                        Modifier.padding(bottom = if (message.body.isNotBlank() || message.request != null) 6.dp else 0.dp),
+                        playable = message.request == null,
+                    )
+                }
                 if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
                 message.request?.let { status -> SongRequestStatus(status, message.requestMode == "now", canAnswer, jamOwnerName, onAnswer) }
                 Text(
@@ -319,7 +345,7 @@ private fun Bubble(
 
 /** "Alice and Bob are listening together · Join", or "Listening together with Alice · Leave" once you're in. */
 @Composable
-private fun ListenBar(members: List<SocialUser>, listeners: List<Long>, me: Long?, inSession: Boolean, onJoin: () -> Unit, onLeave: () -> Unit) {
+private fun ListenBar(members: List<SocialUser>, listeners: List<Long>, me: Long?, inSession: Boolean, isHost: Boolean, onJoin: () -> Unit, onLeave: () -> Unit) {
     val others = members.filter { it.id in listeners && it.id != me }.map { it.displayName }
     val names = when (others.size) {
         0 -> ""
@@ -341,7 +367,8 @@ private fun ListenBar(members: List<SocialUser>, listeners: List<Long>, me: Long
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
             )
-            if (inSession) TextButton(onClick = onLeave) { Text("Leave") } else Button(onClick = onJoin) { Text("Join") }
+            // The host leaving ends the jam for everyone, so say so.
+            if (inSession) TextButton(onClick = onLeave) { Text(if (isHost) "End jam" else "Leave") } else Button(onClick = onJoin) { Text("Join") }
         }
     }
 }

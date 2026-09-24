@@ -143,7 +143,12 @@ fun chatTime(millis: Long): String {
 
 /** A shared song (or part of one) inside a chat bubble: cover, title, and a play button. */
 @Composable
-fun SongCard(song: SongRef, modifier: Modifier = Modifier) {
+fun SongCard(
+    song: SongRef,
+    modifier: Modifier = Modifier,
+    /** False for a song request: tapping it would replace the queue (and a jam's music) by accident. */
+    playable: Boolean = true,
+) {
     val player = LocalApp.current.player
     val activity = LocalApp.current.activity
     val play = {
@@ -153,7 +158,7 @@ fun SongCard(song: SongRef, modifier: Modifier = Modifier) {
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-        modifier = modifier.clickable(onClick = play),
+        modifier = if (playable) modifier.clickable(onClick = play) else modifier,
     ) {
         Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Cover(song.coverArt, Modifier.size(48.dp), size = 150, corner = 6.dp)
@@ -174,8 +179,10 @@ fun SongCard(song: SongRef, modifier: Modifier = Modifier) {
                     )
                 }
             }
-            IconButton(onClick = play) {
-                Icon(painterResource(R.drawable.ic_play), contentDescription = "Play")
+            if (playable) {
+                IconButton(onClick = play) {
+                    Icon(painterResource(R.drawable.ic_play), contentDescription = "Play")
+                }
             }
         }
     }
