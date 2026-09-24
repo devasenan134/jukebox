@@ -73,7 +73,7 @@ import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
 import io.github.devasenan134.isaipetti.ui.components.songCount
 
 /** The sections of Your Library, in the order of the chips (swipe between them). */
-private enum class LibraryFilter(val label: String) { All("All"), Playlists("Playlists"), Mine("My Playlists"), Movies("Movies") }
+private enum class LibraryFilter(val label: String) { All("All"), Playlists("Playlists"), Movies("Movies"), Mine("My Playlists") }
 
 /** Your Library: liked songs, saved mixes, liked movies, liked playlists and playlists you created. */
 @Composable
@@ -135,7 +135,8 @@ fun LibraryScreen(nav: Nav) {
                 )
             }
         }
-        HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }) { page ->
+        // Pages start at the top (a pager centres them by default).
+        HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, key = { it }, verticalAlignment = Alignment.Top) { page ->
             val filter = LibraryFilter.entries[page]
             val madeFor = madeForName()
             // "Playlists": mixes and playlists you saved from others. "My Playlists": Liked songs and the ones you made.
@@ -273,7 +274,7 @@ fun LikedSongsScreen(nav: Nav) {
             itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
                 SongRow(
                     song = song,
-                    onClick = { app.activity.liked(); player.play(songs, index, source = LIKED) },
+                    onClick = { app.activity.song(song); player.play(songs, index, source = LIKED) },
                     isCurrent = song.id == nowPlaying.songId,
                     showCover = true,
                     onOpenAlbum = nav.openAlbum,

@@ -162,7 +162,7 @@ fun MixScreen(id: String, nav: Nav) {
                 itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
                     SongRow(
                         song = song,
-                        onClick = { play(index, false) },
+                        onClick = { app.activity.song(song); app.player.play(songs, index, source = mix.source) },
                         isCurrent = song.id == nowPlaying.songId,
                         showCover = true,
                         onOpenAlbum = nav.openAlbum,

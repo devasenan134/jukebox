@@ -1,5 +1,8 @@
 package io.github.devasenan134.isaipetti.ui.home
 
+import io.github.devasenan134.isaipetti.ui.components.SongRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.remember
 import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -58,6 +61,8 @@ private data class HomeData(
 fun HomeScreen(nav: Nav) {
     val app = LocalApp.current
     val recentlyPlayed by app.activity.items.collectAsStateWithLifecycle()
+    val recents = remember(recentlyPlayed) { splitRecents(recentlyPlayed) }
+    val nowPlaying by app.player.nowPlaying.collectAsStateWithLifecycle()
     // Mixes by Isai Pettai; worked out again on the server whenever the library or your listening changed.
     val mixes by app.mixes.home.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { app.mixes.refresh() }
@@ -73,17 +78,33 @@ fun HomeScreen(nav: Nav) {
     }
 
     Column {
-        ScreenHeader("இசைப்பெட்டி") {
+        ScreenHeader("இசைப்பெட்டி", titleColor = MaterialTheme.colorScheme.primary) {
             IconButton(onClick = { loader.reload(); app.mixes.refresh() }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
             IconButton(onClick = nav.openSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
         }
         LoadableContent(loader) { data ->
             LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                // Playlists live under Search → Playlists and in Your Library.
-                // Everything you played lately; until there's some, the movies Navidrome says you played.
-                if (recentlyPlayed.isNotEmpty()) recentRow(recentlyPlayed, nav) { app.player.play(listOf(it)) }
-                else albumRow("Recently played", data.recent, nav)
-                mixes?.let { mixSections(it.sections, nav) }
+                // 1. Made for you, as tiles.
+                val sections = mixes?.sections.orEmpty()
+                mixSections(sections.filter { it.id == "made-for-you" }, nav)
+                // 2. The songs you played lately, as a list.
+                if (recents.songs.isNotEmpty()) {
+                    item(key = "recent-songs-title") { SectionTitle("Recent songs") }
+                    itemsIndexed(recents.songs, key = { _, song -> "recent-song-${song.id}" }) { index, song ->
+                        SongRow(
+                            song = song,
+                            onClick = { app.activity.song(song); app.player.play(listOf(song)) },
+                            isCurrent = song.id == nowPlaying.songId,
+                            showCover = true,
+                            onOpenAlbum = nav.openAlbum,
+                        )
+                    }
+                }
+                // 3. Movies, playlists, artists and mixes you played as a whole, as tiles.
+                // Until there's any listening, the movies Navidrome says you played.
+                if (recents.collections.isNotEmpty()) recentRow(recents.collections, nav) { app.player.play(listOf(it)) }
+                else if (recents.songs.isEmpty()) albumRow("Recently played", data.recent, nav)
+                mixSections(sections.filter { it.id != "made-for-you" }, nav)
                 albumRow("Most played", data.frequent, nav)
                 albumRow("Recently added", data.newest, nav)
                 albumRow("Random picks", data.random, nav)
@@ -91,6 +112,19 @@ fun HomeScreen(nav: Nav) {
         }
     }
 }
+
+/**
+ * Home's recently played. Songs you started by tapping them (anywhere) are listed; movies, playlists,
+ * Liked songs, mixes and artists you started as a whole (Play, Shuffle, Resume) are tiles.
+ */
+private data class Recents(val songs: List<Song>, val collections: List<RecentActivity.Item>)
+
+private const val RECENT_SONGS = 6
+
+private fun splitRecents(items: List<RecentActivity.Item>): Recents = Recents(
+    songs = items.mapNotNull { it.song?.toSong() }.take(RECENT_SONGS),
+    collections = items.filter { it.kind != RecentActivity.Kind.Song },
+)
 
 private fun androidx.compose.foundation.lazy.LazyListScope.albumRow(title: String, albums: List<Album>, nav: Nav) {
     if (albums.isEmpty()) return

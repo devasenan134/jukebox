@@ -7,87 +7,86 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// Brand palette: "brass & night".
-private val Night = Color(0xFF16131F)
-private val Plum = Color(0xFF1F1A2E)
-private val Dusk = Color(0xFF2A2340)
-private val Brass = Color(0xFFF5B942)
-private val DeepBrass = Color(0xFF7A5200)
-private val Kumkum = Color(0xFFE8643C)
-private val Jasmine = Color(0xFFF6F0E4)
-private val Haze = Color(0xFFA99FBF)
-private val Cream = Color(0xFFFBF6EC)
-private val Ink = Color(0xFF1B1726)
+// Brand palette: "Indigo night" — deep indigo with a periwinkle accent, bright cool text.
+private val Night = Color(0xFF0E1024)
+private val Deep = Color(0xFF171A36)
+private val Dusk = Color(0xFF22264A)
+private val Periwinkle = Color(0xFF8FA0FF)
+private val Indigo = Color(0xFF3949AB)
+private val Moon = Color(0xFFF7F7FF)
+private val Mist = Color(0xFFC3C6E6)
+private val Paper = Color(0xFFFAFAFF)
+private val Ink = Color(0xFF121433)
 
 private val DarkColors = darkColorScheme(
-    primary = Brass,
-    onPrimary = Color(0xFF3F2B00),
-    primaryContainer = Color(0xFF5C3F00),
-    onPrimaryContainer = Color(0xFFFFDEA6),
-    inversePrimary = DeepBrass,
-    secondary = Haze,
+    primary = Periwinkle,
+    onPrimary = Color(0xFF0B1260),
+    primaryContainer = Color(0xFF303A8C),
+    onPrimaryContainer = Color(0xFFDCE1FF),
+    inversePrimary = Indigo,
+    secondary = Mist,
     onSecondary = Night,
-    secondaryContainer = Color(0xFF3B3050),
-    onSecondaryContainer = Jasmine,
-    tertiary = Kumkum,
-    onTertiary = Color(0xFF3A0B00),
-    tertiaryContainer = Color(0xFF7A2A12),
-    onTertiaryContainer = Color(0xFFFFDBD0),
+    secondaryContainer = Color(0xFF2E3360),
+    onSecondaryContainer = Moon,
+    tertiary = Color(0xFFFFB4D0),
+    onTertiary = Color(0xFF4A0A2C),
+    tertiaryContainer = Color(0xFF6B2748),
+    onTertiaryContainer = Color(0xFFFFD9E5),
     background = Night,
-    onBackground = Jasmine,
+    onBackground = Moon,
     surface = Night,
-    onSurface = Jasmine,
+    onSurface = Moon,
     surfaceVariant = Dusk,
-    onSurfaceVariant = Haze,
-    surfaceTint = Brass,
+    onSurfaceVariant = Mist,
+    surfaceTint = Periwinkle,
     surfaceDim = Night,
-    surfaceBright = Color(0xFF3A3152),
-    surfaceContainerLowest = Color(0xFF110F18),
-    surfaceContainerLow = Color(0xFF1B1727),
-    surfaceContainer = Plum,
+    surfaceBright = Color(0xFF30355E),
+    surfaceContainerLowest = Color(0xFF0A0B1C),
+    surfaceContainerLow = Color(0xFF13152D),
+    surfaceContainer = Deep,
     surfaceContainerHigh = Dusk,
-    surfaceContainerHighest = Color(0xFF332B4A),
-    inverseSurface = Jasmine,
+    surfaceContainerHighest = Color(0xFF2B3057),
+    inverseSurface = Moon,
     inverseOnSurface = Ink,
-    outline = Color(0xFF4A4063),
-    outlineVariant = Color(0xFF3A3152),
+    outline = Color(0xFF4A4F82),
+    outlineVariant = Color(0xFF2F3460),
 )
 
 private val LightColors = lightColorScheme(
-    primary = DeepBrass,
+    primary = Indigo,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDEA6),
-    onPrimaryContainer = Color(0xFF271900),
-    inversePrimary = Brass,
-    secondary = Color(0xFF5D5470),
+    primaryContainer = Color(0xFFDCE1FF),
+    onPrimaryContainer = Color(0xFF0B1260),
+    inversePrimary = Periwinkle,
+    secondary = Color(0xFF4B4F72),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE6DDF3),
+    secondaryContainer = Color(0xFFE1E3F5),
     onSecondaryContainer = Ink,
-    tertiary = Color(0xFFB23A1C),
+    tertiary = Color(0xFF8E3A5E),
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFFDBD0),
-    onTertiaryContainer = Color(0xFF3A0B00),
-    background = Cream,
+    tertiaryContainer = Color(0xFFFFD9E5),
+    onTertiaryContainer = Color(0xFF3A0620),
+    background = Paper,
     onBackground = Ink,
-    surface = Cream,
+    surface = Paper,
     onSurface = Ink,
-    surfaceVariant = Color(0xFFEDE3D2),
-    onSurfaceVariant = Color(0xFF5D5470),
-    surfaceTint = DeepBrass,
-    surfaceDim = Color(0xFFE2D8C6),
-    surfaceBright = Cream,
+    surfaceVariant = Color(0xFFE1E3F5),
+    onSurfaceVariant = Color(0xFF4B4F72),
+    surfaceTint = Indigo,
+    surfaceDim = Color(0xFFD9DBEE),
+    surfaceBright = Paper,
     surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFF7F0E4),
-    surfaceContainer = Color(0xFFF3EBDD),
-    surfaceContainerHigh = Color(0xFFEDE3D2),
-    surfaceContainerHighest = Color(0xFFE7DCC9),
-    inverseSurface = Plum,
-    inverseOnSurface = Jasmine,
-    outline = Color(0xFF8A8199),
-    outlineVariant = Color(0xFFD6CCBB),
+    surfaceContainerLow = Color(0xFFF4F4FD),
+    surfaceContainer = Color(0xFFEEEFFB),
+    surfaceContainerHigh = Color(0xFFE7E8F7),
+    surfaceContainerHighest = Color(0xFFE1E3F5),
+    inverseSurface = Deep,
+    inverseOnSurface = Moon,
+    outline = Color(0xFF7A7EA3),
+    outlineVariant = Color(0xFFCDD0EA),
 )
 
-/** Always the Isaipetti brass palette; follows the system light/dark setting. */
+/** Always the Isaipetti "Indigo night" palette; follows the system light/dark setting. */
 @Composable
 fun IsaipettiTheme(content: @Composable () -> Unit) {
     MaterialTheme(

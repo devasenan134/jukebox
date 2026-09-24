@@ -201,7 +201,7 @@ fun ArtistScreen(id: String, nav: Nav) {
                                     val songs = runCatching {
                                         coroutineScope { albums.map { async { app.api.album(it.id).song } }.awaitAll().flatten() }
                                     }.getOrDefault(emptyList())
-                                    app.player.play(songs, shuffle = true)
+                                    app.player.play(songs, shuffle = true, source = "composer:${artist.id}")
                                     shuffling = false
                                 }
                             },
@@ -244,7 +244,8 @@ internal fun SongList(
     /** Set on a playlist you made (its name), so its songs' ✓ doesn't just say they're in it. */
     ownPlaylist: String? = null,
 ) {
-    val player = LocalApp.current.player
+    val app = LocalApp.current
+    val player = app.player
     val nowPlaying by player.nowPlaying.collectAsStateWithLifecycle()
     LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
         item {
@@ -294,7 +295,8 @@ internal fun SongList(
         itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
             SongRow(
                 song = song,
-                onClick = { onPlay(); player.play(songs, index, source = source) },
+                // A song you tap goes in Recent songs; Play, Shuffle and Resume put the whole page in Recently played.
+                onClick = { app.activity.song(song); player.play(songs, index, source = source) },
                 isCurrent = song.id == nowPlaying.songId,
                 showCover = showCovers,
                 onOpenAlbum = if (showCovers) nav.openAlbum else null,

@@ -9,8 +9,9 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * Everything you played recently, newest first, for "Recently played" on Home: songs, movies,
- * playlists, composers, artists and Liked songs. Kept on the phone.
+ * Everything you played recently, newest first, for Home: songs you started by tapping them
+ * ("Recent songs"), and movies, playlists, composers, artists, mixes and Liked songs you started as a
+ * whole with Play, Shuffle or Resume ("Recently played"). Kept on the phone.
  */
 class RecentActivity(context: Context) {
     enum class Kind { Song, Movie, Playlist, Composer, Artist, Liked, Mix }
@@ -64,6 +65,7 @@ class RecentActivity(context: Context) {
 
     private companion object {
         const val KEY = "activity"
-        const val MAX = 20
+        /** Songs and whole movies/playlists share the list, so keep enough of both. */
+        const val MAX = 40
     }
 }

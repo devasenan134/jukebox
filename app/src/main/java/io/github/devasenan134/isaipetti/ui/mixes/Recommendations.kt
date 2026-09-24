@@ -69,7 +69,7 @@ private fun RecommendedSongs(playlist: Playlist, onAdded: () -> Unit) {
         )
         list.filter { it.id !in added }.forEach { song ->
             Row(
-                Modifier.fillMaxWidth().clickable { app.player.play(listOf(song)) }.padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
+                Modifier.fillMaxWidth().clickable { app.activity.song(song); app.player.play(listOf(song)) }.padding(start = 16.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Cover(song.coverArt, Modifier.size(UiSize.SongThumb), size = 150, corner = 4.dp)

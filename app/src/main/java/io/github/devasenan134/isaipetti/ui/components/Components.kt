@@ -72,8 +72,8 @@ object UiSize {
     /** Pictures in list rows (Your Library, search results for people). */
     val ListThumb = 64.dp
     /** Your Library is a list of many things, so it's more compact: pictures in its rows, and its grid cells (three across). */
-    val LibraryThumb = 52.dp
-    val LibraryGridCell = 104.dp
+    val LibraryThumb = 60.dp
+    val LibraryGridCell = 120.dp
     /** Covers in song rows. */
     val SongThumb = 50.dp
     /** The big picture at the top of a movie, playlist or mix page. */
@@ -307,6 +307,8 @@ fun ScreenHeader(
     onBack: (() -> Unit)? = null,
     /** The page's colour behind the bar (see PageTint.kt); none by default. */
     color: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
+    /** The title's colour; the normal text colour by default. */
+    titleColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Unspecified,
     actions: @Composable () -> Unit = {},
 ) {
     Row(
@@ -319,6 +321,7 @@ fun ScreenHeader(
         Text(
             title,
             style = MaterialTheme.typography.titleLarge,
+            color = titleColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
