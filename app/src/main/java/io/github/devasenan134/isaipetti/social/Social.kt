@@ -17,6 +17,10 @@ import io.github.devasenan134.isaipetti.data.ListenSessionEvent
 import io.github.devasenan134.isaipetti.data.ListenStateEvent
 import io.github.devasenan134.isaipetti.data.MessageEvent
 import io.github.devasenan134.isaipetti.data.ConversationUpdatedEvent
+import io.github.devasenan134.isaipetti.data.ReadEvent
+import io.github.devasenan134.isaipetti.data.ReadMark
+import io.github.devasenan134.isaipetti.data.TypingEvent
+import io.github.devasenan134.isaipetti.data.TypingUpdate
 import io.github.devasenan134.isaipetti.data.MessageUpdatedEvent
 import io.github.devasenan134.isaipetti.data.NowPlayingUpdate
 import io.github.devasenan134.isaipetti.data.PresenceEvent
@@ -86,6 +90,23 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     /** New messages as they arrive, for the open chat screen. */
     val messages: SharedFlow<ChatMessage> = _messages
+
+    private val _typing = MutableStateFlow<Map<Long, Map<Long, Long>>>(emptyMap())
+
+    /** Who is typing where: chat → person → when we last heard (they count as typing for a few seconds after). */
+    val typing: StateFlow<Map<Long, Map<Long, Long>>> = _typing
+
+    private var lastTypingSent = 0L
+    private var lastTypingChat = 0L
+
+    /** Tells the others you're typing in a chat, at most every 3 seconds. */
+    fun sendTyping(conversationId: Long) {
+        val now = System.currentTimeMillis()
+        if (conversationId == lastTypingChat && now - lastTypingSent < 3_000) return
+        lastTypingSent = now
+        lastTypingChat = conversationId
+        sendEvent(TypingUpdate(conversationId))
+    }
 
     /** The chat currently on screen; its new messages are marked read right away. */
     var openConversationId: Long? = null
@@ -284,12 +305,24 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 list.map { if (it.user.id == event.userId) it.copy(online = event.online, nowPlaying = event.nowPlaying) else it }.sortedForDisplay()
             }
             is MessageEvent -> {
+                // Their message is sent: they've stopped typing.
+                _typing.update { all -> all[event.message.conversationId]?.let { all + (event.message.conversationId to it - event.message.sender.id) } ?: all }
                 _messages.emit(event.message)
                 if (event.message.conversationId == openConversationId) markRead(event.message.conversationId, event.message.id)
                 refreshConversations()
             }
             is FriendRequestEvent -> refreshRequests()
             is ConversationUpdatedEvent -> refreshConversations()
+            is TypingEvent -> _typing.update { all ->
+                all + (event.conversationId to (all[event.conversationId].orEmpty() + (event.userId to System.currentTimeMillis())))
+            }
+            // Someone read up to a message: "Seen" can change without asking the server.
+            is ReadEvent -> _conversations.update { list ->
+                list.map { c ->
+                    if (c.id != event.conversationId) c
+                    else c.copy(readMarks = c.readMarks.filter { it.userId != event.userId } + ReadMark(event.userId, event.messageId))
+                }
+            }
             is ConversationRemovedEvent -> {
                 _conversations.update { list -> list.filter { it.id != event.conversationId } }
                 _removed.emit(event.conversationId)

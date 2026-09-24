@@ -147,6 +147,19 @@ class SocialApi(
     /** Where a message's picture is (needs the Authorization header from [authHeader]). */
     fun imageUrl(message: ChatMessage): String? = baseUrl()?.let { "$it/conversations/${message.conversationId}/messages/${message.id}/image" }
 
+    /** Changes the text of your own message, or deletes it for everyone. */
+    suspend fun editMessage(conversationId: Long, messageId: Long, body: String): ChatMessage =
+        send("PATCH", "/conversations/$conversationId/messages/$messageId", json.encodeToString(EditBody.serializer(), EditBody(body)), ChatMessage.serializer())
+    suspend fun deleteMessage(conversationId: Long, messageId: Long): ChatMessage =
+        send("DELETE", "/conversations/$conversationId/messages/$messageId", null, ChatMessage.serializer())
+
+    /** Reacts to a message with an emoji (replacing your earlier one), or with null takes your reaction away. */
+    suspend fun react(conversationId: Long, messageId: Long, emoji: String?): ChatMessage {
+        val path = "/conversations/$conversationId/messages/$messageId/reaction"
+        return if (emoji == null) send("DELETE", path, null, ChatMessage.serializer())
+        else send("PUT", path, json.encodeToString(ReactBody.serializer(), ReactBody(emoji)), ChatMessage.serializer())
+    }
+
     /** Pins a message to the top of the chat for [hours] (24, 168 or 720), or unpins it. */
     suspend fun pin(conversationId: Long, messageId: Long, hours: Int): Conversation = post("/conversations/$conversationId/pins", PinBody(messageId, hours))
     suspend fun unpin(conversationId: Long, messageId: Long): Conversation =
@@ -221,6 +234,8 @@ class SocialApi(
     @Serializable private data class UserIdsBody(val userIds: List<Long>)
     @Serializable private data class NameBody(val name: String)
     @Serializable private data class PinBody(val messageId: Long, val hours: Int)
+    @Serializable private data class EditBody(val body: String)
+    @Serializable private data class ReactBody(val emoji: String)
     @Serializable private data class MessageBody(val body: String, val song: SongRef?, val replyTo: Long? = null)
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)

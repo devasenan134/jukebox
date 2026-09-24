@@ -71,7 +71,16 @@ data class ChatMessage(
     val replyTo: ReplyQuote? = null,
     /** A photo, GIF or sticker; [body] is then its caption. */
     val image: ChatImage? = null,
+    /** Emoji reactions, each with who reacted with it (one per person). */
+    val reactions: List<Reaction> = emptyList(),
+    /** When its sender last changed it, or null. */
+    val editedAt: Long? = null,
+    /** Its sender deleted it for everyone. */
+    val deleted: Boolean = false,
 ) {
+    /** Your own ordinary message: one you can edit and delete. */
+    fun isOwnEditable(me: Long?) = sender.id == me && !system && !deleted && request == null
+
     /** "Alice left the group" / "You left the group". */
     fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body
 
@@ -80,11 +89,17 @@ data class ChatMessage(
 
     /** One line about it for the chat list: its text, song or picture. */
     fun summary() = when {
+        deleted -> "This message was deleted"
         image != null -> imageLabel(image.kind) + if (body.isNotBlank()) " – $body" else ""
         song != null -> "♪ ${song.title}${song.clipLabel}" + if (body.isNotBlank()) " – $body" else ""
         else -> body
     }
 }
+
+@Serializable data class Reaction(val emoji: String, val userIds: List<Long>)
+
+/** How far one member of a chat has read. */
+@Serializable data class ReadMark(val userId: Long, val lastReadId: Long)
 
 /** A picture in a message. [kind] is "photo", "gif" or "sticker"; [width] × [height] is its size in pixels. */
 @Serializable
@@ -115,10 +130,13 @@ data class ReplyQuote(
     val hidden: Boolean = false,
     /** Set when it's a picture: "photo", "gif" or "sticker". */
     val imageKind: String? = null,
+    /** The quoted message was deleted since. */
+    val deleted: Boolean = false,
 ) {
     /** One line about what it said: its text, or the song or picture it shared. */
     val preview get() = when {
         hidden -> "Earlier message"
+        deleted -> "Deleted message"
         imageKind != null -> imageLabel(imageKind) + if (body.isNotBlank()) " – $body" else ""
         body.isNotBlank() -> body
         song != null -> "♪ ${song.title}${song.clipLabel}"
@@ -146,6 +164,8 @@ data class Conversation(
     val picture: Long? = null,
     /** Pinned messages, newest first (the app also hides ones that ran out since it last asked). */
     val pins: List<Pin> = emptyList(),
+    /** How far the other members have read, for "Seen". */
+    val readMarks: List<ReadMark> = emptyList(),
 ) {
     val isGroup get() = kind == "group"
 
@@ -175,6 +195,14 @@ data class FriendRemovedEvent(val userId: Long) : SocialEvent
 /** Something about a chat changed that isn't a new message (a pin was removed). */
 @Serializable @SerialName("conversationUpdated")
 data class ConversationUpdatedEvent(val conversationId: Long) : SocialEvent
+
+/** Someone is typing in a chat (the server sends it every few seconds while they type). */
+@Serializable @SerialName("typing")
+data class TypingEvent(val conversationId: Long, val userId: Long) : SocialEvent
+
+/** Someone read a chat up to [messageId]. */
+@Serializable @SerialName("read")
+data class ReadEvent(val conversationId: Long, val userId: Long, val messageId: Long) : SocialEvent
 
 /** A group was deleted for everyone. */
 @Serializable @SerialName("conversationRemoved")
@@ -214,6 +242,10 @@ sealed interface ClientEvent
 data class NowPlayingUpdate(val song: SongRef? = null) : ClientEvent
 
 /** Tells the server whether the app is on screen, so it knows when to send push notifications instead. */
+/** You're typing in a chat. */
+@Serializable @SerialName("typing")
+data class TypingUpdate(val conversationId: Long) : ClientEvent
+
 @Serializable @SerialName("appState")
 data class AppStateUpdate(val visible: Boolean) : ClientEvent
 

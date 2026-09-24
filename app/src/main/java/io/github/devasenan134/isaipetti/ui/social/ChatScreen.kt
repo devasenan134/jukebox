@@ -98,6 +98,12 @@ import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.font.FontStyle
+import kotlinx.coroutines.flow.drop
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -105,6 +111,12 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 private const val PAGE = 50
+
+/** Someone counts as typing for this long after their last "typing" (the app sends one every 3 seconds). */
+private const val TYPING_SHOWN_MS = 6_000L
+
+/** The emoji offered when you long-press a message. */
+private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
 // Receiving GIFs and stickers from the keyboard (contentReceiver) is still marked experimental.
 @OptIn(ExperimentalFoundationApi::class)
@@ -137,6 +149,9 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     var uploading by remember { mutableStateOf(false) }
     // The photo or GIF open full screen.
     var viewing by remember { mutableStateOf<ChatMessage?>(null) }
+    // Your message whose text is being changed (the text box holds the new text), or being deleted.
+    var editing by remember { mutableStateOf<ChatMessage?>(null) }
+    var deleting by remember { mutableStateOf<ChatMessage?>(null) }
 
     fun add(message: ChatMessage) {
         // A message we already have comes back when it changes (an answered song request): replace it.
@@ -251,6 +266,45 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         }
     }
 
+    /** Your reaction to a message (the same emoji again takes it away). */
+    fun react(message: ChatMessage, emoji: String?) {
+        scope.launch {
+            runCatching { social.api.react(conversationId, message.id, emoji) }
+                .onSuccess { add(it) }
+                .onFailure { Toast.makeText(context, it.message ?: "Couldn't react", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
+    fun startEditing(message: ChatMessage) {
+        editing = message
+        replyingTo = null
+        draft.setTextAndPlaceCursorAtEnd(message.body)
+        runCatching { input.requestFocus() }
+    }
+
+    fun stopEditing() {
+        editing = null
+        draft.clearText()
+    }
+
+    fun saveEdit(message: ChatMessage, body: String) {
+        sending = true
+        scope.launch {
+            try {
+                add(social.api.editMessage(conversationId, message.id, body))
+                stopEditing()
+            } catch (e: Exception) {
+                Toast.makeText(context, e.message ?: "Couldn't change it", Toast.LENGTH_SHORT).show()
+            }
+            sending = false
+        }
+    }
+
+    // Tell the others you're typing (Social sends it at most every few seconds).
+    LaunchedEffect(conversationId) {
+        snapshotFlow { draft.text.toString() }.drop(1).collect { if (it.isNotBlank() && editing == null) social.sendTyping(conversationId) }
+    }
+
     fun send(body: String, song: SongRef? = null) {
         sending = true
         scope.launch {
@@ -342,8 +396,27 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 )
             }
         }
+        // Who's typing here: anyone heard from in the last few seconds (a clock ticks while someone is).
+        val typingHere = social.typing.collectAsStateWithLifecycle().value[conversationId].orEmpty()
+        var clock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(typingHere) {
+            clock = System.currentTimeMillis()
+            while (typingHere.values.any { System.currentTimeMillis() - it < TYPING_SHOWN_MS }) {
+                delay(1_000)
+                clock = System.currentTimeMillis()
+            }
+        }
+        val typers = typingHere.filter { (id, at) -> id != me && clock - at < TYPING_SHOWN_MS }.keys
+            .mapNotNull { id -> conversation?.members?.firstOrNull { it.id == id }?.displayName }
+        val typingText = when {
+            typers.isEmpty() -> null
+            conversation?.isGroup != true -> "typing…"
+            typers.size == 1 -> "${typers[0]} is typing…"
+            else -> typers.dropLast(1).joinToString() + " and " + typers.last() + " are typing…"
+        }
         val subtitle = when {
             conversation == null -> null
+            typingText != null -> typingText
             conversation.isGroup -> conversation.members.joinToString { if (it.id == me) "You" else it.displayName }
             otherFriend?.nowPlaying != null -> "♪ Listening to ${otherFriend.nowPlaying.title}"
             otherFriend?.online == true -> "Online"
@@ -353,7 +426,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             Text(
                 it,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (otherFriend?.nowPlaying != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (typingText != null || otherFriend?.nowPlaying != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 // In a group this line lists the members, so tapping it opens them too.
@@ -375,6 +448,37 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             )
         }
 
+
+        // "Seen" under your newest message: who has read up to it.
+        val lastMine = messages.lastOrNull { it.sender.id == me && !it.system && !it.deleted }
+        val seenLabel = lastMine?.let { m ->
+            val others = conversation?.members.orEmpty().filter { it.id != me }
+            val readers = conversation?.readMarks.orEmpty().filter { it.lastReadId >= m.id }.mapNotNull { mark -> others.firstOrNull { it.id == mark.userId } }
+            when {
+                readers.isEmpty() -> null
+                conversation?.isGroup != true -> "Seen"
+                readers.size == others.size -> "Seen by everyone"
+                else -> "Seen by " + readers.joinToString { it.displayName }
+            }
+        }
+        deleting?.let { target ->
+            AlertDialog(
+                onDismissRequest = { deleting = null },
+                title = { Text("Delete for everyone?") },
+                text = { Text("It's replaced with \"This message was deleted\" for everyone in the chat.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        deleting = null
+                        scope.launch {
+                            runCatching { social.api.deleteMessage(conversationId, target.id) }
+                                .onSuccess { add(it); if (editing?.id == target.id) stopEditing() }
+                                .onFailure { Toast.makeText(context, it.message ?: "Couldn't delete it", Toast.LENGTH_SHORT).show() }
+                        }
+                    }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+            )
+        }
 
         LazyColumn(
             state = listState,
@@ -403,10 +507,14 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     onAnswer = { accept -> answerRequest(message, accept) },
                     me = me,
                     highlighted = highlighted == message.id,
-                    onReply = if (conversation?.canMessage == true) ({ reply(message) }) else null,
+                    onReply = if (conversation?.canMessage == true && !message.deleted) ({ reply(message) }) else null,
                     onQuoteClick = ::jumpTo,
                     pinned = message.id in pinnedIds,
-                    onPin = if (conversation?.canMessage == true) ({ hours -> pin(message.id, hours) }) else null,
+                    onPin = if (conversation?.canMessage == true && !message.deleted) ({ hours -> pin(message.id, hours) }) else null,
+                    onReact = if (conversation?.canMessage == true && !message.deleted) ({ emoji -> react(message, emoji) }) else null,
+                    onEdit = if (message.isOwnEditable(me) && message.song == null) ({ startEditing(message) }) else null,
+                    onDelete = if (message.isOwnEditable(me)) ({ deleting = message }) else null,
+                    seenLabel = if (message.id == lastMine?.id) seenLabel else null,
                     onUnpin = { unpin(message.id) },
                     onOpenPicture = { viewing = message },
                 )
@@ -438,6 +546,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 TextButton(onClick = { confirm = true }) { Text("Delete chat") }
             }
             return@Column
+        }
+        editing?.let { target ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Quote(target.quote(), me, Modifier.weight(1f), heading = "Editing message")
+                IconButton(onClick = ::stopEditing) { Icon(Icons.Filled.Close, contentDescription = "Stop editing") }
+            }
         }
         replyingTo?.let { target ->
             Row(
@@ -500,7 +617,12 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                         }
                     },
             )
-            IconButton(enabled = draft.text.isNotBlank() && !sending, onClick = { send(draft.text.toString().trim()) }) {
+            val editingNow = editing
+            IconButton(
+                // A picture's caption can be emptied; other messages need some text.
+                enabled = !sending && (draft.text.isNotBlank() || editingNow?.image != null),
+                onClick = { if (editingNow != null) saveEdit(editingNow, draft.text.toString().trim()) else send(draft.text.toString().trim()) },
+            ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
             }
         }
@@ -523,6 +645,10 @@ private fun Bubble(
     onPin: ((hours: Int) -> Unit)? = null,
     onUnpin: () -> Unit = {},
     onOpenPicture: () -> Unit = {},
+    onReact: ((String?) -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
+    seenLabel: String? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -534,6 +660,9 @@ private fun Bubble(
     var choosingPin by remember { mutableStateOf(false) }
     if (choosingPin && onPin != null) PinDialog(onPin = { choosingPin = false; onPin(it) }, onDismiss = { choosingPin = false })
     val sticker = message.image?.isSticker == true
+    val myReaction = message.reactions.firstOrNull { me in it.userIds }?.emoji
+    // Long-press opens the menu when there's something in it.
+    val hasMenu = !message.deleted && (onReply != null || onReact != null || message.body.isNotBlank() || pinned || onDelete != null)
     val flash by animateColorAsState(
         if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
         label = "highlight",
@@ -586,8 +715,8 @@ private fun Bubble(
                         topStart = 18.dp, topEnd = 18.dp,
                         bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp,
                     ),
-                    modifier = Modifier.widthIn(max = 300.dp).pointerInput(message.id, onReply != null) {
-                        detectTapGestures(onLongPress = { if (onReply != null || message.body.isNotBlank() || pinned) menu = true })
+                    modifier = Modifier.widthIn(max = 300.dp).pointerInput(message.id, hasMenu) {
+                        detectTapGestures(onLongPress = { if (hasMenu) menu = true })
                     },
                 ) {
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -605,7 +734,7 @@ private fun Bubble(
                                     .then(if (sticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
                                     .combinedClickable(
                                         onClick = { if (!sticker) onOpenPicture() },
-                                        onLongClick = { if (onReply != null || message.body.isNotBlank() || pinned) menu = true },
+                                        onLongClick = { if (hasMenu) menu = true },
                                     ),
                                 contentScale = if (sticker) ContentScale.Fit else ContentScale.Crop,
                             )
@@ -627,18 +756,40 @@ private fun Bubble(
                                 playable = message.request == null,
                             )
                         }
+                        if (message.deleted) {
+                            Text(
+                                if (mine) "You deleted this message" else "This message was deleted",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontStyle = FontStyle.Italic,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
                         message.request?.let { status -> SongRequestStatus(status, message.requestMode == "now", canAnswer, jamOwnerName, onAnswer) }
                         Text(
-                            chatTime(message.createdAt),
+                            (if (message.editedAt != null && !message.deleted) "edited · " else "") + chatTime(message.createdAt),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
                         )
                     }
                 }
-                // Long-press a message: reply to it, or copy what it says.
+                // Long-press a message: react, reply, pin, copy, or change or delete your own.
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (onReact != null) {
+                        Row(Modifier.padding(horizontal = 8.dp)) {
+                            QUICK_REACTIONS.forEach { emoji ->
+                                Text(
+                                    emoji,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    modifier = Modifier.clip(RoundedCornerShape(50))
+                                        .background(if (emoji == myReaction) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
+                                        .clickable { menu = false; onReact(if (emoji == myReaction) null else emoji) }
+                                        .padding(6.dp),
+                                )
+                            }
+                        }
+                    }
                     if (onReply != null) DropdownMenuItem(text = { Text("Reply") }, onClick = { menu = false; onReply() })
                     if (pinned) DropdownMenuItem(text = { Text("Unpin") }, onClick = { menu = false; onUnpin() })
                     else if (onPin != null) DropdownMenuItem(text = { Text("Pin") }, onClick = { menu = false; choosingPin = true })
@@ -648,7 +799,40 @@ private fun Bubble(
                             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Message", message.body))
                         })
                     }
+                    if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
+                    if (onDelete != null) {
+                        DropdownMenuItem(text = { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; onDelete() })
+                    }
                 }
+            }
+            // Reactions under the message: tap one to react the same way (or take yours back).
+            if (message.reactions.isNotEmpty()) {
+                Row(Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    message.reactions.forEach { reaction ->
+                        val chosen = me in reaction.userIds
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            border = if (chosen) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                                .then(if (onReact != null) Modifier.clickable { onReact(if (chosen) null else reaction.emoji) } else Modifier),
+                        ) {
+                            Text(
+                                reaction.emoji + if (reaction.userIds.size > 1) " ${reaction.userIds.size}" else "",
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            seenLabel?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp, end = 6.dp),
+                )
             }
         }
     }
