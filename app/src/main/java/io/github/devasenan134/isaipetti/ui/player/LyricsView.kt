@@ -17,6 +17,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -28,17 +29,13 @@ import io.github.devasenan134.isaipetti.data.StructuredLyrics
 import io.github.devasenan134.isaipetti.ui.components.Loadable
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 
-/**
- * Lyrics for the current song. Synced lyrics highlight the line being sung and scroll
- * to keep it in view; tap a line to jump there. Unsynced lyrics are plain scrolling text.
- */
+/** The lyrics for [songId]: synced ones when the server has several versions, or null if it has none. */
 @Composable
-fun LyricsView(songId: String?, positionMs: Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
+fun rememberLyrics(songId: String?): State<Loadable<StructuredLyrics?>> {
     val app = LocalApp.current
-    val lyrics by produceState<Loadable<StructuredLyrics?>>(Loadable.Loading, songId) {
+    return produceState<Loadable<StructuredLyrics?>>(Loadable.Loading, songId) {
         value = Loadable.Loading
         value = try {
-            // Prefer synced lyrics when the server has several versions.
             val all = songId?.let { app.api.lyrics(it) }.orEmpty().filter { it.line.isNotEmpty() }
             Loadable.Ready(all.firstOrNull { it.synced } ?: all.firstOrNull())
         } catch (e: Exception) {
@@ -46,15 +43,25 @@ fun LyricsView(songId: String?, positionMs: Long, onSeek: (Long) -> Unit, modifi
             Loadable.Failed(e.message ?: "Couldn't load lyrics")
         }
     }
+}
 
+/** The index of the line being sung at [positionMs]: the last one whose start time has passed (-1 before the first). */
+fun StructuredLyrics.currentLine(positionMs: Long): Int = line.indexOfLast { (it.start ?: 0) + offset <= positionMs }
+
+/**
+ * Lyrics for the current song. Synced lyrics highlight the line being sung and scroll
+ * to keep it in view; tap a line to jump there. Unsynced lyrics are plain scrolling text.
+ */
+@Composable
+fun LyricsView(lyrics: Loadable<StructuredLyrics?>, positionMs: Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
     Box(modifier, contentAlignment = Alignment.Center) {
-        when (val state = lyrics) {
+        when (lyrics) {
             Loadable.Loading -> CircularProgressIndicator()
-            is Loadable.Failed -> Message(state.message)
+            is Loadable.Failed -> Message(lyrics.message)
             is Loadable.Ready -> when {
-                state.value == null -> Message("No lyrics for this song yet")
-                state.value.synced -> SyncedLyrics(state.value, positionMs, onSeek)
-                else -> PlainLyrics(state.value)
+                lyrics.value == null -> Message("No lyrics for this song yet")
+                lyrics.value.synced -> SyncedLyrics(lyrics.value, positionMs, onSeek)
+                else -> PlainLyrics(lyrics.value)
             }
         }
     }
@@ -63,8 +70,7 @@ fun LyricsView(songId: String?, positionMs: Long, onSeek: (Long) -> Unit, modifi
 @Composable
 private fun SyncedLyrics(lyrics: StructuredLyrics, positionMs: Long, onSeek: (Long) -> Unit) {
     val lines = lyrics.line
-    // The current line is the last one whose start time has passed.
-    val current = lines.indexOfLast { (it.start ?: 0) + lyrics.offset <= positionMs }
+    val current = lyrics.currentLine(positionMs)
     val listState = rememberLazyListState()
 
     // Keep the current line about a third of the way down, unless the user is scrolling.

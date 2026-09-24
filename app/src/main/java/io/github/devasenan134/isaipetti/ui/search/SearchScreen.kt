@@ -115,7 +115,7 @@ fun SearchScreen(nav: Nav) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            placeholder = { Text("Songs, movies, composers, singers") },
+            placeholder = { Text("Songs, movies, composers, artists") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             trailingIcon = if (query.isNotEmpty() || focused) ({
                 IconButton(onClick = { query = ""; focusManager.clearFocus() }) { Icon(Icons.Filled.Close, contentDescription = "Close search") }

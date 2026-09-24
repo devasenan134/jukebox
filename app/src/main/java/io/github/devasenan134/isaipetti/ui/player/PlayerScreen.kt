@@ -1,6 +1,16 @@
 package io.github.devasenan134.isaipetti.ui.player
 
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.ui.text.font.FontWeight
+import io.github.devasenan134.isaipetti.data.StructuredLyrics
+import io.github.devasenan134.isaipetti.ui.components.Loadable
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -92,6 +102,7 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
     val joined by listen.joined.collectAsStateWithLifecycle()
     val conversations by app.social.conversations.collectAsStateWithLifecycle()
     val position by rememberPosition(now.songId, now.isPlaying)
+    val lyrics by rememberLyrics(now.songId)
     var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
     var showShare by rememberSaveable { mutableStateOf(false) }
@@ -188,22 +199,29 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
 
                     Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
                         if (showLyrics) {
-                            LyricsView(now.songId, position, onSeek = player::seekTo, modifier = Modifier.fillMaxSize())
+                            LyricsView(lyrics, position, onSeek = player::seekTo, modifier = Modifier.fillMaxSize())
                         } else {
                             CoverPager(Modifier.fillMaxWidth())
                         }
+                    }
+
+                    // With synced lyrics, the line being sung shows under the cover; tap it for all the lyrics.
+                    val synced = (lyrics as? Loadable.Ready)?.value?.takeIf { it.synced }
+                    if (!showLyrics && synced != null) {
+                        LyricLine(synced, position, Modifier.fillMaxWidth().clickable { showLyrics = true }.padding(bottom = 16.dp))
                     }
 
                     val likedSongs by app.likes.songs.collectAsStateWithLifecycle()
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(now.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            // Too many singers to fit? The line scrolls sideways so every name shows.
                             Text(
                                 now.artist,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_000, repeatDelayMillis = 2_000),
                             )
                         }
                         now.song?.let { song ->
@@ -285,4 +303,31 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
     if (showQueue) QueueSheet(onDismiss = { showQueue = false })
     if (showShare) now.song?.let { ShareSongSheet(it, onDismiss = { showShare = false }) }
     if (addingToPlaylist) now.song?.let { AddToPlaylistSheet(it.toSong(), onDismiss = { addingToPlaylist = false }) }
+}
+
+/**
+ * The line of [lyrics] being sung, which slides up when the next line starts.
+ * Before the first line (and in instrumental gaps) it shows ♪.
+ */
+@Composable
+private fun LyricLine(lyrics: StructuredLyrics, positionMs: Long, modifier: Modifier = Modifier) {
+    val text = lyrics.line.getOrNull(lyrics.currentLine(positionMs))?.value?.takeIf { it.isNotBlank() } ?: "♪"
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = { (slideInVertically { it / 2 } + fadeIn()) togetherWith (slideOutVertically { -it / 2 } + fadeOut()) },
+        label = "lyric line",
+        modifier = modifier,
+    ) { line ->
+        Text(
+            line,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            // Two lines always, so the cover above doesn't jump when a line is short.
+            minLines = 2,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }

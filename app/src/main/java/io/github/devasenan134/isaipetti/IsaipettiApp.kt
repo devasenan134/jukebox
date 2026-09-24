@@ -13,6 +13,7 @@ import io.github.devasenan134.isaipetti.data.RecentSongs
 import io.github.devasenan134.isaipetti.data.SearchHistory
 import io.github.devasenan134.isaipetti.data.SubsonicApi
 import io.github.devasenan134.isaipetti.data.Updates
+import io.github.devasenan134.isaipetti.data.Waveforms
 import io.github.devasenan134.isaipetti.playback.PlayerConnection
 import io.github.devasenan134.isaipetti.push.Notifications
 import io.github.devasenan134.isaipetti.push.PushSetup
@@ -58,6 +59,8 @@ class IsaipettiApp : Application() {
         private set
     lateinit var appearance: Appearance
         private set
+    lateinit var waveforms: Waveforms
+        private set
 
     /** A screen to open, set when the app is launched from a notification. */
     val pendingOpen = MutableStateFlow<PendingOpen?>(null)
@@ -89,6 +92,7 @@ class IsaipettiApp : Application() {
             }
         })
         player = PlayerConnection(this, api)
+        waveforms = Waveforms(this, api)
         // Notifications can wake the app before any screen opens: start Firebase from the saved settings first.
         PushSetup.startSaved(this)
         social = Social(this, session, http)

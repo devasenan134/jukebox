@@ -45,7 +45,7 @@ fun SongDetailsSection(songId: String?, onOpenAlbum: (String) -> Unit, modifier:
                 // In film music the album artist (music director) is the composer; songs without a composer tag use it.
                 val composers = song.credited("composer").ifEmpty { listOfNotNull(song.displayComposer) }
                     .ifEmpty { song.albumArtists.map { it.name } }.ifEmpty { listOfNotNull(song.displayAlbumArtist) }
-                Detail("Singers", singers.joinToString())
+                Detail("Artists", singers.joinToString())
                 Detail("Composer", composers.joinToString())
                 Detail("Lyricist", song.credited("lyricist").joinToString())
                 Detail("Movie", song.album.orEmpty(), onClick = song.albumId?.let { id -> { onOpenAlbum(id) } })
