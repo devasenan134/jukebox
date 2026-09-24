@@ -67,9 +67,35 @@ data class ChatMessage(
     val request: String? = null,
     /** What a song request asks for: "next" (after the current song) or "now" (skip to it). */
     val requestMode: String? = null,
+    /** The message this one replies to, quoted. */
+    val replyTo: ReplyQuote? = null,
 ) {
     /** "Alice left the group" / "You left the group". */
     fun systemText(me: Long?) = (if (sender.id == me) "You" else sender.displayName) + " " + body
+
+    /** What a reply to this message quotes. */
+    fun quote() = ReplyQuote(id, sender, body, song)
+}
+
+/**
+ * The message a reply quotes. [hidden] when it's from before you joined the group (or cleared the
+ * chat): then you only see who wrote it.
+ */
+@Serializable
+data class ReplyQuote(
+    val id: Long,
+    val sender: SocialUser,
+    val body: String = "",
+    val song: SongRef? = null,
+    val hidden: Boolean = false,
+) {
+    /** One line about what it said: its text, or the song it shared. */
+    val preview get() = when {
+        hidden -> "Earlier message"
+        body.isNotBlank() -> body
+        song != null -> "♪ ${song.title}${song.clipLabel}"
+        else -> ""
+    }
 }
 
 @Serializable

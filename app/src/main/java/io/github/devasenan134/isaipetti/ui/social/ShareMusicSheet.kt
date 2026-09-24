@@ -45,7 +45,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ShareMusicSheet(conversationId: Long, onSent: (ChatMessage) -> Unit, onDismiss: () -> Unit) {
+fun ShareMusicSheet(conversationId: Long, onSent: (ChatMessage) -> Unit, onDismiss: () -> Unit, replyTo: Long? = null) {
     val app = LocalApp.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -86,7 +86,7 @@ fun ShareMusicSheet(conversationId: Long, onSent: (ChatMessage) -> Unit, onDismi
                         sending = true
                         scope.launch {
                             try {
-                                onSent(app.social.api.sendMessage(conversationId, "", shared))
+                                onSent(app.social.api.sendMessage(conversationId, "", shared, replyTo))
                                 onDismiss()
                             } catch (e: Exception) {
                                 Toast.makeText(context, e.message ?: "Couldn't send", Toast.LENGTH_SHORT).show()

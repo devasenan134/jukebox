@@ -61,7 +61,32 @@ import io.github.devasenan134.isaipetti.push.Notifications
 import io.github.devasenan134.isaipetti.ui.Nav
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
+import io.github.devasenan134.isaipetti.data.ReplyQuote
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private const val PAGE = 50
 
@@ -84,6 +109,11 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     var draft by rememberSaveable { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // The message being replied to (swipe a message right, or long-press it), shown above the text box.
+    var replyingTo by remember { mutableStateOf<ChatMessage?>(null) }
+    val input = remember { FocusRequester() }
+    // A message the chat just jumped to (tapping a reply's quote), lit up for a moment.
+    var highlighted by remember { mutableStateOf<Long?>(null) }
 
     fun add(message: ChatMessage) {
         // A message we already have comes back when it changes (an answered song request): replace it.
@@ -132,11 +162,32 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     // Jump to the newest message when one arrives (the list is drawn bottom-up).
     LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(0) }
 
+    fun reply(message: ChatMessage) {
+        replyingTo = message
+        runCatching { input.requestFocus() }
+    }
+
+    /** Scrolls to the message a reply quotes, if it's loaded, and lights it up. */
+    fun jumpTo(id: Long) {
+        val i = messages.indexOfFirst { it.id == id }
+        if (i < 0) {
+            Toast.makeText(context, "That message is further back. Load earlier messages to see it", Toast.LENGTH_SHORT).show()
+            return
+        }
+        scope.launch {
+            listState.animateScrollToItem(messages.size - 1 - i)
+            highlighted = id
+            delay(1_500)
+            if (highlighted == id) highlighted = null
+        }
+    }
+
     fun send(body: String, song: SongRef? = null) {
         sending = true
         scope.launch {
             try {
-                add(social.api.sendMessage(conversationId, body, song))
+                add(social.api.sendMessage(conversationId, body, song, replyingTo?.id))
+                replyingTo = null
                 if (song == null) draft = ""
                 social.refreshConversationsSoon()
             } catch (e: Exception) {
@@ -264,6 +315,10 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     canAnswer = message.request == "pending" && message.sender.id != me && jamOwner == me && joinedJam == conversationId,
                     jamOwnerName = conversation?.members?.firstOrNull { it.id == jamOwner }?.displayName,
                     onAnswer = { accept -> answerRequest(message, accept) },
+                    me = me,
+                    highlighted = highlighted == message.id,
+                    onReply = if (conversation?.canMessage == true) ({ reply(message) }) else null,
+                    onQuoteClick = ::jumpTo,
                 )
             }
             if (hasOlder) {
@@ -294,6 +349,15 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             }
             return@Column
         }
+        replyingTo?.let { target ->
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Quote(target.quote(), me, Modifier.weight(1f), heading = "Replying to ${if (target.sender.id == me) "yourself" else target.sender.displayName}")
+                IconButton(onClick = { replyingTo = null }) { Icon(Icons.Filled.Close, contentDescription = "Cancel reply") }
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // Share what's playing or a recently played song, whole or just a part.
             var sharingMusic by remember { mutableStateOf(false) }
@@ -301,7 +365,12 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 Icon(painterResource(R.drawable.ic_music_note), contentDescription = "Share a song")
             }
             if (sharingMusic) {
-                ShareMusicSheet(conversationId, onSent = { add(it); social.refreshConversationsSoon() }, onDismiss = { sharingMusic = false })
+                ShareMusicSheet(
+                    conversationId,
+                    onSent = { add(it); replyingTo = null; social.refreshConversationsSoon() },
+                    onDismiss = { sharingMusic = false },
+                    replyTo = replyingTo?.id,
+                )
             }
             OutlinedTextField(
                 value = draft,
@@ -309,7 +378,7 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                 placeholder = { Text("Message") },
                 maxLines = 4,
                 shape = RoundedCornerShape(24.dp),
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(input),
             )
             IconButton(enabled = draft.isNotBlank() && !sending, onClick = { send(draft.trim()) }) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
@@ -326,50 +395,142 @@ private fun Bubble(
     canAnswer: Boolean = false,
     jamOwnerName: String? = null,
     onAnswer: (Boolean) -> Unit = {},
+    me: Long? = null,
+    highlighted: Boolean = false,
+    onReply: (() -> Unit)? = null,
+    onQuoteClick: (Long) -> Unit = {},
 ) {
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-        if (showName) {
-            Text(
-                message.sender.displayName,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 12.dp, top = 6.dp),
-            )
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
+    // Swiping a message to the right (past [replyAt]) replies to it, like in WhatsApp.
+    val replyAt = with(LocalDensity.current) { 64.dp.toPx() }
+    val swipe = remember { Animatable(0f) }
+    var menu by remember { mutableStateOf(false) }
+    val flash by animateColorAsState(
+        if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent,
+        label = "highlight",
+    )
+    val swipeToReply = if (onReply == null) Modifier else Modifier.pointerInput(message.id) {
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                if (swipe.value >= replyAt) onReply()
+                scope.launch { swipe.animateTo(0f) }
+            },
+            onDragCancel = { scope.launch { swipe.animateTo(0f) } },
+        ) { change, amount ->
+            val before = swipe.value
+            val next = (before + amount).coerceIn(0f, replyAt * 1.4f)
+            if (before < replyAt && next >= replyAt) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            change.consume()
+            scope.launch { swipe.snapTo(next) }
         }
-        Surface(
-            color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(
-                topStart = 18.dp, topEnd = 18.dp,
-                bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp,
-            ),
-            modifier = Modifier.widthIn(max = 300.dp),
+    }
+    Box(Modifier.fillMaxWidth().background(flash, RoundedCornerShape(12.dp)).then(swipeToReply)) {
+        // The reply arrow that shows up behind a message as it's swiped.
+        Icon(
+            painterResource(R.drawable.ic_reply),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(22.dp)
+                .alpha((swipe.value / replyAt).coerceIn(0f, 1f)),
+        )
+        Column(
+            Modifier.fillMaxWidth().offset { IntOffset(swipe.value.roundToInt(), 0) },
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
         ) {
-            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                if (message.request != null) {
-                    Text(
-                        (if (mine) "You asked to play" else "${message.sender.displayName} asked to play") +
-                            if (message.requestMode == "now") " now" else " next",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 6.dp),
-                    )
-                }
-                message.song?.let {
-                    SongCard(
-                        it,
-                        Modifier.padding(bottom = if (message.body.isNotBlank() || message.request != null) 6.dp else 0.dp),
-                        playable = message.request == null,
-                    )
-                }
-                if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
-                message.request?.let { status -> SongRequestStatus(status, message.requestMode == "now", canAnswer, jamOwnerName, onAnswer) }
+            if (showName) {
                 Text(
-                    chatTime(message.createdAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                    message.sender.displayName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 12.dp, top = 6.dp),
                 )
             }
+            Box {
+                Surface(
+                    color = if (mine) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(
+                        topStart = 18.dp, topEnd = 18.dp,
+                        bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp,
+                    ),
+                    modifier = Modifier.widthIn(max = 300.dp).pointerInput(message.id, onReply != null) {
+                        detectTapGestures(onLongPress = { if (onReply != null || message.body.isNotBlank()) menu = true })
+                    },
+                ) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        message.replyTo?.let { quote ->
+                            Quote(
+                                quote, me,
+                                Modifier.padding(bottom = 6.dp)
+                                    .then(if (quote.hidden) Modifier else Modifier.clickable { onQuoteClick(quote.id) }),
+                            )
+                        }
+                        if (message.request != null) {
+                            Text(
+                                (if (mine) "You asked to play" else "${message.sender.displayName} asked to play") +
+                                    if (message.requestMode == "now") " now" else " next",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 6.dp),
+                            )
+                        }
+                        message.song?.let {
+                            SongCard(
+                                it,
+                                Modifier.padding(bottom = if (message.body.isNotBlank() || message.request != null) 6.dp else 0.dp),
+                                playable = message.request == null,
+                            )
+                        }
+                        if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
+                        message.request?.let { status -> SongRequestStatus(status, message.requestMode == "now", canAnswer, jamOwnerName, onAnswer) }
+                        Text(
+                            chatTime(message.createdAt),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.End).padding(top = 2.dp),
+                        )
+                    }
+                }
+                // Long-press a message: reply to it, or copy what it says.
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (onReply != null) DropdownMenuItem(text = { Text("Reply") }, onClick = { menu = false; onReply() })
+                    if (message.body.isNotBlank()) {
+                        DropdownMenuItem(text = { Text("Copy text") }, onClick = {
+                            menu = false
+                            context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Message", message.body))
+                        })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A quoted message: who wrote it and a line of what it said, with a bar down its side. */
+@Composable
+private fun Quote(quote: ReplyQuote, me: Long?, modifier: Modifier = Modifier, heading: String? = null) {
+    Row(
+        modifier
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+            .height(IntrinsicSize.Min),
+    ) {
+        Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)))
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(
+                heading ?: if (quote.sender.id == me) "You" else quote.sender.displayName,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                quote.preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
