@@ -20,6 +20,8 @@ object Notifications {
     private const val CHATS = "chats"
     private const val FRIENDS = "friends"
     private const val LISTEN = "listen"
+    private const val REQUESTS = "requests"
+    private const val REQUEST_TAG = "request"
     private const val LISTEN_TAG = "listen"
     private const val FRIENDS_ID = 1
     private const val CHAT_TAG = "chat"
@@ -27,6 +29,8 @@ object Notifications {
     /** Extras on the intent that opens the app from a notification. */
     const val EXTRA_CONVERSATION = "conversationId"
     const val EXTRA_OPEN_FRIENDS = "openFriends"
+    const val EXTRA_ALBUM = "albumId"
+    const val EXTRA_OPEN_REQUESTS = "openRequests"
 
     /** Android 8+ groups notifications into channels people can mute separately in system settings. */
     fun createChannels(context: Context) {
@@ -34,6 +38,7 @@ object Notifications {
         manager.createNotificationChannel(NotificationChannel(CHATS, "Chat messages", NotificationManager.IMPORTANCE_HIGH))
         manager.createNotificationChannel(NotificationChannel(FRIENDS, "Friend requests", NotificationManager.IMPORTANCE_DEFAULT))
         manager.createNotificationChannel(NotificationChannel(LISTEN, "Friends listening together", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(REQUESTS, "Song and movie requests", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
     fun show(context: Context, data: Map<String, String>, openConversationId: Long?) {
@@ -44,6 +49,7 @@ object Notifications {
             "message" -> message(context, data, openConversationId)
             "friendRequest", "friendAccepted" -> friends(context, data)
             "listen" -> listening(context, data, openConversationId)
+            "musicReady", "musicDeclined", "musicRequest" -> request(context, data)
         }
     }
 
@@ -100,6 +106,26 @@ object Notifications {
     }
 
     private const val LISTEN_REQUEST = 1_000_000
+
+    /**
+     * Requested music: "It's in the library" opens its movie; "Couldn't get it" and (for admins)
+     * "New request" open the requests. Each is its own notification.
+     */
+    private fun request(context: Context, data: Map<String, String>) {
+        val albumId = data["albumId"]?.takeIf { data["type"] == "musicReady" }
+        val open = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (albumId != null) open.putExtra(EXTRA_ALBUM, albumId) else open.putExtra(EXTRA_OPEN_REQUESTS, true)
+        val id = (data["body"].orEmpty() + data["title"].orEmpty()).hashCode()
+        val notification = NotificationCompat.Builder(context, REQUESTS)
+            .setSmallIcon(R.drawable.ic_music_note)
+            .setContentTitle(data["title"])
+            .setContentText(data["body"])
+            .setStyle(NotificationCompat.BigTextStyle().bigText(data["body"]))
+            .setAutoCancel(true)
+            .setContentIntent(PendingIntent.getActivity(context, id, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(REQUEST_TAG, id, notification) }
+    }
 
     private fun friends(context: Context, data: Map<String, String>) {
         val open = Intent(context, MainActivity::class.java)

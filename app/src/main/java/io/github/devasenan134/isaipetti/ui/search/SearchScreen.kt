@@ -65,6 +65,7 @@ import io.github.devasenan134.isaipetti.ui.components.SongRow
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.lazy.LazyListScope
 import io.github.devasenan134.isaipetti.data.Album
+import io.github.devasenan134.isaipetti.data.CatalogResults
 import io.github.devasenan134.isaipetti.data.LibrarySearchResults
 import io.github.devasenan134.isaipetti.data.Song
 import io.github.devasenan134.isaipetti.ui.Nav
@@ -89,6 +90,9 @@ fun SearchScreen(nav: Nav) {
     // From the friends server when it has search: forgives spelling, and finds lyricists and actors.
     var smart by remember { mutableStateOf<LibrarySearchResults?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Songs and movies that aren't in the library, to request.
+    var catalog by remember { mutableStateOf<CatalogResults?>(null) }
+    val (requestMusic, cancelRequest) = rememberRequestActions { itemId, request -> catalog = catalog?.with(itemId, request) }
     val history by app.searches.queries.collectAsStateWithLifecycle()
     // What you picked from search results before, newest first.
     val searchedSongs by app.searches.songs.collectAsStateWithLifecycle()
@@ -122,6 +126,17 @@ fun SearchScreen(nav: Nav) {
             }
             smart = better.await()
             if (smart != null) error = null
+        }
+    }
+    // The catalog is slower and allows only so many searches a minute, so it waits for a longer pause.
+    LaunchedEffect(query) {
+        catalog = null
+        val q = query.trim()
+        if (q.length < 3) return@LaunchedEffect
+        delay(700)
+        catalog = try { app.social.api.catalog(q) } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null // no friends server, or one without requests
         }
     }
     // Back while the search bar is active closes it, before leaving the page.
@@ -171,6 +186,7 @@ fun SearchScreen(nav: Nav) {
                     } else {
                         basicResults(result, nowPlaying.songId, nav, onPicked = saveSearch)
                     }
+                    catalog?.let { catalogResults(it.movies, it.songs, requestMusic, cancelRequest) }
                 }
 
                 focused -> {
@@ -219,6 +235,22 @@ fun SearchScreen(nav: Nav) {
                                     MaterialTheme.colorScheme.surfaceVariant,
                                     nav.openPlaylists,
                                     Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        Row(
+                            Modifier.fillMaxWidth().clickable(onClick = nav.openRequests).padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(painterResource(R.drawable.ic_playlist_add), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Column(Modifier.padding(start = 16.dp)) {
+                                Text("Your requests", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "Songs and movies you asked to be added",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }

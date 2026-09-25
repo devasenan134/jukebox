@@ -140,6 +140,9 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
 sealed interface PendingOpen {
     data class Chat(val conversationId: Long) : PendingOpen
     data object Friends : PendingOpen
+    /** A movie whose requested music is in the library now. */
+    data class Album(val albumId: String) : PendingOpen
+    data object Requests : PendingOpen
 }
 
 private fun IsaipettiApp.toast(text: String) = android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()
