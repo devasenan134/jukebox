@@ -108,6 +108,14 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import io.github.devasenan134.isaipetti.data.SocialUser as Member
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -118,9 +126,6 @@ private const val PAGE = 50
 
 /** Someone counts as typing for this long after their last "typing" (the app sends one every 3 seconds). */
 private const val TYPING_SHOWN_MS = 6_000L
-
-/** The emoji offered when you long-press a message. */
-private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
 // Receiving GIFs and stickers from the keyboard (contentReceiver) is still marked experimental.
 @OptIn(ExperimentalFoundationApi::class)
@@ -162,6 +167,13 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
     var searching by remember { mutableStateOf(false) }
     // The message being forwarded (the chat picker is open).
     var forwarding by remember { mutableStateOf<ChatMessage?>(null) }
+    // @mentions typed into the message: who, and the name that was put in the text for them.
+    val mentioned = remember { mutableStateMapOf<Long, String>() }
+    // Your own quick reactions, and the reaction pickers.
+    val quickReactions = remember { QuickReactions(context.applicationContext) }
+    var editingQuick by remember { mutableStateOf(false) }
+    var pickingReaction by remember { mutableStateOf<ChatMessage?>(null) }
+    var showingReactions by remember { mutableStateOf<ChatMessage?>(null) }
     // Your message whose text is being changed (the text box holds the new text), or being deleted.
     var editing by remember { mutableStateOf<ChatMessage?>(null) }
     var deleting by remember { mutableStateOf<ChatMessage?>(null) }
@@ -359,19 +371,25 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         editing = message
         replyingTo = null
         draft.setTextAndPlaceCursorAtEnd(message.body)
+        mentioned.clear()
+        message.mentions.forEach { id -> conversation?.members?.firstOrNull { it.id == id }?.let { mentioned[id] = it.displayName } }
         runCatching { input.requestFocus() }
     }
 
     fun stopEditing() {
         editing = null
         draft.clearText()
+        mentioned.clear()
     }
+
+    /** The people still @mentioned in [body] (a name deleted from the text isn't mentioned anymore). */
+    fun mentionsIn(body: String) = mentioned.filter { (_, name) -> body.contains("@$name") }.keys.toList()
 
     fun saveEdit(message: ChatMessage, body: String) {
         sending = true
         scope.launch {
             try {
-                add(social.api.editMessage(conversationId, message.id, body))
+                add(social.api.editMessage(conversationId, message.id, body, mentionsIn(body)))
                 stopEditing()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Couldn't change it", Toast.LENGTH_SHORT).show()
@@ -389,9 +407,12 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
         sending = true
         scope.launch {
             try {
-                add(social.api.sendMessage(conversationId, body, song, replyingTo?.id))
+                add(social.api.sendMessage(conversationId, body, song, replyingTo?.id, if (song == null) mentionsIn(body) else emptyList()))
                 replyingTo = null
-                if (song == null) draft.clearText()
+                if (song == null) {
+                    draft.clearText()
+                    mentioned.clear()
+                }
                 social.refreshConversationsSoon()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Couldn't send", Toast.LENGTH_SHORT).show()
@@ -561,6 +582,22 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             )
         }
 
+        if (editingQuick) {
+            EditQuickReactionsDialog(quickReactions.emoji, onSave = { quickReactions.set(it); editingQuick = false }, onDismiss = { editingQuick = false })
+        }
+        pickingReaction?.let { target ->
+            EmojiPickerDialog(onPick = { pickingReaction = null; react(target, it) }, onDismiss = { pickingReaction = null })
+        }
+        showingReactions?.let { target ->
+            // The newest copy of the message (reactions change while the sheet is open).
+            val live = messages.firstOrNull { it.id == target.id } ?: target
+            val mine = live.reactions.any { me in it.userIds }
+            ReactionsSheet(
+                live, conversation?.members.orEmpty(), me,
+                onRemoveMine = if (mine) ({ react(live, null) }) else null,
+                onDismiss = { showingReactions = null },
+            )
+        }
         forwarding?.let { target ->
             ForwardDialog(onForward = { to -> forwarding = null; forward(target, to) }, onDismiss = { forwarding = null })
         }
@@ -613,6 +650,12 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
                     onOpenPicture = { viewing = message },
                     onForward = if (!message.deleted) ({ forwarding = message }) else null,
                     voicePlayer = voicePlayer,
+                    quickReactions = quickReactions.emoji,
+                    onMoreReactions = { pickingReaction = message },
+                    onEditQuickReactions = { editingQuick = true },
+                    onShowReactions = { showingReactions = message },
+                    mentionNames = message.mentions.mapNotNull { id -> conversation?.members?.firstOrNull { it.id == id }?.displayName },
+                    myName = conversation?.members?.firstOrNull { it.id == me }?.displayName,
                 )
             }
             if (hasOlder) {
@@ -653,6 +696,24 @@ fun ChatScreen(conversationId: Long, nav: Nav) {
             ) {
                 Quote(target.quote(), me, Modifier.weight(1f), heading = "Replying to ${if (target.sender.id == me) "yourself" else target.sender.displayName}")
                 IconButton(onClick = { replyingTo = null }) { Icon(Icons.Filled.Close, contentDescription = "Cancel reply") }
+            }
+        }
+        // @mentions in groups: typing "@" and part of a name suggests members; picking one puts "@Name" in.
+        val typed = draft.text.toString()
+        val cursor = draft.selection.end
+        val at = mentionStart(typed, cursor)
+        val suggestions = if (conversation?.isGroup != true || at < 0) emptyList() else {
+            val query = typed.substring(at + 1, cursor)
+            conversation.members.filter { it.id != me && (it.displayName.contains(query, ignoreCase = true) || it.username.startsWith(query, ignoreCase = true)) }.take(5)
+        }
+        if (suggestions.isNotEmpty() && !recording) {
+            MentionSuggestions(suggestions) { member ->
+                val inserted = "@${member.displayName} "
+                draft.edit {
+                    replace(at, cursor, inserted)
+                    selection = TextRange(at + inserted.length)
+                }
+                mentioned[member.id] = member.displayName
             }
         }
         if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp))
@@ -753,6 +814,12 @@ private fun Bubble(
     seenLabel: String? = null,
     onForward: (() -> Unit)? = null,
     voicePlayer: VoicePlayer? = null,
+    quickReactions: List<String> = QuickReactions.DEFAULT,
+    onMoreReactions: () -> Unit = {},
+    onEditQuickReactions: () -> Unit = {},
+    onShowReactions: () -> Unit = {},
+    mentionNames: List<String> = emptyList(),
+    myName: String? = null,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -878,7 +945,9 @@ private fun Bubble(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        if (message.body.isNotBlank()) Text(message.body, style = MaterialTheme.typography.bodyLarge)
+                        if (message.body.isNotBlank()) {
+                            Text(withMentions(message.body, mentionNames, myName, MaterialTheme.colorScheme.primary), style = MaterialTheme.typography.bodyLarge)
+                        }
                         message.request?.let { status -> SongRequestStatus(status, message.requestMode == "now", canAnswer, jamOwnerName, onAnswer) }
                         Text(
                             (if (message.editedAt != null && !message.deleted) "edited · " else "") + chatTime(message.createdAt),
@@ -891,8 +960,8 @@ private fun Bubble(
                 // Long-press a message: react, reply, pin, copy, or change or delete your own.
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     if (onReact != null) {
-                        Row(Modifier.padding(horizontal = 8.dp)) {
-                            QUICK_REACTIONS.forEach { emoji ->
+                        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            quickReactions.forEach { emoji ->
                                 Text(
                                     emoji,
                                     style = MaterialTheme.typography.headlineSmall,
@@ -902,6 +971,19 @@ private fun Bubble(
                                         .padding(6.dp),
                                 )
                             }
+                            // Any other emoji, and changing which ones are in this row.
+                            Text(
+                                "＋",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).clickable { menu = false; onMoreReactions() }.padding(8.dp),
+                            )
+                            Text(
+                                "✎",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clip(RoundedCornerShape(50)).clickable { menu = false; onEditQuickReactions() }.padding(8.dp),
+                            )
                         }
                     }
                     if (onReply != null) DropdownMenuItem(text = { Text("Reply") }, onClick = { menu = false; onReply() })
@@ -930,7 +1012,7 @@ private fun Bubble(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                             border = if (chosen) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
                             modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                                .then(if (onReact != null) Modifier.clickable { onReact(if (chosen) null else reaction.emoji) } else Modifier),
+                                .clickable(onClick = onShowReactions),
                         ) {
                             Text(
                                 reaction.emoji + if (reaction.userIds.size > 1) " ${reaction.userIds.size}" else "",
@@ -1083,4 +1165,58 @@ private fun SongRequestStatus(status: String, playNow: Boolean, canAnswer: Boole
         style = MaterialTheme.typography.labelMedium,
         color = if (status == "accepted") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * Where an "@name" being typed starts: the "@" before the cursor, at the start or after a space,
+ * with at most 30 characters (and no new line) since. -1 if there's none.
+ */
+private fun mentionStart(text: String, cursor: Int): Int {
+    var i = cursor - 1
+    while (i >= 0 && cursor - i <= 31) {
+        val c = text[i]
+        if (c == '\n') return -1
+        if (c == '@') return if (i == 0 || text[i - 1].isWhitespace()) i else -1
+        i--
+    }
+    return -1
+}
+
+/** Members to @mention, above the text box. */
+@Composable
+private fun MentionSuggestions(members: List<Member>, onPick: (Member) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+        Column {
+            members.forEach { member ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(member) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Avatar(member.displayName, member.username, size = 32.dp, user = member)
+                    Text(member.displayName, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 12.dp).weight(1f))
+                    Text("@${member.username}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** A message's text with each "@Name" it mentions in colour (and yours highlighted). */
+private fun withMentions(body: String, names: List<String>, myName: String?, color: Color): AnnotatedString {
+    if (names.isEmpty()) return AnnotatedString(body)
+    val tags = names.distinct().sortedByDescending { it.length }.map { "@$it" }
+    return buildAnnotatedString {
+        var i = 0
+        while (i < body.length) {
+            val tag = tags.firstOrNull { body.startsWith(it, i) }
+            if (tag == null) { append(body[i]); i++; continue }
+            val style = SpanStyle(
+                color = color,
+                fontWeight = FontWeight.Bold,
+                background = if (tag == "@$myName") color.copy(alpha = 0.15f) else Color.Unspecified,
+            )
+            withStyle(style) { append(tag) }
+            i += tag.length
+        }
+    }
 }

@@ -203,7 +203,11 @@ private fun ChatList(
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     c.lastMessage?.let { Text(chatTime(it.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    if (c.unread > 0) Badge(Modifier.padding(top = 4.dp)) { Text("${c.unread}") }
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Someone @mentioned you in a message you haven't read.
+                        if (c.unreadMentions > 0) Badge { Text("@") }
+                        if (c.unread > 0) Badge { Text("${c.unread}") }
+                    }
                 }
             }
         }

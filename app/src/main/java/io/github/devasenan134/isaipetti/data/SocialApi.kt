@@ -120,8 +120,8 @@ class SocialApi(
     suspend fun messages(conversationId: Long, before: Long? = null): List<ChatMessage> =
         get("/conversations/$conversationId/messages" + (before?.let { "?before=$it" } ?: ""))
     /** Sends a message, which can be a reply to message [replyTo] of the same chat. */
-    suspend fun sendMessage(conversationId: Long, body: String, song: SongRef? = null, replyTo: Long? = null): ChatMessage =
-        post("/conversations/$conversationId/messages", MessageBody(body, song, replyTo))
+    suspend fun sendMessage(conversationId: Long, body: String, song: SongRef? = null, replyTo: Long? = null, mentions: List<Long> = emptyList()): ChatMessage =
+        post("/conversations/$conversationId/messages", MessageBody(body, song, replyTo, mentions))
     suspend fun deleteConversation(conversationId: Long) = send<Unit>("DELETE", "/conversations/$conversationId", null)
     /**
      * Sends a photo, GIF or sticker ([bytes] as JPEG, PNG, WebP or GIF, [width] × [height] pixels),
@@ -173,8 +173,8 @@ class SocialApi(
     fun imageUrl(message: ChatMessage): String? = baseUrl()?.let { "$it/conversations/${message.conversationId}/messages/${message.id}/image" }
 
     /** Changes the text of your own message, or deletes it for everyone. */
-    suspend fun editMessage(conversationId: Long, messageId: Long, body: String): ChatMessage =
-        send("PATCH", "/conversations/$conversationId/messages/$messageId", json.encodeToString(EditBody.serializer(), EditBody(body)), ChatMessage.serializer())
+    suspend fun editMessage(conversationId: Long, messageId: Long, body: String, mentions: List<Long>): ChatMessage =
+        send("PATCH", "/conversations/$conversationId/messages/$messageId", json.encodeToString(EditBody.serializer(), EditBody(body, mentions)), ChatMessage.serializer())
     suspend fun deleteMessage(conversationId: Long, messageId: Long): ChatMessage =
         send("DELETE", "/conversations/$conversationId/messages/$messageId", null, ChatMessage.serializer())
 
@@ -259,10 +259,10 @@ class SocialApi(
     @Serializable private data class UserIdsBody(val userIds: List<Long>)
     @Serializable private data class NameBody(val name: String)
     @Serializable private data class PinBody(val messageId: Long, val hours: Int)
-    @Serializable private data class EditBody(val body: String)
+    @Serializable private data class EditBody(val body: String, val mentions: List<Long>)
     @Serializable private data class ReactBody(val emoji: String)
     @Serializable private data class ForwardBody(val conversationIds: List<Long>)
-    @Serializable private data class MessageBody(val body: String, val song: SongRef?, val replyTo: Long? = null)
+    @Serializable private data class MessageBody(val body: String, val song: SongRef?, val replyTo: Long? = null, val mentions: List<Long> = emptyList())
     @Serializable private data class ReadBody(val messageId: Long)
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)

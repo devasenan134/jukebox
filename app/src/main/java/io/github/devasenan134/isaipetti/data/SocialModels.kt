@@ -81,6 +81,8 @@ data class ChatMessage(
     val voiceMs: Long? = null,
     /** Forwarded from another chat. */
     val forwarded: Boolean = false,
+    /** The people it @mentions (its text has "@Their Name" for each). */
+    val mentions: List<Long> = emptyList(),
 ) {
     /** Your own ordinary message: one you can edit and delete. */
     fun isOwnEditable(me: Long?) = sender.id == me && !system && !deleted && request == null
@@ -176,6 +178,8 @@ data class Conversation(
     val pins: List<Pin> = emptyList(),
     /** How far the other members have read, for "Seen". */
     val readMarks: List<ReadMark> = emptyList(),
+    /** Unread messages that @mention you. */
+    val unreadMentions: Int = 0,
 ) {
     val isGroup get() = kind == "group"
 
