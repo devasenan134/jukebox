@@ -75,6 +75,16 @@ class SocialApi(
     /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
     suspend fun search(query: String): LibrarySearchResults = get("/search?q=${enc(query)}")
     suspend fun person(id: String): PersonPage = get("/search/people/${enc(id)}")
+    /** Songs and movies from the music catalog that aren't in the library, to ask for. */
+    suspend fun catalog(query: String): CatalogResults = get("/search/catalog?q=${enc(query)}")
+    /** Your requests for music, waiting ones first. */
+    suspend fun musicRequests(): List<MusicRequest> = get("/requests")
+    suspend fun requestMusic(catalogId: String): MusicRequest = post("/requests", CatalogIdBody(catalogId))
+    suspend fun cancelMusicRequest(id: Long) = send<Unit>("DELETE", "/requests/$id", null)
+    /** Admins: everyone's requests, and answering them (done means it's in the library now). */
+    suspend fun allMusicRequests(): List<MusicRequest> = get("/admin/requests")
+    suspend fun completeMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/done", Unit)
+    suspend fun declineMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/decline", NoteBody(note))
     suspend fun followedMixes(): List<Mix> = get("/mixes/followed")
     suspend fun followMix(id: String) = send<Unit>("PUT", "/mixes/${enc(id)}/follow", "")
     suspend fun unfollowMix(id: String) = send<Unit>("DELETE", "/mixes/${enc(id)}/follow", null)
@@ -272,6 +282,8 @@ class SocialApi(
     @Serializable private data class PlaysBody(val events: List<PlayEvent>)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 
+    @Serializable private data class CatalogIdBody(val id: String)
+    @Serializable private data class NoteBody(val note: String?)
     @Serializable private data class SongRequestBody(val song: SongRef, val mode: String)
     @Serializable private data class SongRequestAnswer(val accept: Boolean)
 }

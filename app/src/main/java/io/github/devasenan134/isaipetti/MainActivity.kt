@@ -56,6 +56,8 @@ class MainActivity : ComponentActivity() {
         when {
             conversationId > 0 -> app.pendingOpen.value = PendingOpen.Chat(conversationId)
             intent?.getBooleanExtra(Notifications.EXTRA_OPEN_FRIENDS, false) == true -> app.pendingOpen.value = PendingOpen.Friends
+            intent?.getStringExtra(Notifications.EXTRA_ALBUM) != null -> app.pendingOpen.value = PendingOpen.Album(intent.getStringExtra(Notifications.EXTRA_ALBUM)!!)
+            intent?.getBooleanExtra(Notifications.EXTRA_OPEN_REQUESTS, false) == true -> app.pendingOpen.value = PendingOpen.Requests
         }
     }
 

@@ -77,6 +77,7 @@ import io.github.devasenan134.isaipetti.ui.mixes.MixScreen
 import io.github.devasenan134.isaipetti.ui.search.SearchScreen
 import io.github.devasenan134.isaipetti.ui.settings.SettingsScreen
 import io.github.devasenan134.isaipetti.ui.settings.StatsScreen
+import io.github.devasenan134.isaipetti.ui.search.RequestsScreen
 import io.github.devasenan134.isaipetti.ui.settings.UpdateDialog
 import io.github.devasenan134.isaipetti.ui.social.ChatScreen
 import io.github.devasenan134.isaipetti.ui.social.SocialScreen
@@ -94,6 +95,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class ChatRoute(val id: Long)
 @Serializable object SettingsRoute
 @Serializable object StatsRoute
+@Serializable object RequestsRoute
 @Serializable object LibraryRoute
 @Serializable object LikedSongsRoute
 @Serializable object PlaylistsRoute
@@ -120,6 +122,8 @@ class Nav(
     val openSinger: (Artist) -> Unit,
     /** A mix, playlist or station by Isai Pettai. */
     val openMix: (String) -> Unit,
+    /** Your requests for music that isn't in the library (admins: everyone's). */
+    val openRequests: () -> Unit,
     val back: () -> Unit,
 )
 
@@ -157,22 +161,30 @@ fun MainScreen() {
             else navController.navigate(SingerRoute(it.id, it.name, it.coverArt))
         },
         openMix = { navController.navigate(MixRoute(it)) },
+        openRequests = { navController.navigate(RequestsRoute) },
         back = { navController.popBackStack() },
     )
 
-    // Open the chat or Friends tab from a tapped notification.
+    // Open what a tapped notification is about: a chat or the Friends tab, or (from Search) a movie
+    // that was requested or the requests.
     val app = LocalApp.current
     val pending by app.pendingOpen.collectAsStateWithLifecycle()
     LaunchedEffect(pending) {
         val target = pending ?: return@LaunchedEffect
         app.pendingOpen.value = null
         playerOpen = false
-        currentTab = tabs.indexOfFirst { it.route == SocialRoute }
-        navController.navigate(SocialRoute) {
+        val tab = if (target is PendingOpen.Album || target is PendingOpen.Requests) SearchRoute else SocialRoute
+        currentTab = tabs.indexOfFirst { it.route == tab }
+        navController.navigate(tab) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
         }
-        if (target is PendingOpen.Chat) nav.openChat(target.conversationId)
+        when (target) {
+            is PendingOpen.Chat -> nav.openChat(target.conversationId)
+            is PendingOpen.Album -> nav.openAlbum(target.albumId)
+            PendingOpen.Requests -> nav.openRequests()
+            PendingOpen.Friends -> Unit
+        }
     }
 
     // A newer version on GitHub: offer it once (until "Later"; it's always in Settings too).
@@ -257,6 +269,7 @@ fun MainScreen() {
                 screen<ChatRoute> { ChatScreen(it.toRoute<ChatRoute>().id, nav) }
                 screen<SettingsRoute> { SettingsScreen(nav) }
                 screen<StatsRoute> { StatsScreen(nav) }
+                screen<RequestsRoute> { RequestsScreen(nav) }
                 screen<LibraryRoute> { LibraryScreen(nav) }
                 screen<LikedSongsRoute> { LikedSongsScreen(nav) }
                 screen<PlaylistsRoute> { PlaylistsScreen(nav) }

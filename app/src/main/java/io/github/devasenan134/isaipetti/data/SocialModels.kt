@@ -365,3 +365,64 @@ data class LibrarySearchResults(
 /** A lyricist's or actor's page: the movies they wrote for or acted in, and the songs. */
 @Serializable
 data class PersonPage(val person: PersonHit, val movies: List<MovieHit> = emptyList(), val songs: List<MixSong> = emptyList())
+
+// Asking for music that isn't in the library: the friends server finds it in the iTunes catalog.
+
+/** A song or a movie's album from the music catalog, not in the library. */
+@Serializable
+data class CatalogItem(
+    val id: String,
+    /** "song" or "movie". */
+    val kind: String,
+    val title: String,
+    /** The movie a song is from (for a movie, its own name). */
+    val movie: String,
+    val year: Int? = null,
+    /** A song's singers; a movie's composer. */
+    val artist: String? = null,
+    val artworkUrl: String? = null,
+    /** How many songs a movie's album has. */
+    val trackCount: Int = 0,
+    val durationMs: Long? = null,
+) {
+    val isMovie get() = kind == "movie"
+
+    /** "Kanave Kanave · David", or "David (2013)" for a whole movie. */
+    val label get() = if (isMovie) movie + (year?.let { " ($it)" } ?: "") else "$title · $movie"
+}
+
+@Serializable
+data class MusicRequest(
+    val id: Long,
+    val item: CatalogItem,
+    /** "open", "done" (in the library now) or "declined" (it couldn't be found). */
+    val status: String = "open",
+    val requestedAt: Long = 0,
+    val closedAt: Long? = null,
+    /** Why it was declined, if the admin said. */
+    val note: String? = null,
+    /** Where it is in the library once done. */
+    val albumId: String? = null,
+    val songId: String? = null,
+    /** Whether you asked for it. */
+    val mine: Boolean = false,
+    /** Everyone who asked, by name. */
+    val askedBy: List<String> = emptyList(),
+) {
+    val isOpen get() = status == "open"
+}
+
+/** A catalog result, with its request if someone asked for it already. */
+@Serializable
+data class CatalogHit(val item: CatalogItem, val request: MusicRequest? = null)
+
+@Serializable
+data class CatalogResults(val movies: List<CatalogHit> = emptyList(), val songs: List<CatalogHit> = emptyList()) {
+    val isEmpty get() = movies.isEmpty() && songs.isEmpty()
+
+    /** The same results, with [itemId]'s request changed to [request]. */
+    fun with(itemId: String, request: MusicRequest?) = CatalogResults(
+        movies.map { if (it.item.id == itemId) it.copy(request = request) else it },
+        songs.map { if (it.item.id == itemId) it.copy(request = request) else it },
+    )
+}
