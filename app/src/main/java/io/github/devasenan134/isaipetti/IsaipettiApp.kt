@@ -14,6 +14,7 @@ import io.github.devasenan134.isaipetti.data.Likes
 import io.github.devasenan134.isaipetti.data.MyPlaylists
 import io.github.devasenan134.isaipetti.data.Mixes
 import io.github.devasenan134.isaipetti.data.Appearance
+import io.github.devasenan134.isaipetti.data.LockScreenSettings
 import io.github.devasenan134.isaipetti.data.QueueMemory
 import io.github.devasenan134.isaipetti.data.RecentActivity
 import io.github.devasenan134.isaipetti.data.RecentPlaylists
@@ -67,6 +68,8 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         private set
     lateinit var appearance: Appearance
         private set
+    lateinit var lockScreen: LockScreenSettings
+        private set
     lateinit var waveforms: Waveforms
         private set
 
@@ -82,6 +85,7 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         session = SessionStore(this).also { it.load() }
         appearance = Appearance(this)
+        lockScreen = LockScreenSettings(this)
         val http = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

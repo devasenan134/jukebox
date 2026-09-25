@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import io.github.devasenan134.isaipetti.IsaipettiApp
+import io.github.devasenan134.isaipetti.lockscreen.LockScreenLyrics
 import io.github.devasenan134.isaipetti.MainActivity
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -33,6 +34,7 @@ import kotlinx.coroutines.launch
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var listenSync: ListenSync? = null
+    private var lockScreenLyrics: LockScreenLyrics? = null
     private val scope = MainScope()
     private val app get() = application as IsaipettiApp
     private val api get() = app.api
@@ -69,6 +71,8 @@ class PlaybackService : MediaSessionService() {
         startScrobbling(player)
         rememberQueues(player)
         stopAtClipEnds(player)
+        // Lyrics over the lock screen when the screen goes off while music plays (if that's on in Settings).
+        lockScreenLyrics = LockScreenLyrics(this) { player.isPlaying }.also { it.register() }
         listenSync = ListenSync(player, api, app.social.listen, scope)
         // Mixes by Isai Pettai: learn from skips, and keep stations playing.
         val socialApi = { app.social.api.takeIf { app.session.social.value != null } }
@@ -97,6 +101,8 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        lockScreenLyrics?.unregister()
+        lockScreenLyrics = null
         app.social.onPlayback(null, false)
         // Without a player there's nothing to keep in sync.
         listenSync?.release()

@@ -51,6 +51,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.devasenan134.isaipetti.BuildConfig
+import io.github.devasenan134.isaipetti.lockscreen.LockScreenLyrics
+import android.app.NotificationManager
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import io.github.devasenan134.isaipetti.data.PasswordRules
 import io.github.devasenan134.isaipetti.data.SocialSession
 import io.github.devasenan134.isaipetti.data.SubsonicApi
@@ -129,6 +137,8 @@ fun SettingsScreen(nav: Nav) {
             if (social != null) ListeningStatsCard(onOpen = nav.openStats)
 
             AppearanceCard()
+
+            LockScreenCard()
 
             ChangePasswordCard()
 
@@ -287,6 +297,69 @@ private fun AppearanceCard() {
                 )
             }
         }
+    }
+}
+
+/**
+ * Lyrics over the lock screen, and keeping the screen on while they show. Android has to allow the
+ * app's "full-screen" notifications for it (Android 14 lets people turn that off); if it doesn't,
+ * this says so and opens the right settings page.
+ */
+@Composable
+private fun LockScreenCard() {
+    val settings = LocalApp.current.lockScreen
+    val context = LocalContext.current
+    val lyrics by settings.lyrics.collectAsStateWithLifecycle()
+    val keepOn by settings.keepScreenOn.collectAsStateWithLifecycle()
+    // Checked again whenever you come back to Settings (e.g. from Android's settings).
+    var allowed by remember { mutableStateOf(LockScreenLyrics.canShow(context)) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { allowed = LockScreenLyrics.canShow(context) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Lock screen", style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider()
+            SettingSwitch(
+                "Lyrics on the lock screen",
+                "Lock your phone while music plays, and the lyrics show when you turn the screen on, " +
+                    "on the song's colours. Swipe up to get to the normal lock screen.",
+                checked = lyrics,
+                onChange = settings::setLyrics,
+            )
+            SettingSwitch(
+                "Keep the screen on",
+                "While the lyrics show and the music plays.",
+                checked = keepOn,
+                onChange = settings::setKeepScreenOn,
+                enabled = lyrics,
+            )
+            if (lyrics && !allowed) {
+                Text(
+                    "Android needs to allow Isaipetti's notifications, including full-screen ones, to show the lyrics over the lock screen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedButton(onClick = {
+                    val notificationsOn = context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
+                    val intent = if (!notificationsOn || Build.VERSION.SDK_INT < 34) {
+                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    } else {
+                        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, "package:${context.packageName}".toUri())
+                    }
+                    runCatching { context.startActivity(intent) }
+                }) { Text("Allow in Android settings") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingSwitch(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        androidx.compose.material3.Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 

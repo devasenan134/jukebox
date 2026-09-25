@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Voice messages in chats (asked for the first time you record one). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Lyrics on the lock screen: the only way to open a screen from the background (see LockScreenLyrics). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Installing app updates downloaded from GitHub (Android asks the user first). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -30,6 +32,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Lyrics over the lock screen: its own task, so the rest of the app never shows over the lock. -->
+        <activity
+            android:name=".lockscreen.LockLyricsActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="${applicationId}.lockscreen"
+            android:theme="@style/Theme.Isaipetti.LockLyrics" />
 
         <service
             android:name=".playback.PlaybackService"

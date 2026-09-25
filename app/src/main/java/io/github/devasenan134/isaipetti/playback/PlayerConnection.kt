@@ -81,7 +81,11 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
     /** Accepted song requests still waiting to play, so they play in the order they were accepted. */
     private val acceptedRequests = mutableListOf<String>()
 
+    // The app's screens and the lock-screen lyrics each connect while shown; it stays connected while either is.
+    private var users = 0
+
     fun connect() {
+        users++
         if (controllerFuture != null) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
@@ -99,6 +103,8 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
     }
 
     fun disconnect() {
+        users = (users - 1).coerceAtLeast(0)
+        if (users > 0) return
         controllerFuture?.let { MediaController.releaseFuture(it) }
         controllerFuture = null
         controller = null
