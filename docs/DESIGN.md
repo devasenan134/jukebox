@@ -6,8 +6,8 @@ size of one home server and a group of friends: one small machine (the reference
 
 ## Goals
 
-- **A music server for film music.** Films, songs and people (composers, singers, lyricists, actors) are
-  part of the catalog, not tags bolted on.
+- **A music server for film music.** Albums (films), songs and people (composers, singers, lyricists,
+  actors) are part of the catalog, not tags bolted on.
 - **Self-hostable in one container.** A standalone music server, or music plus social, from the same image.
 - **Stable identity.** Renaming folders, re-downloading in better quality or the same song appearing on three
   albums never loses a like, a play or a playlist entry.
@@ -22,7 +22,7 @@ Not goals: many machines, millions of users, DRM, a CDN.
 ```
                  ┌───────────────────────── Jukebox server (one image) ─────────────────────────┐
  app / web ────▶ │ control plane (JSON over HTTPS)                                              │
-                 │   core: auth · catalog (films, people, recordings, tracks) · library ·       │
+                 │   core: auth · catalog (albums, people, recordings, tracks) · library ·       │
                  │         playlists · likes · plays · lyrics · search · mixes                  │
                  │   module subsonic: the Subsonic API subset (third-party players, migration)  │
                  │   module social:   friends · chat · jam · push                               │
@@ -61,12 +61,15 @@ a **track** (that recording appearing on a release). One recording often appears
 "From X" single, a re-release and a compilation.
 
 ```
-film ── release (soundtrack, background score, single, re-release)
-            └── track (disc, number) ──▶ recording ──▶ file(s) on disk (quality variants)
-                                             │
-                                             ├── version of ──▶ song (karaoke, remix, unplugged,
-                                             │                          female/male version)
-                                             └── people with roles (composer, singer, lyricist)
+album (a film, or any album) ── release (soundtrack, background score, single, re-release)
+                                    └── track (disc, number) ──▶ recording ──▶ file(s) on disk
+                                                                     │
+                                                                     ├── version of ──▶ song
+                                                                     │   (karaoke, remix, unplugged,
+                                                                     │    female/male version)
+                                                                     └── people with roles
+                                                                         (composer, singer, lyricist)
+album ── people with roles (actor, director) for films
 ```
 
 - Likes, plays, playlists and lyrics attach to the **recording**, so they survive renames, better-quality
@@ -74,8 +77,11 @@ film ── release (soundtrack, background score, single, re-release)
 - A recording's id comes from what identifies it (JioSaavn id, ISRC, audio fingerprint), not from its path.
 - Versions link to their song, so a karaoke track or a remix is "the same song, another version" instead of
   a duplicate or a stranger.
-- Films, people and their roles are first-class, so "songs by this lyricist", "this actor's songs" and
-  "this film's background score" are plain queries.
+- An **album** is what people browse: for film music it's the film, with its soundtrack, background score
+  and singles as releases; for any other music it's simply the album. Film details (cast, director) are
+  credits on the album.
+- People and their roles are first-class, so "songs by this lyricist", "this actor's songs" and "this
+  film's background score" are plain queries.
 
 ## The event log
 
