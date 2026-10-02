@@ -27,7 +27,7 @@ data class PlayEvent(
 @Serializable data class PlaysRequest(val events: List<PlayEvent>)
 
 /**
- * Mixes, playlists and stations by Isai Pettai, for each person.
+ * Mixes, playlists and stations by Jukebox, for each person.
  *
  * Nothing is stored as a finished list: every mix is worked out from the library and your listening
  * whenever one of them changed. That's what keeps them up to date: a new song that fits a mix appears

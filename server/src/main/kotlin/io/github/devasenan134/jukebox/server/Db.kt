@@ -218,7 +218,7 @@ class Db(path: String) {
             )
         """.trimIndent()
 
-        // What Isai Pettai suggested: every list of songs a mix, a station batch or "more like this" handed
+        // What Jukebox suggested: every list of songs a mix, a station batch or "more like this" handed
         // out, and each song's place in it (first_position: a station batch continues after what was
         // played). Joined with plays, whose source names the mix, it says which suggestions were played,
         // skipped or never reached. The recommendation engine learns from it.
@@ -241,7 +241,7 @@ class Db(path: String) {
             )
         """.trimIndent()
 
-        // Mixes by Isai Pettai: what the app played (with skips), mixes saved to Your Library,
+        // Mixes by Jukebox: what the app played (with skips), mixes saved to Your Library,
         // and when each mix's songs last changed.
         val SCHEMA_V7 = """
             CREATE TABLE plays (

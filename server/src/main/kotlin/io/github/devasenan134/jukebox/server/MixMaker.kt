@@ -12,7 +12,7 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 /** Who made every mix, playlist and station the app didn't get from a person. */
-const val AUTHOR = "Isai Pettai"
+const val AUTHOR = "Jukebox"
 
 @Serializable data class PersonDto(val id: String, val name: String)
 
@@ -29,7 +29,7 @@ data class MixSong(
     val artists: List<PersonDto> = emptyList(),
 )
 
-/** A mix, playlist or station made by Isai Pettai. In lists, [songs] is left out and only [songCount] is set. */
+/** A mix, playlist or station made by Jukebox. In lists, [songs] is left out and only [songCount] is set. */
 @Serializable
 data class MixDto(
     val id: String,

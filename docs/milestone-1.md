@@ -142,9 +142,8 @@ untouched.
 Likes, playlists, plays and the event log; sign-in without Navidrome; mixes and search running on Jukebox's
 own catalog (they keep reading Navidrome until Milestone 2); converting audio; the realtime gateway.
 
-## Questions
+## Decisions (2026-10-02)
 
-1. Mixes say "by Isai Pettai" in the app. Should they say "by Jukebox" now?
-2. Should Jukebox also scan `jiosaavn_m4a_duplicate_singles`? Each repeat would join its recording as one
-   more track (the single it came from), without showing up as a second copy of the song.
-3. Fingerprinting takes a few hours once on the Mac mini, and catches re-downloads and repeats. On?
+1. Mixes are credited to "Jukebox" (they said "Isai Pettai").
+2. The repeats folder (`jiosaavn_m4a_duplicate_singles`) is not scanned.
+3. Fingerprinting is on.

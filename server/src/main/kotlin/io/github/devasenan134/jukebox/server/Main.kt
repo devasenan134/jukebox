@@ -260,7 +260,7 @@ fun Application.jukeboxServer(
                 }
             }
 
-            // Mixes, playlists and stations by Isai Pettai.
+            // Mixes, playlists and stations by Jukebox.
             route("/mixes") {
                 fun mixesOn() = mixes ?: throw ApiError(HttpStatusCode.NotFound, "Mixes are off on this server")
                 get { call.respond(mixesOn().home(call.me())) }

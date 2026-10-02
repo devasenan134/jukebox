@@ -75,7 +75,7 @@ class MixMakerTest {
         MixMaker(lib, history, skips, popularity = (100 until 130).associateWith { 3 }, friendsPlays = mapOf(120 to 4), personSeed = 42, today = today, now = now)
 
     @Test
-    fun `daily mixes follow your taste and are by Isai Pettai`() {
+    fun `daily mixes follow your taste and are by Jukebox`() {
         val lib = Pretend.library()
         val daily = maker(lib).dailyMixes()
         assertTrue(daily.isNotEmpty())
@@ -83,7 +83,7 @@ class MixMakerTest {
         assertTrue(songs.size >= 30, "a daily mix has plenty of songs")
         val melody = songs.count { style(it.id) == 0 }
         assertTrue(melody > songs.size * 0.8, "mostly melody: $melody of ${songs.size}")
-        assertTrue(daily.all { it.author == "Isai Pettai" })
+        assertTrue(daily.all { it.author == "Jukebox" })
         assertTrue(maker(lib).home().first { it.id == "made-for-you" }.mixes.filter { it.kind == "daily" }.all { it.personal })
         // Never two songs from the same movie back to back.
         assertTrue(songs.zipWithNext().none { (a, b) -> a.albumId == b.albumId })

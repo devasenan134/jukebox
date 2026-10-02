@@ -13,6 +13,3 @@ Milestones in the order they're built. Each one leaves the app working.
 | 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, the Android app and web app in this repo, APK releases | |
 | – | Engine | The recommendation engine in its own repository, following the event stream | Later |
 
-## Open questions
-
-- Mixes are credited to "Isai Pettai" in the app. Keep that name, or rename it with the project?
