@@ -21,6 +21,7 @@ dependencies {
     implementation("io.ktor:ktor-server-websockets:$ktor")
     implementation("io.ktor:ktor-server-status-pages:$ktor")
     implementation("io.ktor:ktor-server-call-logging:$ktor")
+    implementation("io.ktor:ktor-server-partial-content:$ktor")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
     implementation("io.ktor:ktor-client-core:$ktor")
     implementation("io.ktor:ktor-client-cio:$ktor")

@@ -44,9 +44,19 @@ Notifications go through Firebase Cloud Messaging, with **your own** Firebase pr
    The log line now says `push on`.
 5. Recommended: in the [Google Cloud console](https://console.cloud.google.com/apis/credentials), open the project's **Android key (auto created by Firebase)** and under *Application restrictions* allow only your app's package name and SHA-1.
 
-## Mixes by Isai Pettai (optional)
+## Your own library (milestone 1)
 
-The server makes mixes, playlists and stations for everyone, with **Isai Pettai** as their author: up to six **Daily Mixes** (one per side of your taste), **Discover Weekly** (songs you haven't played), **On Repeat**, **Rewind**, **New Arrivals**, **Friends Mix**, **Top 50**, composer, singer and decade mixes, and **stations** from any song, movie, composer or singer that never run out. Your own playlists get **Recommended songs**. People can save mixes to Your Library, where they keep updating, or save a copy as a normal playlist.
+Jukebox can scan the music itself instead of relying on Navidrome's catalog (see
+[../docs/milestone-1.md](../docs/milestone-1.md)). Set `MUSIC_FOLDER` (mounted read-only at `/music`) and `LIBRARIES` in
+`.env`, for example `LIBRARIES=tamil=/music:film:tamil`. On start it scans everything (quick rescans every hour after
+that), then fingerprints the songs in the background, which takes a few hours once for a large library. The
+Subsonic API at `/rest/...` serves browsing, search, lyrics (`.lrc` and `.txt` files next to the songs), cover art and
+streaming from it. Admins see progress at `GET /library/status` and can ask for a rescan with `POST /library/scan`.
+Sign-in, likes, plays and playlists still come from Navidrome until milestone 2.
+
+## Mixes by Jukebox (optional)
+
+The server makes mixes, playlists and stations for everyone, with **Jukebox** as their author: up to six **Daily Mixes** (one per side of your taste), **Discover Weekly** (songs you haven't played), **On Repeat**, **Rewind**, **New Arrivals**, **Friends Mix**, **Top 50**, composer, singer and decade mixes, and **stations** from any song, movie, composer or singer that never run out. Your own playlists get **Recommended songs**. People can save mixes to Your Library, where they keep updating, or save a copy as a normal playlist.
 
 It works them out from Navidrome's own database, which it only reads (Navidrome's API can't tell an admin what others played; its database can): the songs, and everyone's plays, likes and ratings. The app also reports skips, so songs you keep skipping stay out of your mixes. Nothing is stored as a finished list: when the library, your listening or the day changes, the mixes are worked out again, so **new songs that fit a mix appear in it by themselves**.
 

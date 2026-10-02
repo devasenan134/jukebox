@@ -57,25 +57,9 @@ class ScannerTest {
     private val fingerprints = Fingerprints(db, tools) { mapOf(1L to root.path) }
     private val library = LibraryDef("tamil", root.path, kind = "film", language = "tamil")
 
-    /** A song with a sound of its own (a sweep starting at [hz]), tagged like the organizer tags the library. */
-    private fun song(path: String, hz: Int, tags: Map<String, String>, bitrate: String = "128k", seconds: Int = 20): File {
-        val file = File(root, path).apply { parentFile.mkdirs() }
-        val meta = tags.flatMap { (k, v) -> listOf("-metadata", "$k=$v") }
-        val cmd = listOf("ffmpeg", "-v", "error", "-nostdin", "-y", "-f", "lavfi", "-i",
-            "aevalsrc=0.5*sin(2*PI*($hz+${hz / 20}*t)*t)+0.3*sin(2*PI*${hz * 3 / 2}*t)*gt(mod(t\\,${hz % 3 + 1})\\,0.5):s=22050:d=$seconds",
-            "-c:a", "aac", "-b:a", bitrate, "-movflags", "use_metadata_tags") + meta + file.path
-        val p = ProcessBuilder(cmd).redirectErrorStream(true).redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).start()
-        val out = p.inputStream.bufferedReader().readText()
-        check(p.waitFor() == 0) { out }
-        return file
-    }
-
-    private fun airaa(n: Int, title: String, hz: Int, score: Boolean = false, singers: String = "Sathya Prakash") = song(
-        if (score) "Airaa (2019) (Original Background Score)/0$n - $title.m4a" else "Airaa (2019)/0$n - $title.m4a", hz,
-        mapOf("title" to title, "album" to if (score) "Airaa (Original Background Score)" else "Airaa", "artist" to singers,
-            "album_artist" to "Sundaramurthy K.S.", "composer" to "Sundaramurthy K.S.", "date" to "2019", "track" to "$n/3",
-            "disc" to "1/1", "DISCSUBTITLE" to if (score) "" else "Soundtrack", "genre" to "Tamil"),
-    )
+    private fun song(path: String, hz: Int, tags: Map<String, String>, bitrate: String = "128k") = TestAudio.song(root, path, hz, tags, bitrate)
+    private fun airaa(n: Int, title: String, hz: Int, score: Boolean = false, singers: String = "Sathya Prakash") =
+        TestAudio.airaa(root, n, title, hz, score, singers)
 
     private fun recordingOf(path: String): String = runBlocking {
         db.tx { queryOne("SELECT recording_id FROM files WHERE path = ?", path) { it.getString(1) } }!!
@@ -88,7 +72,7 @@ class ScannerTest {
         airaa(1, "Kaariga", 300, singers = "Sathya Prakash, Chinmayi")
         airaa(2, "Megathoodham", 500)
         airaa(1, "She Hates You", 700, score = true)
-        File(root, "Airaa (2019)/cover.jpg").writeBytes(tools.embeddedPicture(File("/dev/null")) ?: jpeg())
+        File(root, "Airaa (2019)/cover.jpg").writeBytes(jpeg())
         File(root, "Airaa (2019)/01 - Kaariga.lrc").writeText("[00:01.00] Kaariga kaariga\n[00:05.00] la la")
 
         val report = scanner.scan(library)
@@ -204,10 +188,5 @@ class ScannerTest {
         assertTrue(AudioTools.similarity(a, c) < Fingerprints.SAME, "other audio: ${AudioTools.similarity(a, c)}")
     }
 
-    /** A tiny JPEG made by ffmpeg. */
-    private fun jpeg(): ByteArray {
-        val f = File(data, "cover.jpg")
-        ProcessBuilder("ffmpeg", "-v", "error", "-nostdin", "-y", "-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", f.path).start().waitFor()
-        return f.readBytes()
-    }
+    private fun jpeg(): ByteArray = TestAudio.jpeg(File(data, "cover.jpg")).readBytes()
 }

@@ -38,6 +38,10 @@ import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import kotlinx.serialization.SerializationException
 import org.slf4j.LoggerFactory
+import io.github.devasenan134.jukebox.server.library.AudioTools
+import io.github.devasenan134.jukebox.server.library.MusicLibrary
+import io.github.devasenan134.jukebox.server.subsonic.SubsonicApi
+import io.github.devasenan134.jukebox.server.subsonic.SubsonicLibrary
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
@@ -91,6 +95,15 @@ fun Application.jukeboxServer(
     val search = music?.let { LibrarySearch(it, File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)) }
     // Asking for music the library doesn't have (it needs the library, to know what's missing).
     val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds) }
+    // Jukebox's own library (docs/milestone-1.md): scanned in the background, served through the Subsonic API.
+    val musicLibrary = MusicLibrary.parse(config.libraries).takeIf { it.isNotEmpty() }?.let { defs ->
+        MusicLibrary(
+            db, defs, AudioTools(lowPriority = true),
+            File(config.artworkDir ?: File(File(config.dbPath).absoluteFile.parentFile, "artwork").path),
+            config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes,
+        ).also { it.start(this) }
+    }
+    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.tools, lib.artworkDir, lib::roots), navidrome) }
     val limiter = RateLimiter(maxPerMinute = 10)
     val cleanup = Cleanup(db, navidrome, hub)
     // Every 10 minutes, remove people whose Navidrome account is gone.
@@ -139,6 +152,8 @@ fun Application.jukeboxServer(
 
     routing {
         get("/health") { call.respond(mapOf("status" to "ok")) }
+        // The Subsonic API signs in with its own parameters (u, t, s), so it sits outside the session check.
+        subsonic?.routes(this)
 
         route("/auth") {
             post("/login") {
@@ -281,6 +296,19 @@ fun Application.jukeboxServer(
             post("/plays") {
                 mixes?.recordPlays(call.me(), call.receive<PlaysRequest>().events)
                 call.respond(HttpStatusCode.NoContent)
+            }
+
+            // The library: what's been scanned, and a rescan on demand (admins only).
+            route("/library") {
+                fun libraryOn() = musicLibrary ?: throw ApiError(HttpStatusCode.NotFound, "This server has no library of its own")
+                suspend fun ApplicationCall.admin() { if (!stats.isAdmin(me())) throw ApiError(HttpStatusCode.Forbidden, "Only admins can do this") }
+                get("/status") { call.admin(); call.respond(libraryOn().status()) }
+                post("/scan") {
+                    call.admin()
+                    val lib = libraryOn()
+                    call.application.launch { lib.scanAll() }
+                    call.respond(HttpStatusCode.Accepted, mapOf("status" to "scanning"))
+                }
             }
 
             // Listening stats, only for people who are admins in Navidrome.

@@ -28,6 +28,15 @@ data class Config(
     val listenOwnerGraceMs: Long = 60_000,
     /** How long a listener waits between song requests. */
     val songRequestCooldownMs: Long = 10_000,
+    /** Music folders Jukebox scans itself: "name=path:kind:language;..." (docs/milestone-1.md). Empty: no library of its own. */
+    val libraries: String? = null,
+    /** Where cover art is kept (by default next to the database). */
+    val artworkDir: String? = null,
+    /** A CSV of path,saavn_id for files whose tags have no JioSaavn id (optional). */
+    val saavnIdMap: String? = null,
+    /** Fingerprint recordings in the background (finds the same song twice). */
+    val fingerprints: Boolean = true,
+    val rescanEveryMinutes: Long = 60,
 ) {
     companion object {
         fun fromEnv(): Config {
@@ -47,6 +56,11 @@ data class Config(
                 featuresDb = System.getenv("FEATURES_DB")?.takeIf { it.isNotBlank() },
                 castFile = System.getenv("CAST_FILE")?.takeIf { it.isNotBlank() },
                 timeZone = env("MIX_TIMEZONE", "Asia/Kolkata"),
+                libraries = System.getenv("LIBRARIES")?.takeIf { it.isNotBlank() },
+                artworkDir = System.getenv("ARTWORK_DIR")?.takeIf { it.isNotBlank() },
+                saavnIdMap = System.getenv("SAAVN_ID_MAP")?.takeIf { it.isNotBlank() },
+                fingerprints = System.getenv("FINGERPRINTS")?.lowercase() != "off",
+                rescanEveryMinutes = System.getenv("RESCAN_EVERY_MINUTES")?.toLongOrNull() ?: 60,
             )
         }
     }

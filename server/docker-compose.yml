@@ -11,14 +11,20 @@ services:
       - FIREBASE_APP_CONFIG=/secrets/google-services.json
       - NAVIDROME_DB=/navidrome/navidrome.db
       - FEATURES_DB=/features/features.db
+      - SAAVN_ID_MAP=/signals/songs.csv
     volumes:
       - ./data:/data
       - ./secrets:/secrets:ro  # optional Firebase files for push notifications; never commit them
-      # Optional, for mixes by Isai Pettai: Navidrome's data folder and the audio analyzer's (both read-only).
+      # Optional, for mixes by Jukebox: Navidrome's data folder and the audio analyzer's (both read-only).
       - ${NAVIDROME_DATA:-./no-navidrome-data}:/navidrome:ro
       - ${FEATURES_FOLDER:-./no-features}:/features:ro
+      # Jukebox's own library (docs/milestone-1.md): your music folder, read-only. LIBRARIES in .env says
+      # what's in it (as seen inside the container, under /music).
+      - ${MUSIC_FOLDER:-./no-music}:/music:ro
+      - ${SIGNALS_FOLDER:-./no-signals}:/signals:ro  # optional: songs.csv with JioSaavn ids for files
     ports:
-      - "127.0.0.1:8095:8095"  # only this machine; put HTTPS (reverse proxy or tunnel) in front
+      - "127.0.0.1:${HOST_PORT:-8095}:8095"  # only this machine; put HTTPS (reverse proxy or tunnel) in front
     extra_hosts:
       - "host.docker.internal:host-gateway"  # lets the container reach Navidrome on the host
+    mem_limit: ${MEM_LIMIT:-1g}
     restart: unless-stopped

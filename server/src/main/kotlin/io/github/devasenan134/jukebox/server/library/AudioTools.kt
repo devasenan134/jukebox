@@ -30,7 +30,12 @@ data class Probed(
  * Reads audio files with ffprobe and ffmpeg (in the Docker image; any format they know works).
  * Every call has a time limit, so one broken file can't hold up a scan.
  */
-open class AudioTools(private val ffprobe: String = "ffprobe", private val ffmpeg: String = "ffmpeg") {
+open class AudioTools(
+    private val ffprobe: String = "ffprobe",
+    private val ffmpeg: String = "ffmpeg",
+    /** Run at low CPU priority (scans shouldn't slow down anything people are listening to). */
+    private val lowPriority: Boolean = false,
+) {
     private val json = Json { ignoreUnknownKeys = true }
 
     open fun probe(file: File): Probed? {
@@ -82,6 +87,7 @@ open class AudioTools(private val ffprobe: String = "ffprobe", private val ffmpe
             "scale='min($size,iw)':'min($size,ih)':force_original_aspect_ratio=decrease", "-q:v", "3", "-f", "image2pipe", "-c:v", "mjpeg", "-"))
 
     private fun run(command: List<String>, timeoutSeconds: Long = 60): ByteArray? {
+        val command = if (lowPriority && File("/usr/bin/nice").exists()) listOf("/usr/bin/nice", "-n", "15") + command else command
         val process = runCatching { ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).start() }.getOrNull() ?: return null
         val out = process.inputStream.use { it.readBytes() }
         if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
