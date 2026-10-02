@@ -1,0 +1,7 @@
+build
+.gradle
+.kotlin
+data
+secrets
+.env
+*.json
