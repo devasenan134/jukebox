@@ -42,7 +42,7 @@ class Db(path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -238,6 +238,149 @@ class Db(path: String) {
                 position INTEGER NOT NULL,
                 song_id TEXT NOT NULL,
                 PRIMARY KEY (list_id, position)
+            )
+        """.trimIndent()
+
+        // The catalog (docs/milestone-1.md). An album (a film, or any album) has releases (soundtrack, score,
+        // single...), a release has tracks, and a track is a recording appearing on it. A recording is one
+        // performance: likes, plays and lyrics belong to it, and its id never changes when files move.
+        // A song groups the versions of a recording (karaoke, remix...). files are what's on disk.
+        // merged_into: a recording found to be the same as another (same sound) points to the one kept.
+        // group_key: how the scanner recognizes the same album or release on the next scan.
+        val SCHEMA_V19 = """
+            CREATE TABLE libraries (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                path TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                language TEXT
+            );
+            CREATE TABLE artwork (
+                id TEXT PRIMARY KEY,
+                hash TEXT NOT NULL UNIQUE,
+                source TEXT NOT NULL,
+                mime TEXT NOT NULL,
+                width INTEGER,
+                height INTEGER
+            );
+            CREATE TABLE people (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_name TEXT NOT NULL,
+                sound_key TEXT NOT NULL UNIQUE,
+                aliases TEXT
+            );
+            CREATE TABLE songs (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                song_key TEXT NOT NULL UNIQUE
+            );
+            CREATE TABLE albums (
+                id TEXT PRIMARY KEY,
+                library_id INTEGER NOT NULL REFERENCES libraries(id),
+                title TEXT NOT NULL,
+                sort_title TEXT NOT NULL,
+                year INTEGER,
+                kind TEXT NOT NULL,
+                cover_id TEXT REFERENCES artwork(id),
+                group_key TEXT NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE releases (
+                id TEXT PRIMARY KEY,
+                album_id TEXT NOT NULL REFERENCES albums(id),
+                title TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                year INTEGER,
+                source TEXT,
+                source_id TEXT,
+                cover_id TEXT REFERENCES artwork(id),
+                group_key TEXT NOT NULL UNIQUE
+            );
+            CREATE INDEX releases_by_album ON releases(album_id);
+            CREATE TABLE recordings (
+                id TEXT PRIMARY KEY,
+                song_id TEXT REFERENCES songs(id),
+                title TEXT NOT NULL,
+                title_key TEXT NOT NULL,
+                version TEXT NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                isrc TEXT,
+                saavn_id TEXT,
+                mbid TEXT,
+                fingerprint BLOB,
+                merged_into TEXT REFERENCES recordings(id),
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX recordings_by_isrc ON recordings(isrc);
+            CREATE INDEX recordings_by_saavn ON recordings(saavn_id);
+            CREATE INDEX recordings_by_mbid ON recordings(mbid);
+            CREATE INDEX recordings_by_song ON recordings(song_id);
+            CREATE INDEX recordings_by_title ON recordings(title_key, duration_ms);
+            CREATE TABLE tracks (
+                id TEXT PRIMARY KEY,
+                release_id TEXT NOT NULL REFERENCES releases(id),
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                disc INTEGER NOT NULL,
+                number INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                disc_subtitle TEXT
+            );
+            CREATE INDEX tracks_by_release ON tracks(release_id);
+            CREATE INDEX tracks_by_recording ON tracks(recording_id);
+            CREATE TABLE recording_credits (
+                recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+                person_id TEXT NOT NULL REFERENCES people(id),
+                role TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (recording_id, person_id, role)
+            );
+            CREATE INDEX recording_credits_by_person ON recording_credits(person_id, role);
+            CREATE TABLE album_credits (
+                album_id TEXT NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+                person_id TEXT NOT NULL REFERENCES people(id),
+                role TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                PRIMARY KEY (album_id, person_id, role)
+            );
+            CREATE INDEX album_credits_by_person ON album_credits(person_id, role);
+            CREATE TABLE files (
+                id INTEGER PRIMARY KEY,
+                library_id INTEGER NOT NULL REFERENCES libraries(id),
+                path TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                mtime INTEGER NOT NULL,
+                recording_id TEXT NOT NULL REFERENCES recordings(id),
+                track_id TEXT REFERENCES tracks(id),
+                format TEXT NOT NULL,
+                codec TEXT,
+                bitrate INTEGER,
+                sample_rate INTEGER,
+                channels INTEGER,
+                duration_ms INTEGER NOT NULL,
+                audio_md5 TEXT,
+                cover_id TEXT REFERENCES artwork(id),
+                lyrics_mtime INTEGER,
+                missing_since INTEGER,
+                scanned_at INTEGER NOT NULL,
+                UNIQUE (library_id, path)
+            );
+            CREATE INDEX files_by_recording ON files(recording_id);
+            CREATE INDEX files_by_md5 ON files(audio_md5);
+            CREATE TABLE lyrics (
+                recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                script TEXT NOT NULL,
+                synced INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                PRIMARY KEY (recording_id, source, script)
+            );
+            CREATE TABLE scans (
+                id INTEGER PRIMARY KEY,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                info TEXT
             )
         """.trimIndent()
 
