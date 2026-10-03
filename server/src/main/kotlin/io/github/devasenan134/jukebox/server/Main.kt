@@ -7,6 +7,7 @@ import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.http.content.singlePageApplication
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.authenticate
@@ -154,6 +155,9 @@ fun Application.jukeboxServer(
         get("/health") { call.respond(mapOf("status" to "ok")) }
         // The Subsonic API signs in with its own parameters (u, t, s), so it sits outside the session check.
         subsonic?.routes(this)
+        // The web app: its files, and index.html for any page address it handles itself (/album/…). Every API
+        // route above and below wins over it.
+        config.webDir?.let { dir -> singlePageApplication { filesPath = dir; defaultPage = "index.html"; useResources = false } }
 
         route("/auth") {
             post("/login") {

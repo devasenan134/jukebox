@@ -37,6 +37,8 @@ data class Config(
     /** Fingerprint recordings in the background (finds the same song twice). */
     val fingerprints: Boolean = true,
     val rescanEveryMinutes: Long = 60,
+    /** The built web app (web/dist), served at /. Empty: no web app. */
+    val webDir: String? = null,
 ) {
     companion object {
         fun fromEnv(): Config {
@@ -61,6 +63,7 @@ data class Config(
                 saavnIdMap = System.getenv("SAAVN_ID_MAP")?.takeIf { it.isNotBlank() },
                 fingerprints = System.getenv("FINGERPRINTS")?.lowercase() != "off",
                 rescanEveryMinutes = System.getenv("RESCAN_EVERY_MINUTES")?.toLongOrNull() ?: 60,
+                webDir = System.getenv("WEB_DIR")?.takeIf { File(it, "index.html").isFile },
             )
         }
     }

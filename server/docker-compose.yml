@@ -1,6 +1,8 @@
 services:
   jukebox:
-    build: .
+    build:
+      context: ..          # the repository: the image holds the server and the web app
+      dockerfile: Dockerfile
     container_name: jukebox
     env_file: .env
     # Runs as your own user (not root); data/ and secrets/ must belong to it. Set PUID/PGID in .env if yours isn't 1000.
