@@ -1,21 +1,27 @@
 import { useParams } from 'react-router-dom'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
-import { Cover, formatTotalDuration, PlayShuffleRow, ScreenHeader, songCount, SongRow, useLoad } from '../ui/components'
+import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, ScreenHeader, songCount, SongRow, useLoad } from '../ui/components'
 import { ErrorBox, Loading } from '../ui/kit'
 import { useNav } from '../ui/nav'
+import { activity } from '../state/history'
+import { likes, useLikes } from '../state/likes'
 
 /** An album (a film's songs, or its background score): cover, music director, and the songs by disc. */
 export function AlbumScreen() {
   const { id = '' } = useParams()
   const nav = useNav()
   const data = useLoad(() => subsonic.album(id), [id])
+  const liked = useLikes((s) => s.albums.some((a) => a.id === id))
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const album = data.data!
   const songs = album.song ?? []
   const discs = [...new Set(songs.map((s) => s.discNumber ?? 1))]
-  const play = (index: number, shuffle = false) => player.play(songs, index, shuffle, `album:${album.id}`)
+  const play = (index: number, shuffle = false) => {
+    activity.movie(album)
+    player.play(songs, index, shuffle, `album:${album.id}`)
+  }
 
   return (
     <div className="page">
@@ -31,7 +37,9 @@ export function AlbumScreen() {
         </div>
         <div className="body-small muted" style={{ marginTop: 2 }}>{songCount(album.songCount)} · {formatTotalDuration(album.duration)}</div>
       </div>
-      <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} />
+      <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
+        <LikeButton liked={liked} onToggle={() => likes().toggleAlbum(album)} />
+      </PlayShuffleRow>
       {discs.map((disc) => (
         <div key={disc}>
           {discs.length > 1 && <div className="label-large muted" style={{ padding: '12px 16px 4px' }}>{`Disc ${disc}`}</div>}

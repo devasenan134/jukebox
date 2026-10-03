@@ -73,21 +73,73 @@ async def main():
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(500)
 
-            for tab, step in (("Search", "5-search"), ("Albums", "6-albums"), ("Music directors", "7-composers")):
-                t = time.time()
-                await page.get_by_role("link", name=tab).click()
+            async def tab(name):
+                await page.get_by_role("link", name=name).click()
                 await page.wait_for_timeout(1500)
-                if tab == "Search":
-                    await page.fill(".search-box input", "kariga")
-                    await page.wait_for_timeout(1500)
-                    check(await page.get_by_text("Kaariga").count() > 0, "search forgives spelling (kariga finds Kaariga)")
-                check(len(await visible_text()) > 20, f"{tab} shows content ({time.time() - t:.1f}s)")
+
+            t = time.time()
+            await tab("Search")
+            await page.fill(".search-box input", "kariga")
+            await page.wait_for_timeout(1500)
+            check(await page.get_by_text("Kaariga").count() > 0, "search forgives spelling (kariga finds Kaariga)")
+            check(len(await visible_text()) > 20, f"Search shows content ({time.time() - t:.1f}s)")
+            await shot("5-search")
+
+            for chip, step in (("Albums", "6-albums"), ("Music directors", "7-composers")):
+                await tab("Home")
+                await page.get_by_role("button", name=chip, exact=True).click()
+                await page.wait_for_timeout(1500)
+                check(len(await visible_text()) > 20, f"{chip} shows content")
                 await shot(step)
 
             await page.get_by_text("Ilaiyaraaja").first.click()
             await page.wait_for_timeout(1500)
             check(await page.get_by_text("Mouna Raagam").count() > 0, "a music director's page lists their albums")
             await shot("8-composer")
+
+            # Like the album, like its first song, and save the song to a new playlist.
+            playlist = f"Road trip {name}"
+            await page.get_by_text("Mouna Raagam").first.click()
+            await page.wait_for_selector(".song-row", timeout=10000)
+            # (The phone run is the same user: already liked there.)
+            if await page.locator("button[aria-label='Like']").count():
+                await page.locator("button[aria-label='Like']").first.click()
+            await page.locator(".song-row button[aria-label='More']").first.click()
+            like = page.get_by_text("Like", exact=True)
+            await (like.click() if await like.count() else page.keyboard.press("Escape"))
+            await page.wait_for_timeout(500)
+            await page.locator(".song-row button[aria-label='More']").first.click()
+            await page.get_by_text("Add to playlist", exact=True).click()
+            await page.get_by_text("New playlist", exact=True).click()
+            await page.locator(".field input").last.fill(playlist)
+            await page.get_by_role("button", name="Create").click()
+            await page.wait_for_timeout(800)
+            await page.get_by_role("button", name="Done").click()
+            await page.wait_for_timeout(800)
+
+            await tab("Your Library")
+            text = await visible_text()
+            check("Liked songs" in text and "Mouna Raagam" in text and playlist in text,
+                  "Your Library has Liked songs, the liked album and the new playlist")
+            await shot("9-library")
+
+            await page.get_by_text(playlist, exact=True).first.click()
+            await page.wait_for_timeout(1500)
+            check(await page.locator(".song-row").count() == 1, "the new playlist has the song")
+            await page.locator(".fab-play").click()
+            await page.wait_for_timeout(1000)
+            await shot("10-playlist")
+
+            await tab("Your Library")
+            await page.get_by_text("Liked songs", exact=True).first.click()
+            await page.wait_for_timeout(1500)
+            check(await page.locator(".song-row").count() == 1, "Liked songs has the liked song")
+            await shot("11-liked")
+
+            await tab("Home")
+            text = await visible_text()
+            check("Recently played" in text and "Jump back in" in text, "Home shows Recently played and Jump back in")
+            await shot("12-home-after")
 
             check(not errors, "no page errors: " + "; ".join(errors[:3]))
             await page.close()

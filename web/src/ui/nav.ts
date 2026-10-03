@@ -45,7 +45,7 @@ export function useNav() {
       if (a.roles?.includes('lyricist') || a.roles?.includes('actor')) go(`/person/${enc(a.id)}${q}`)
       else go(`/singer/${enc(a.id)}${q}`)
     },
-    /** A mix, playlist or station by Isai Pettai. */
+    /** A mix, playlist or station by Jukebox. */
     openMix: (id: string) => go(`/mix/${enc(id)}`),
     /** Your requests for music that isn't in the library (admins: everyone's). */
     openRequests: () => go('/requests'),

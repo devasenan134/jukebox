@@ -10,7 +10,11 @@ import { HomeScreen } from './screens/HomeScreen'
 import { LoginScreen } from './screens/LoginScreen'
 import { NowPlaying } from './screens/NowPlaying'
 import { SearchScreen } from './screens/SearchScreen'
-import { useSession } from './state/session'
+import { LibraryScreen } from './screens/LibraryScreen'
+import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistScreens'
+import { useLikes } from './state/likes'
+import { useMixes, useMyPlaylists } from './state/library'
+import { signInToSocial, useSession } from './state/session'
 import { Icon, IconButton, Toasts } from './ui/kit'
 import { usePlayerOpen } from './ui/nav'
 import { ErrorBoundary } from './ui/ErrorBoundary'
@@ -18,8 +22,7 @@ import { ErrorBoundary } from './ui/ErrorBoundary'
 const TABS = [
   { label: 'Home', path: '/', icon: 'home' },
   { label: 'Search', path: '/search', icon: 'search' },
-  { label: 'Albums', path: '/albums', icon: 'album' },
-  { label: 'Music directors', path: '/artists', icon: 'piano' },
+  { label: 'Your Library', path: '/library', icon: 'library_music' },
 ]
 
 export default function App() {
@@ -36,7 +39,17 @@ export default function App() {
 function Main() {
   const open = usePlayerOpen((s) => s.open)
   const location = useLocation()
-  useEffect(() => player.restoreQueue(), [])
+  useEffect(() => {
+    player.restoreQueue()
+    // Signed in before the friends side was: sign in to it now, then load likes, playlists and mixes.
+    const s = useSession.getState()
+    const ready = s.social || !s.credentials ? Promise.resolve() : signInToSocial(s.credentials)
+    ready.then(() => {
+      useLikes.getState().refresh()
+      useMyPlaylists.getState().refresh()
+      useMixes.getState().refresh()
+    })
+  }, [])
   return (
     <div className="app">
       <div className="content">
@@ -49,6 +62,10 @@ function Main() {
           <Route path="/artists" element={<ArtistsScreen />} />
           <Route path="/artist/:id" element={<ArtistScreen />} />
           <Route path="/singer/:id" element={<ArtistScreen />} />
+          <Route path="/library" element={<LibraryScreen />} />
+          <Route path="/liked" element={<LikedSongsScreen />} />
+          <Route path="/playlist/:id" element={<PlaylistScreen />} />
+          <Route path="/mix/:id" element={<MixScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
         </ErrorBoundary>

@@ -463,7 +463,7 @@ export function AddToPlaylistSheet({ song, onClose }: { song: Song; onClose: () 
 }
 
 /**
- * Starts a station by Isai Pettai: kind is "song", "album", "composer" or "singer". It plays at once
+ * Starts a station by Jukebox: kind is "song", "album", "composer" or "singer". It plays at once
  * and keeps going (the player asks for more songs as it goes).
  */
 export async function startStation(kind: 'song' | 'album' | 'composer' | 'singer', id: string) {

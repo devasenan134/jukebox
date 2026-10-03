@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { credentialsFor, subsonic } from '../api/subsonic'
 import { social } from '../api/social'
-import { useSession } from '../state/session'
+import { signInToSocial, useSession } from '../state/session'
 import { useLikes } from '../state/likes'
 import { useMyPlaylists } from '../state/library'
 import { PasswordStrength, checkPassword } from '../ui/password'
 
 /**
- * Log in with an existing Navidrome account, or sign up with an invite code from a friend
+ * Log in with an existing account, or sign up with an invite code from a friend
  * (ui/login/LoginScreen.kt). The web app lives on the same address as the servers, so unlike the
  * phone app there are no server addresses to type.
  */
@@ -33,11 +33,12 @@ export function LoginScreen() {
     try {
       const creds = credentialsFor(username, password)
       if (signingUp) {
-        // The friends server creates the Navidrome account, then we log in to both.
+        // Creates the account and signs in to the friends side; the music side checks the password next.
         const r = await social.signup(inviteCode.trim(), username.trim(), password, displayName.trim())
         useSession.getState().saveSocial({ token: r.sessionToken, user: r.user })
       }
       await subsonic.ping(creds) // checks the password
+      if (!signingUp) await signInToSocial(creds)
       useSession.getState().saveCredentials(creds) // the app then switches to the main screen
       useLikes.getState().refresh()
       useMyPlaylists.getState().refresh()

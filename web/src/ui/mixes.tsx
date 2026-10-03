@@ -4,7 +4,7 @@ import { Cover, SectionTitle } from './components'
 import { Icon } from './kit'
 import type { Nav } from './nav'
 
-// Mixes by Isai Pettai, drawn in the browser (ui/mixes/MixComponents.kt).
+// Mixes by Jukebox, drawn in the browser (ui/mixes/MixComponents.kt).
 
 const DEFAULT_TINT = '#7A3E9D'
 
@@ -47,7 +47,7 @@ const partnerOf = (c: string) => {
  * - made for you (Daily Mixes, Discover Weekly...): a colour gradient, like cover art;
  * - "This Is" and stations: the composer's, singer's or song's picture on a soft pastel;
  * - everything else (moods, decades, charts): the covers of its first movies.
- * All carry the "Isai Pettai" mark and the mix's name.
+ * All carry the "Jukebox" mark and the mix's name.
  */
 export function MixCover({ mix, size = 150, fill }: { mix: Mix; size?: number; fill?: boolean }) {
   const big = size > 120
@@ -88,7 +88,7 @@ export function MixCover({ mix, size = 150, fill }: { mix: Mix; size?: number; f
         <>
           <div style={{ position: 'absolute', top: '5.5%', left: '5.5%', display: 'flex', alignItems: 'center', gap: 3, color: text }}>
             <Icon name={mix.endless ? 'radio' : 'music_note'} filled size={big ? 14 : 10} />
-            <span style={{ fontWeight: 700, fontSize: big ? 12 : 9 }}>Isai Pettai</span>
+            <span style={{ fontWeight: 700, fontSize: big ? 12 : 9 }}>Jukebox</span>
           </div>
           <div
             className="clamp2"

@@ -1,52 +1,117 @@
-import { useState } from 'react'
-import type { Album } from '../api/types'
+import { useEffect, useState } from 'react'
+import type { Album, Mix } from '../api/types'
+import { refToSong } from '../api/types'
 import { subsonic } from '../api/subsonic'
-import { AlbumCard, SectionTitle, useLoad } from '../ui/components'
-import { ErrorBox, Loading } from '../ui/kit'
-import { useNav } from '../ui/nav'
+import * as player from '../player/player'
+import { activity, useActivity, useRecentSongs, type ActivityItem } from '../state/history'
+import { useMixes } from '../state/library'
+import { AlbumCard, Cover, SectionTitle, SongRow, useLoad } from '../ui/components'
+import { ErrorBox, IconButton, Loading } from '../ui/kit'
+import { LikedTile, MixCover, MixSections } from '../ui/mixes'
+import { useNav, type Nav } from '../ui/nav'
 
-// Home: new albums, a random handful to discover, and a way into the whole library.
-// (Mixes, Recently played and Most played come back when Jukebox keeps plays, milestone 2.)
+// Home (ui/home/HomeScreen.kt): Made for you, the songs you played lately, "Jump back in", the other
+// mixes, then rows of albums: most played, recently added and random picks.
+
+const RECENT_SONGS = 6
 
 export function HomeScreen() {
   const nav = useNav()
   const [seed, setSeed] = useState(0)
+  const mixes = useMixes((s) => s.home)
+  const followed = useMixes((s) => s.followed)
+  const items = useActivity((s) => s.items)
+  const recentSongs = useRecentSongs((s) => s.songs)
+  useEffect(() => useMixes.getState().refresh(), [seed])
   const data = useLoad(async () => {
-    const [newest, random, byName] = await Promise.all([
+    const [recent, frequent, newest, random] = await Promise.all([
+      subsonic.albumList('recent', 20),
+      subsonic.albumList('frequent', 20),
       subsonic.albumList('newest', 20),
       subsonic.albumList('random', 20),
-      subsonic.albumList('alphabeticalByName', 20),
     ])
-    return { newest, random, byName }
+    return { recent, frequent, newest, random }
   }, [seed])
 
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const d = data.data!
+  const sections = mixes?.sections ?? []
+  const knownMixes = new Map([...sections.flatMap((s) => s.mixes), ...followed].map((m) => [m.id, m]))
+  const songs = recentSongs.slice(0, RECENT_SONGS).map(refToSong)
+  const collections = items.filter((i) => i.kind !== 'Song')
+
   return (
     <div className="page">
-      <div style={{ padding: '20px 16px 0', display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <div className="headline-medium" style={{ fontWeight: 700 }}>Jukebox</div>
+      <div style={{ padding: '16px 8px 0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="headline-medium" style={{ fontWeight: 700, color: 'var(--primary)', fontFamily: 'var(--display)', flex: 1 }}>Jukebox</div>
+        <IconButton icon="refresh" label="Refresh" onClick={() => setSeed((s) => s + 1)} />
       </div>
-      <Row title="New in the library" albums={d.newest} onOpen={nav.openAlbum} />
-      <Row title="Something different" albums={d.random} onOpen={nav.openAlbum} action={{ label: 'Shuffle', onClick: () => setSeed((s) => s + 1) }} />
-      <Row title="A to Z" albums={d.byName} onOpen={nav.openAlbum} action={{ label: 'See all', onClick: nav.openAlbums }} />
+      <div style={{ display: 'flex', gap: 8, padding: '8px 16px 0' }}>
+        <button className="chip" onClick={nav.openAlbums}>Albums</button>
+        <button className="chip" onClick={nav.openArtists}>Music directors</button>
+      </div>
+      <MixSections sections={sections.filter((s) => s.id === 'made-for-you')} nav={nav} />
+      {songs.length > 0 && (
+        <>
+          <SectionTitle>Recently played</SectionTitle>
+          {songs.map((s) => (
+            <SongRow key={s.id} song={s} showCover onOpenAlbum={nav.openAlbum} onClick={() => { activity.song(s); player.play([s]) }} />
+          ))}
+        </>
+      )}
+      {collections.length > 0 ? <JumpBackIn items={collections} mixes={knownMixes} nav={nav} /> : songs.length === 0 && <AlbumRow title="Jump back in" albums={d.recent} nav={nav} />}
+      <MixSections sections={sections.filter((s) => s.id !== 'made-for-you')} nav={nav} />
+      <AlbumRow title="Most played" albums={d.frequent} nav={nav} />
+      <AlbumRow title="Recently added" albums={d.newest} nav={nav} />
+      <AlbumRow title="Random picks" albums={d.random} nav={nav} />
     </div>
   )
 }
 
-function Row({ title, albums, onOpen, action }: { title: string; albums: Album[]; onOpen: (id: string) => void; action?: { label: string; onClick: () => void } }) {
+function AlbumRow({ title, albums, nav }: { title: string; albums: Album[]; nav: Nav }) {
   if (!albums.length) return null
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', paddingRight: 8 }}>
-        <SectionTitle>{title}</SectionTitle>
-        {action && <button className="btn text" onClick={action.onClick}>{action.label}</button>}
-      </div>
+      <SectionTitle>{title}</SectionTitle>
       <div className="row-scroll">
         {albums.map((a) => (
-          <AlbumCard key={a.id} album={a} onClick={() => onOpen(a.id)} className="tile" />
+          <AlbumCard key={a.id} album={a} onClick={() => nav.openAlbum(a.id)} className="tile" />
         ))}
+      </div>
+    </>
+  )
+}
+
+/** Albums, playlists, mixes and Liked songs as squares; composers and singers as circles. */
+function JumpBackIn({ items, mixes, nav }: { items: ActivityItem[]; mixes: Map<string, Mix>; nav: Nav }) {
+  const open = (i: ActivityItem) => {
+    switch (i.kind) {
+      case 'Movie': return nav.openAlbum(i.id)
+      case 'Playlist': return nav.openPlaylist(i.id)
+      case 'Composer': return nav.openArtist(i.id)
+      case 'Artist': return nav.openSinger({ id: i.id, name: i.title, coverArt: i.coverArt, roles: ['artist'] })
+      case 'Liked': return nav.openLikedSongs()
+      case 'Mix': return nav.openMix(i.id)
+    }
+  }
+  return (
+    <>
+      <SectionTitle>Jump back in</SectionTitle>
+      <div className="row-scroll">
+        {items.map((i) => {
+          const round = i.kind === 'Composer' || i.kind === 'Artist'
+          const mix = i.kind === 'Mix' ? mixes.get(i.id) : undefined
+          return (
+            <div key={`${i.kind}-${i.id}`} className="card tile" onClick={() => open(i)} data-testid="jump-back-in">
+              {i.kind === 'Liked' ? <LikedTile size={192} fill /> : mix ? <MixCover mix={mix} size={192} fill /> : (
+                <Cover coverArt={i.coverArt} round={round} style={{ width: '100%', aspectRatio: '1' }} />
+              )}
+              <div className="name title-small ellipsis" style={{ textAlign: round ? 'center' : undefined }}>{i.title}</div>
+              <div className="body-small muted ellipsis" style={{ textAlign: round ? 'center' : undefined }}>{i.subtitle}</div>
+            </div>
+          )
+        })}
       </div>
     </>
   )

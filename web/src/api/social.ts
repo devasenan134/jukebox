@@ -105,7 +105,7 @@ export const social = {
   playlistLikeCounts: (ids: string[]) =>
     ids.length ? get<Record<string, number>>(`/likes/playlists/counts?ids=${ids.map(enc).join(',')}`) : Promise.resolve({}),
 
-  // Mixes, playlists and stations by Isai Pettai.
+  // Mixes, playlists and stations by Jukebox.
   mixes: () => get<HomeMixes>('/mixes'),
   mix: (id: string) => get<Mix>(`/mixes/${enc(id)}`),
   followedMixes: () => get<Mix[]>('/mixes/followed'),

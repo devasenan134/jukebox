@@ -172,10 +172,10 @@ export interface SessionResponse {
   user: SocialUser
 }
 
-// ---- Mixes by Isai Pettai ----
+// ---- Mixes by Jukebox ----
 
 /** Shown as the author of everything the app made rather than a person. */
-export const MIX_AUTHOR = 'Isai Pettai'
+export const MIX_AUTHOR = 'Jukebox'
 
 export interface MixSong {
   id: string

@@ -75,3 +75,5 @@ the Android app, with the smoke test (`scripts/smoke`) growing with each screen.
 
 1. Passwords are carried over from Navidrome: nobody resets.
 2. Subsonic token sign-in stays, so other Subsonic players work; passwords are kept encrypted with Jukebox's key.
+3. The import runs once, at the switch-over, not before: until then Jukebox has no real accounts and is
+   tested with the stand-in sign-in and copies of the live data.

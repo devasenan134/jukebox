@@ -4,8 +4,8 @@ import type {
 } from './types'
 import { session, type Credentials } from '../state/session'
 
-// Talks to Navidrome through the Subsonic API: /rest/<endpoint>?<auth>&<params>, on the same
-// address the web app is served from (the container forwards /rest to Navidrome).
+// Talks to Jukebox through the Subsonic API: /rest/<endpoint>?<auth>&<params>, on the same
+// address the web app is served from.
 // Docs: https://opensubsonic.netlify.app/docs/  Same calls as the Android app's SubsonicApi.kt.
 
 export class SubsonicError extends Error {
@@ -17,7 +17,7 @@ export class SubsonicError extends Error {
 }
 
 const API_VERSION = '1.16.1'
-const CLIENT_NAME = 'isaipetti-web'
+const CLIENT_NAME = 'jukebox-web'
 
 type Params = Record<string, string | number | boolean | (string | number)[] | undefined | null>
 
@@ -137,6 +137,9 @@ export const subsonic = {
       songIdToAdd: o.add?.length ? o.add : undefined,
       songIndexToRemove: o.removeIndexes?.length ? o.removeIndexes : undefined,
     }),
+
+  /** Puts a playlist's songs in this order (createPlaylist with the playlist's id replaces its songs). */
+  replacePlaylist: (id: string, songIds: string[]) => get('createPlaylist', { playlistId: id, songId: songIds }),
 
   deletePlaylist: (id: string) => get('deletePlaylist', { id }),
 

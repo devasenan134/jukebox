@@ -1,9 +1,10 @@
 import { create } from 'zustand'
+import { social } from '../api/social'
 import type { SocialUser } from '../api/types'
 import { load, save, remove } from './storage'
 
 /**
- * Login details for Navidrome. The password itself is never stored: Subsonic accepts
+ * Login details for the music server. The password itself is never stored: Subsonic accepts
  * token = md5(password + salt), so only the salt and token are kept (like the Android app).
  * The web app is served from the same address as the servers, so no server address is needed.
  */
@@ -50,3 +51,16 @@ export const useSession = create<SessionState>((set) => ({
 }))
 
 export const session = () => useSession.getState()
+
+/**
+ * Signs in to the friends side too (mixes, saved playlists, friends), with the same token: Jukebox
+ * answers both. Music still plays if it fails, so a failure is only remembered as "not signed in".
+ */
+export async function signInToSocial(c: Credentials): Promise<void> {
+  try {
+    const r = await social.login(c)
+    useSession.getState().saveSocial({ token: r.sessionToken, user: r.user })
+  } catch {
+    // Mixes and friends stay hidden until the next try.
+  }
+}
