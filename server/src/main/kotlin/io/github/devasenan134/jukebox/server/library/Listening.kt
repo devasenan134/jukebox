@@ -62,7 +62,7 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
             event(userId, if (liked) "liked" else "unliked", t) { put("type", type); put("id", id) }
         }
         songs.forEach { apply("recording", recording(it)) }
-        albums.forEach { apply("album", it) }
+        albums.forEach { apply("album", mapped(it)) }
         people.forEach { apply("person", person(it)) }
     }
 
@@ -85,7 +85,7 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
         query("SELECT id FROM playlists WHERE owner_id = ? OR public = 1 ORDER BY changed_at DESC", userId) { it.getString(1) }.mapNotNull { load(it) }
     }
 
-    suspend fun playlist(userId: Long, id: String): PlaylistRow = db.tx { load(id)?.takeIf { it.ownerId == userId || it.public } } ?: notFound()
+    suspend fun playlist(userId: Long, id: String): PlaylistRow = db.tx { load(mapped(id))?.takeIf { it.ownerId == userId || it.public } } ?: notFound()
 
     suspend fun create(userId: Long, name: String, songIds: List<String>): PlaylistRow = db.tx {
         val id = newId()
@@ -146,12 +146,15 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
 
     /** The recording [id] stands for, following merges. */
     private fun Connection.recording(id: String): String {
-        var current = id
+        var current = mapped(id)
         repeat(10) { current = queryOne("SELECT merged_into FROM recordings WHERE id = ?", current) { it.getString(1) } ?: return current }
         return current
     }
 
-    private fun Connection.person(id: String): String = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", id) { it.getString(1) } ?: id
+    private fun Connection.person(id: String): String = mapped(id).let { m -> queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", m) { it.getString(1) } ?: m }
+
+    /** An id Navidrome gave out before the import, as the Jukebox id it became. */
+    private fun Connection.mapped(id: String): String = queryOne("SELECT new_id FROM id_map WHERE old_id = ?", id) { it.getString(1) } ?: id
 }
 
 /** A small JSON object, for event payloads built outside a builder. */

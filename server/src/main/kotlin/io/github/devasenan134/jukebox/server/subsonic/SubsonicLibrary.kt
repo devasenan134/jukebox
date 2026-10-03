@@ -131,7 +131,11 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }.filter { it.second in known }.groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
     }
 
-    suspend fun album(id: String, me: Personal = Personal.NOBODY): JsonObject? {
+    /** An id Navidrome gave out before the import (a queue the app saved, an old message): the Jukebox id it became. */
+    private suspend fun mapped(id: String): String = db.tx { queryOne("SELECT new_id FROM id_map WHERE old_id = ?", id) { it.getString(1) } } ?: id
+
+    suspend fun album(requested: String, me: Personal = Personal.NOBODY): JsonObject? {
+        val id = mapped(requested)
         val view = views().byId[id] ?: return null
         val songs = db.tx { songsOf(view.albumId, view.scoreId) }
         return albumJson(view, songs, me)
@@ -230,7 +234,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         query("""$songSelect WHERE r.id = ? ORDER BY CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'score' THEN 1 ELSE 2 END,
                  coalesce(f.bitrate, 0) DESC LIMIT 1""", recordingId, map = ::row).firstOrNull()
 
-    suspend fun song(id: String, me: Personal = Personal.NOBODY): JsonObject? = db.tx {
+    suspend fun song(requested: String, me: Personal = Personal.NOBODY): JsonObject? = mapped(requested).let { id -> db.tx {
         val rid = resolve(id)
         val song = mainSong(rid) ?: return@tx null
         val credits = query(
@@ -255,7 +259,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
             details?.second?.let { put("channelCount", it) }
             details?.third?.let { lang -> put("genre", lang.replaceFirstChar(Char::uppercase)); putJsonArray("genres") { addJsonObject { put("name", lang.replaceFirstChar(Char::uppercase)) } } }
         }
-    }
+    } }
 
     // ---------- artists ----------
 
@@ -292,9 +296,9 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }
     }
 
-    suspend fun artist(requested: String, me: Personal = Personal.NOBODY): JsonObject? = db.tx {
+    suspend fun artist(requested: String, me: Personal = Personal.NOBODY): JsonObject? = mapped(requested).let { asked -> db.tx {
         // An old id of a spelling that was merged leads to the person.
-        val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", requested) { it.getString(1) } ?: return@tx null
+        val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", asked) { it.getString(1) } ?: return@tx null
         val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@tx null
         // Their albums (credited on the album, or singing on it).
         val albumIds = query(
@@ -308,7 +312,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         val albums = views().list.filter { it.albumId in albumIds }
             .sortedWith(compareByDescending<View> { it.year }.thenBy { it.sort }).map { albumJson(it, null, me) }
         JsonObject(person + ("album" to JsonArray(albums)) + ("albumCount" to kotlinx.serialization.json.JsonPrimitive(albums.size)))
-    }
+    } }
 
     // ---------- search ----------
 
@@ -398,7 +402,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
 
     // ---------- lyrics, audio and covers ----------
 
-    suspend fun lyrics(id: String): JsonArray = db.tx {
+    suspend fun lyrics(requested: String): JsonArray = mapped(requested).let { id -> db.tx {
         val rid = resolve(id)
         val title = queryOne("SELECT title FROM recordings WHERE id = ?", rid) { it.getString(1) } ?: return@tx JsonArray(emptyList())
         val all = query("SELECT script, synced, text FROM lyrics WHERE recording_id = ? ORDER BY synced DESC, script = 'ta' DESC", rid) {
@@ -416,19 +420,19 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
                 }
             }
         }
-    }
+    } }
 
     /** The best copy of a song on disk: (file, content type). */
-    suspend fun audio(id: String): Pair<File, String>? = db.tx {
+    suspend fun audio(requested: String): Pair<File, String>? = mapped(requested).let { id -> db.tx {
         val rid = resolve(id)
         queryOne("""SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
                     ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
-    }?.let { (lib, path, format) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(format) } }
+    }?.let { (lib, path, format) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(format) } } }
 
     /** A cover (by artwork, album, release or song id), resized to fit [size] when asked. */
     suspend fun cover(requested: String, size: Int?): Pair<File, String>? {
-        // Mixes name an album's cover Navidrome's way ("al-<album>").
-        val id = requested.removePrefix("al-")
+        // Mixes name an album's cover Navidrome's way ("al-<album>"); old ids from before the import still work.
+        val id = mapped(requested.removePrefix("al-").removePrefix("mf-").substringBefore('_'))
         val art = db.tx {
             queryOne("SELECT hash, mime FROM artwork WHERE id = ?", id) { it.getString(1) to it.getString(2) }
                 ?: queryOne(
