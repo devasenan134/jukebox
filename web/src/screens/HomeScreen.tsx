@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import type { Album, Mix } from '../api/types'
 import { refToSong } from '../api/types'
 import { subsonic } from '../api/subsonic'
@@ -9,6 +9,7 @@ import { AlbumCard, Cover, SectionTitle, SongRow, useLoad } from '../ui/componen
 import { ErrorBox, IconButton, Loading } from '../ui/kit'
 import { LikedTile, MixCover, MixSections } from '../ui/mixes'
 import { useNav, type Nav } from '../ui/nav'
+import { queryClient } from '../state/queries'
 
 // Home (ui/home/HomeScreen.kt): Made for you, the songs you played lately, "Jump back in", the other
 // mixes, then rows of albums: most played, recently added and random picks.
@@ -17,25 +18,29 @@ const RECENT_SONGS = 6
 
 export function HomeScreen() {
   const nav = useNav()
-  const [seed, setSeed] = useState(0)
   const mixes = useMixes((s) => s.home)
   const followed = useMixes((s) => s.followed)
   const items = useActivity((s) => s.items)
   const recentSongs = useRecentSongs((s) => s.songs)
-  useEffect(() => useMixes.getState().refresh(), [seed])
-  const data = useLoad(async () => {
-    const [recent, frequent, newest, random] = await Promise.all([
+  useEffect(() => useMixes.getState().refresh(), [])
+  const lists = useLoad(['home', 'lists'], async () => {
+    const [recent, frequent, newest] = await Promise.all([
       subsonic.albumList('recent', 20),
       subsonic.albumList('frequent', 20),
       subsonic.albumList('newest', 20),
-      subsonic.albumList('random', 20),
     ])
-    return { recent, frequent, newest, random }
-  }, [seed])
+    return { recent, frequent, newest }
+  })
+  // Random picks stay the same until you ask for new ones (Refresh), not every time you come back.
+  const random = useLoad(['home', 'random'], () => subsonic.albumList('random', 20), Infinity)
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['home'] })
+    useMixes.getState().refresh(true)
+  }
 
-  if (data.loading && !data.data) return <Loading />
-  if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
-  const d = data.data!
+  if (lists.loading && !lists.data) return <Loading />
+  if (lists.error) return <ErrorBox message={lists.error} onRetry={lists.retry} />
+  const d = { ...lists.data!, random: random.data ?? [] }
   const sections = mixes?.sections ?? []
   const knownMixes = new Map([...sections.flatMap((s) => s.mixes), ...followed].map((m) => [m.id, m]))
   const songs = recentSongs.slice(0, RECENT_SONGS).map(refToSong)
@@ -45,7 +50,7 @@ export function HomeScreen() {
     <div className="page">
       <div style={{ padding: '16px 8px 0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
         <div className="headline-medium" style={{ fontWeight: 700, color: 'var(--primary)', fontFamily: 'var(--display)', flex: 1 }}>Jukebox</div>
-        <IconButton icon="refresh" label="Refresh" onClick={() => setSeed((s) => s + 1)} />
+        <IconButton icon="refresh" label="Refresh" onClick={refresh} />
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '8px 16px 0' }}>
         <button className="chip" onClick={nav.openAlbums}>Albums</button>

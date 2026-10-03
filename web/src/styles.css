@@ -831,3 +831,9 @@ a.nav-item {
   text-decoration: none;
   color: inherit;
 }
+
+/* Long grids (a composer with hundreds of albums): cards off screen aren't laid out or painted until scrolled to. */
+.grid > .card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
+}

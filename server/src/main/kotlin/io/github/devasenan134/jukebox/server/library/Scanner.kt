@@ -126,6 +126,7 @@ class Scanner(
         val report = ScanReport(library.name, found.size, unchanged, added, updated, moved, gone.count { it.missingSince == null },
             unreadable, lyricsUpdated, clock() - started)
         db.tx { update("UPDATE scans SET finished_at = ?, info = ? WHERE id = ?", clock(), Json.encodeToString(ScanReport.serializer(), report), scanId) }
+        if (report.added + report.updated + report.moved + report.missing > 0) db.catalogChanged()
         log.info("Scanned {}: {}", library.name, report)
         report
     }

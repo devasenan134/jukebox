@@ -37,17 +37,21 @@ interface MixesState {
   /** Null until loaded, or if the friends server has no mixes. */
   home: HomeMixes | null
   followed: Mix[]
-  refresh: () => void
+  /** Loads them again; skipped if they were loaded moments ago, unless [force]. */
+  refresh: (force?: boolean) => void
   isFollowed: (id: string) => boolean
   /** Saves a mix to Your Library (it keeps updating there), or removes it. */
   toggleFollow: (m: Mix) => Promise<void>
 }
 
+let mixesLoadedAt = 0
+
 export const useMixes = create<MixesState>((set, get) => ({
   home: null,
   followed: [],
-  refresh: () => {
-    if (!session().social) return
+  refresh: (force = false) => {
+    if (!session().social || (!force && Date.now() - mixesLoadedAt < 20_000)) return
+    mixesLoadedAt = Date.now()
     social.mixes().then((home) => set({ home })).catch(() => {})
     social.followedMixes().then((followed) => set({ followed })).catch(() => {})
   },

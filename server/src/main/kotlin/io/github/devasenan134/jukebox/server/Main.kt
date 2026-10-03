@@ -1,5 +1,6 @@
 package io.github.devasenan134.jukebox.server
 
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.createApplicationPlugin
@@ -17,6 +18,10 @@ import io.ktor.server.auth.principal
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.calllogging.CallLogging
+import io.ktor.server.plugins.compression.Compression
+import io.ktor.server.plugins.compression.gzip
+import io.ktor.server.plugins.compression.matchContentType
+import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
@@ -112,7 +117,7 @@ fun Application.jukeboxServer(
     val music = music
         ?: if (config.libraries != null) JukeboxLibrary(db, config.navidromeDb, config.featuresDb)
         else config.navidromeDb?.let { NavidromeLibrary(it, config.featuresDb) }
-    val mixes = music?.let { MixService(db, it, java.time.ZoneId.of(config.timeZone)) }
+    val mixes = music?.let { MixService(db, it, java.time.ZoneId.of(config.timeZone)) }?.also { it.warm() }
     // Without a cast file next to the database, search just has no actors.
     val search = music?.let { LibrarySearch(it, File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)) }
     // Asking for music the library doesn't have (it needs the library, to know what's missing).
@@ -126,7 +131,7 @@ fun Application.jukeboxServer(
         ).also { it.start(this) }
     }
     val listening = Listening(db)
-    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.tools, lib.artworkDir, lib::roots), signIn::checkToken, signIn::userId, listening) }
+    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.covers, lib::roots), signIn::checkToken, signIn::userId, listening) }
     val limiter = RateLimiter(maxPerMinute = 10)
     val cleanup = Cleanup(db, navidrome, hub)
     // Every 10 minutes, remove people whose Navidrome account is gone.
@@ -141,6 +146,14 @@ fun Application.jukeboxServer(
 
     install(ContentNegotiation) { json(eventJson) }
     install(CallLogging)
+    // Lists of albums and people are large JSON; squeezed, they reach the tunnel (and you) several times sooner.
+    // Audio and pictures are already compressed and go as they are.
+    install(Compression) {
+        gzip {
+            matchContentType(ContentType.Application.Json, ContentType.Text.Any, ContentType.Application.JavaScript)
+            minimumSize(1024)
+        }
+    }
     install(WebSockets) {
         pingPeriod = 20.seconds
         timeout = 45.seconds

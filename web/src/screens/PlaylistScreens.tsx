@@ -13,6 +13,7 @@ import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, ScreenHeader, s
 import { Dialog, ErrorBox, IconButton, Loading, MoreMenu, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover, updatedText } from '../ui/mixes'
 import { useNav } from '../ui/nav'
+import { keys, playlistChanged } from '../state/queries'
 
 // Liked songs, a playlist and a mix: a picture, a name, Play and Shuffle, then the songs
 // (ui/library/LibraryScreen.kt, DetailScreens.kt and PlaylistEditing.kt; ui/mixes/MixScreen.kt).
@@ -60,7 +61,7 @@ export function PlaylistScreen() {
   const { id = '' } = useParams()
   const nav = useNav()
   const username = useSession((s) => s.credentials?.username)
-  const data = useLoad(() => subsonic.playlist(id), [id])
+  const data = useLoad(keys.playlist(id), () => subsonic.playlist(id))
   const liked = useLikes((s) => s.playlists.some((p) => p.id === id))
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -82,6 +83,7 @@ export function PlaylistScreen() {
     try {
       await what()
       data.set(await subsonic.playlist(id))
+      playlistChanged()
       useMyPlaylists.getState().refresh()
       if (done) toast(done)
     } catch (e) {
@@ -205,6 +207,7 @@ function DeleteDialog({ playlist, onClose, onDeleted }: { playlist: Playlist; on
     try {
       await subsonic.deletePlaylist(playlist.id)
       useRecentPlaylists.getState().forget(playlist.id)
+      playlistChanged(playlist.id)
       useMyPlaylists.getState().refresh()
       toast('Playlist deleted')
       onDeleted()
@@ -233,7 +236,7 @@ function DeleteDialog({ playlist, onClose, onDeleted }: { playlist: Playlist; on
 export function MixScreen() {
   const { id = '' } = useParams()
   const nav = useNav()
-  const data = useLoad(() => social.mix(id), [id])
+  const data = useLoad(['mix', id], () => social.mix(id))
   const followed = useMixes((s) => s.followed.some((m) => m.id === id))
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />

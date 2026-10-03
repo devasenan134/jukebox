@@ -7,7 +7,8 @@ import { useMixes, useMyPlaylists } from '../state/library'
 import { useLikes } from '../state/likes'
 import { useSession } from '../state/session'
 import { load, save } from '../state/storage'
-import { Cover, likeCount, ScreenHeader, songCount } from '../ui/components'
+import { Cover, likeCount, ScreenHeader, songCount, useLoad } from '../ui/components'
+import { keys, playlistChanged } from '../state/queries'
 import { IconButton, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover } from '../ui/mixes'
 import { useNav } from '../ui/nav'
@@ -34,33 +35,19 @@ export function LibraryScreen() {
   const likedAlbums = useLikes((s) => s.albums)
   const likedPlaylists = useLikes((s) => s.playlists)
   const savedMixes = useMixes((s) => s.followed)
-  const [own, setOwn] = useState<Playlist[]>([])
-  const [ownLikes, setOwnLikes] = useState<Record<string, number>>({})
+  const all = useLoad(keys.playlists, () => subsonic.playlists(), 30_000)
+  const own = (all.data ?? []).filter((p) => p.owner === username)
+  const ownIds = own.map((p) => p.id)
+  // How many friends liked each playlist you made (shown only when someone has).
+  const ownLikes: Record<string, number> = useLoad(['playlist-likes', ...ownIds], () => (ownIds.length ? social.playlistLikeCounts(ownIds) : Promise.resolve({})), 30_000).data ?? {}
   const [filter, setFilter] = useState<Filter>(() => load<Filter>('library.filter', 'All'))
   const [grid, setGrid] = useState(() => load('library.grid', false))
   const [creating, setCreating] = useState(false)
-  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     useLikes.getState().refresh()
     useMixes.getState().refresh()
   }, [])
-  useEffect(() => {
-    let alive = true
-    subsonic.playlists()
-      .then((all) => {
-        if (!alive) return
-        const mine = all.filter((p) => p.owner === username)
-        setOwn(mine)
-        // How many friends liked each playlist you made (shown only when someone has).
-        if (mine.length) social.playlistLikeCounts(mine.map((p) => p.id)).then((c) => alive && setOwnLikes(c)).catch(() => {})
-      })
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [username, reload])
-
   const choose = (f: Filter) => {
     setFilter(f)
     save('library.filter', f)
@@ -73,7 +60,7 @@ export function LibraryScreen() {
     setCreating(false)
     try {
       const p = await subsonic.createPlaylist(name)
-      setReload((r) => r + 1)
+      playlistChanged()
       useMyPlaylists.getState().refresh()
       nav.openPlaylist(p.id)
     } catch (e) {

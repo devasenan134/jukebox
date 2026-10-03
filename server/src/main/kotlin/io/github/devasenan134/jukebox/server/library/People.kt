@@ -89,7 +89,12 @@ data class PeopleReport(val people: Int, val merged: Int, val forced: Int, val k
 class PeopleMerger(private val db: Db, private val overrides: File? = null) {
     private class Person(val id: String, val name: String, val credits: Int, val roles: Set<String>)
 
-    suspend fun run(): PeopleReport = db.tx {
+    suspend fun run(): PeopleReport {
+        var unmerged = 0
+        return db.tx { merge { unmerged++ } }.also { if (it.merged + it.forced + unmerged > 0) db.catalogChanged() }
+    }
+
+    private fun Connection.merge(unmerged: () -> Unit): PeopleReport {
         val (same, different) = readOverrides()
         // A "different" line undoes an earlier merge: the spelling stands alone again, and the songs credited
         // to the main spelling are read again on the next scan, so each name gets its own credits back.
@@ -98,6 +103,7 @@ class PeopleMerger(private val db: Db, private val overrides: File? = null) {
                 x, y, y, x) { it.getString(1) to it.getString(2) }
             for ((main, variant) in pair) {
                 update("UPDATE people SET merged_into = NULL WHERE id = ?", variant)
+                unmerged()
                 update("""UPDATE files SET mtime = -1 WHERE recording_id IN (SELECT recording_id FROM recording_credits WHERE person_id = ?)
                           OR track_id IN (SELECT t.id FROM tracks t JOIN releases rl ON rl.id = t.release_id
                                           JOIN album_credits c ON c.album_id = rl.album_id WHERE c.person_id = ?)""", main, main)
@@ -146,7 +152,7 @@ class PeopleMerger(private val db: Db, private val overrides: File? = null) {
                 merged++
             } else if (key != null) mains.getOrPut(key) { mutableListOf() } += p
         }
-        PeopleReport(people.size - gone.size, merged, forced, keptApart).also { if (merged + forced > 0) log.info("People: {}", it) }
+        return PeopleReport(people.size - gone.size, merged, forced, keptApart).also { if (merged + forced > 0) log.info("People: {}", it) }
     }
 
     /** Moves [from]'s credits to [into]; [from] stays as a pointer, its name kept as an alias. */

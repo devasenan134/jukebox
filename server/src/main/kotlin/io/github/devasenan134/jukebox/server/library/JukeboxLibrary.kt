@@ -41,7 +41,9 @@ class JukeboxLibrary(
     @Volatile private var checkedAt = 0L
 
     override suspend fun snapshot(): LibrarySnapshot? = mutex.withLock {
-        if (System.currentTimeMillis() - checkedAt < CHECK_EVERY_MS && cached != null) return cached
+        // The catalog's version is known in memory; the sound features' (another program's file) is checked once a minute.
+        val sameCatalog = cached?.version?.startsWith(catalogVersion() + "/") == true
+        if (System.currentTimeMillis() - checkedAt < CHECK_EVERY_MS && sameCatalog) return cached
         checkedAt = System.currentTimeMillis()
         runCatching {
             val version = catalogVersion() + "/" + withContext(Dispatchers.IO) { featuresVersion() }
@@ -54,10 +56,10 @@ class JukeboxLibrary(
     }
 
     /** [user] is a Jukebox user id, or a Navidrome user id for an account linked to Navidrome. */
-    override suspend fun history(navidromeUserId: String, snapshot: LibrarySnapshot): History = db.tx {
+    override suspend fun history(navidromeUserId: String, snapshot: LibrarySnapshot): History = db.read {
         val userId = navidromeUserId.toLongOrNull()?.takeIf { id -> queryOne("SELECT 1 FROM users WHERE id = ?", id) { 1 } != null }
             ?: queryOne("SELECT id FROM users WHERE navidrome_id = ?", navidromeUserId) { it.getLong(1) }
-            ?: return@tx History.EMPTY
+            ?: return@read History.EMPTY
         val playCount = HashMap<Int, Int>()
         val lastPlayed = HashMap<Int, Long>()
         query("SELECT recording_id, count, last_played FROM play_counts WHERE user_id = ?", userId) { rs ->
@@ -76,30 +78,27 @@ class JukeboxLibrary(
         )
     }
 
-    override suspend fun popularity(snapshot: LibrarySnapshot): Map<Int, Int> = db.tx {
+    override suspend fun popularity(snapshot: LibrarySnapshot): Map<Int, Int> = db.read {
         query("SELECT recording_id, sum(count) FROM play_counts GROUP BY recording_id") { rs ->
             snapshot.index[rs.getString(1)]?.let { it to rs.getInt(2) }
         }.filterNotNull().toMap()
     }
 
-    override suspend fun navidromeUserId(username: String): String? = db.tx {
+    override suspend fun navidromeUserId(username: String): String? = db.read {
         queryOne("SELECT id FROM users WHERE username = ? AND deleted_at IS NULL", username) { it.getLong(1).toString() }
     }
 
-    override suspend fun playlists(snapshot: LibrarySnapshot): List<List<Int>> = db.tx {
+    override suspend fun playlists(snapshot: LibrarySnapshot): List<List<Int>> = db.read {
         query("SELECT playlist_id, recording_id FROM playlist_entries ORDER BY playlist_id, position") { rs ->
             rs.getString(1) to snapshot.index[rs.getString(2)]
         }.filter { it.second != null }.groupBy({ it.first }, { it.second!! }).values.toList()
     }
 
-    private suspend fun catalogVersion(): String = db.tx {
-        queryOne("""SELECT coalesce(max(finished_at), 0) || '/' || (SELECT count(*) FROM recordings WHERE merged_into IS NULL)
-                    || '/' || (SELECT count(*) FROM people WHERE merged_into IS NULL) FROM scans""") { it.getString(1) }
-    } ?: "0"
+    private fun catalogVersion(): String = db.catalogVersion.toString()
 
     private suspend fun load(version: String): LibrarySnapshot {
         class Row(val song: LibrarySong, val path: String)
-        val rows = db.tx {
+        val rows = db.read {
             val credits = HashMap<String, MutableMap<String, MutableList<Person>>>()
             query("""SELECT c.recording_id, c.role, p.id, p.name FROM recording_credits c JOIN people p ON p.id = c.person_id
                      ORDER BY c.recording_id, c.role, c.position""") { rs ->

@@ -2,8 +2,6 @@ import { useState } from 'react'
 import { credentialsFor, subsonic } from '../api/subsonic'
 import { social } from '../api/social'
 import { signInToSocial, useSession } from '../state/session'
-import { useLikes } from '../state/likes'
-import { useMyPlaylists } from '../state/library'
 import { PasswordStrength, checkPassword } from '../ui/password'
 
 /**
@@ -39,9 +37,7 @@ export function LoginScreen() {
       }
       await subsonic.ping(creds) // checks the password
       if (!signingUp) await signInToSocial(creds)
-      useSession.getState().saveCredentials(creds) // the app then switches to the main screen
-      useLikes.getState().refresh()
-      useMyPlaylists.getState().refresh()
+      useSession.getState().saveCredentials(creds) // the app then switches to the main screen (which loads your likes)
     } catch (err) {
       setError((err as Error).message || "Couldn't connect")
       setBusy(false)

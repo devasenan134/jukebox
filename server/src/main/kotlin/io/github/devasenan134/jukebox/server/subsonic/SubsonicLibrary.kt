@@ -2,7 +2,7 @@ package io.github.devasenan134.jukebox.server.subsonic
 
 import io.github.devasenan134.jukebox.server.Db
 import io.github.devasenan134.jukebox.server.Fuzzy
-import io.github.devasenan134.jukebox.server.library.AudioTools
+import io.github.devasenan134.jukebox.server.library.Covers
 import io.github.devasenan134.jukebox.server.library.Personal
 import io.github.devasenan134.jukebox.server.library.PlaylistRow
 import io.github.devasenan134.jukebox.server.query
@@ -29,7 +29,7 @@ import java.time.Instant
  * album's id, and its background score release, if any, as a second album under the release's id, named
  * "<album> (Original Background Score)". A song is a recording; its id never changes.
  */
-class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private val artworkDir: File, private val roots: () -> Map<Long, String>) {
+class SubsonicLibrary(private val db: Db, private val covers: Covers, private val roots: () -> Map<Long, String>) {
 
     // ---------- albums ----------
 
@@ -47,15 +47,12 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     @Volatile private var viewsCache: Views? = null
 
     /** Changes whenever a scan finishes, recordings merge, or people merge. */
-    private suspend fun catalogVersion(): String = db.tx {
-        queryOne("""SELECT coalesce(max(finished_at), 0) || '/' || (SELECT count(*) FROM recordings WHERE merged_into IS NULL)
-                    || '/' || (SELECT count(*) FROM people WHERE merged_into IS NULL) FROM scans""") { it.getString(1) }
-    } ?: "0"
+    private fun catalogVersion(): String = db.catalogVersion.toString()
 
     private suspend fun views(): Views {
         val version = catalogVersion()
         viewsCache?.takeIf { it.version == version }?.let { return it }
-        return db.tx {
+        return db.read {
             val composers = HashMap<String, MutableList<Pair<String, String>>>()
             query("""SELECT c.album_id, p.id, p.name FROM album_credits c JOIN people p ON p.id = c.person_id
                      WHERE c.role = 'composer' ORDER BY c.album_id, c.position""") {
@@ -121,7 +118,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     private suspend fun viewsOf(recordings: Collection<String>): Map<String, Set<String>> {
         if (recordings.isEmpty()) return emptyMap()
         val known = views().byId
-        return db.tx {
+        return db.read {
             recordings.chunked(500).flatMap { chunk ->
                 query("""SELECT t.recording_id, CASE WHEN rl.kind = 'score' THEN rl.id ELSE rl.album_id END FROM tracks t
                          JOIN releases rl ON rl.id = t.release_id WHERE t.recording_id IN (${chunk.joinToString(",") { "?" }})""", *chunk.toTypedArray()) {
@@ -132,12 +129,12 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     }
 
     /** An id Navidrome gave out before the import (a queue the app saved, an old message): the Jukebox id it became. */
-    private suspend fun mapped(id: String): String = db.tx { queryOne("SELECT new_id FROM id_map WHERE old_id = ?", id) { it.getString(1) } } ?: id
+    private suspend fun mapped(id: String): String = db.read { queryOne("SELECT new_id FROM id_map WHERE old_id = ?", id) { it.getString(1) } } ?: id
 
     suspend fun album(requested: String, me: Personal = Personal.NOBODY): JsonObject? {
         val id = mapped(requested)
         val view = views().byId[id] ?: return null
-        val songs = db.tx { songsOf(view.albumId, view.scoreId) }
+        val songs = db.read { songsOf(view.albumId, view.scoreId) }
         return albumJson(view, songs, me)
     }
 
@@ -234,9 +231,9 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         query("""$songSelect WHERE r.id = ? ORDER BY CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'score' THEN 1 ELSE 2 END,
                  coalesce(f.bitrate, 0) DESC LIMIT 1""", recordingId, map = ::row).firstOrNull()
 
-    suspend fun song(requested: String, me: Personal = Personal.NOBODY): JsonObject? = mapped(requested).let { id -> db.tx {
+    suspend fun song(requested: String, me: Personal = Personal.NOBODY): JsonObject? = mapped(requested).let { id -> db.read {
         val rid = resolve(id)
-        val song = mainSong(rid) ?: return@tx null
+        val song = mainSong(rid) ?: return@read null
         val credits = query(
             "SELECT c.role, p.id, p.name FROM recording_credits c JOIN people p ON p.id = c.person_id WHERE c.recording_id = ? ORDER BY c.role, c.position",
             rid,
@@ -284,7 +281,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }
     }
 
-    suspend fun artists(): JsonObject = db.tx {
+    suspend fun artists(): JsonObject = db.read {
         val all = people("WHERE (EXISTS (SELECT 1 FROM album_credits c WHERE c.person_id = p.id) OR EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id))")
             .sortedBy { it["name"].toString().trim('"').lowercase() }
         buildJsonObject {
@@ -296,10 +293,10 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }
     }
 
-    suspend fun artist(requested: String, me: Personal = Personal.NOBODY): JsonObject? = mapped(requested).let { asked -> db.tx {
+    suspend fun artist(requested: String, me: Personal = Personal.NOBODY): JsonObject? = mapped(requested).let { asked -> db.read {
         // An old id of a spelling that was merged leads to the person.
-        val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", asked) { it.getString(1) } ?: return@tx null
-        val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@tx null
+        val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", asked) { it.getString(1) } ?: return@read null
+        val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@read null
         // Their albums (credited on the album, or singing on it).
         val albumIds = query(
             """SELECT album_id FROM album_credits WHERE person_id = ?
@@ -326,7 +323,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         val version = catalogVersion()
         index?.takeIf { it.version == version }?.let { return it }
         val viewsNow = views().list
-        return db.tx {
+        return db.read {
             val albums = viewsNow.map { Entry(it.id, Fuzzy.words(it.name)) }
             // People are found by their other spellings too.
             val people = query("SELECT id, name, coalesce(aliases, '') FROM people WHERE merged_into IS NULL") {
@@ -347,15 +344,16 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         fun ranked(list: List<Entry>, count: Int, offset: Int, singerToo: Boolean = false): List<String> {
             if (count <= 0) return emptyList()
             if (q.isEmpty()) return list.sortedBy { it.words.joinToString(" ") }.drop(offset).take(count).map { it.id }
-            return list.asSequence().map { e ->
+            // Spread over the processor's cores: the songs list alone is tens of thousands of names.
+            return list.parallelStream().map { e ->
                 e.id to maxOf(Fuzzy.match(q, e.words), if (singerToo && e.alsoWords.isNotEmpty()) Fuzzy.match(q, e.alsoWords) * 0.9 else 0.0)
-            }.filter { it.second > 0 }.sortedByDescending { it.second }.drop(offset).take(count).map { it.first }.toList()
+            }.filter { it.second > 0 }.toList().sortedByDescending { it.second }.drop(offset).take(count).map { it.first }
         }
         val artistIds = ranked(idx.people, artistCount, artistOffset, singerToo = true)
         val albumIds = ranked(idx.albums, albumCount, albumOffset)
         val songIds = ranked(idx.songs, songCount, songOffset, singerToo = true)
         val albums = albumsById(albumIds, me)
-        return db.tx {
+        return db.read {
             val artists = artistIds.mapNotNull { people("WHERE p.id = ?", it).firstOrNull() }
             val songs = songIds.mapNotNull { mainSong(it)?.json(me) }
             buildJsonObject {
@@ -371,7 +369,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     /** Your liked songs, albums and people, newest first. */
     suspend fun starred(me: Personal): JsonObject {
         val albums = albumsById(me.likedAlbums.entries.sortedByDescending { it.value }.map { it.key }, me)
-        return db.tx {
+        return db.read {
             val songs = me.likedSongs.entries.sortedByDescending { it.value }.mapNotNull { mainSong(it.key)?.json(me) }
             val people = me.likedPeople.entries.sortedByDescending { it.value }.mapNotNull { people("WHERE p.id = ?", it.key).firstOrNull() }
             buildJsonObject {
@@ -383,7 +381,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     }
 
     /** A playlist, with its songs when [withSongs]; its cover is its first song's. */
-    suspend fun playlistJson(p: PlaylistRow, me: Personal, withSongs: Boolean): JsonObject = db.tx {
+    suspend fun playlistJson(p: PlaylistRow, me: Personal, withSongs: Boolean): JsonObject = db.read {
         val songs = p.songIds.mapNotNull { mainSong(it) }
         buildJsonObject {
             put("id", p.id)
@@ -402,9 +400,9 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
 
     // ---------- lyrics, audio and covers ----------
 
-    suspend fun lyrics(requested: String): JsonArray = mapped(requested).let { id -> db.tx {
+    suspend fun lyrics(requested: String): JsonArray = mapped(requested).let { id -> db.read {
         val rid = resolve(id)
-        val title = queryOne("SELECT title FROM recordings WHERE id = ?", rid) { it.getString(1) } ?: return@tx JsonArray(emptyList())
+        val title = queryOne("SELECT title FROM recordings WHERE id = ?", rid) { it.getString(1) } ?: return@read JsonArray(emptyList())
         val all = query("SELECT script, synced, text FROM lyrics WHERE recording_id = ? ORDER BY synced DESC, script = 'ta' DESC", rid) {
             Triple(it.getString(1), it.getInt(2) == 1, it.getString(3))
         }
@@ -423,7 +421,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     } }
 
     /** The best copy of a song on disk: (file, content type). */
-    suspend fun audio(requested: String): Pair<File, String>? = mapped(requested).let { id -> db.tx {
+    suspend fun audio(requested: String): Pair<File, String>? = mapped(requested).let { id -> db.read {
         val rid = resolve(id)
         queryOne("""SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
                     ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
@@ -433,7 +431,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     suspend fun cover(requested: String, size: Int?): Pair<File, String>? {
         // Mixes name an album's cover Navidrome's way ("al-<album>"); old ids from before the import still work.
         val id = mapped(requested.removePrefix("al-").removePrefix("mf-").substringBefore('_'))
-        val art = db.tx {
+        val art = db.read {
             queryOne("SELECT hash, mime FROM artwork WHERE id = ?", id) { it.getString(1) to it.getString(2) }
                 ?: queryOne(
                     """SELECT w.hash, w.mime FROM artwork w WHERE w.id = coalesce(
@@ -444,43 +442,8 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
                     id, id, resolve(id),
                 ) { it.getString(1) to it.getString(2) }
         } ?: return null
-        val (hash, mime) = art
-        val original = File(artworkDir, hash + if (mime == "image/png") ".png" else ".jpg").takeIf { it.isFile } ?: return null
-        if (size == null || size <= 0 || size >= 1500) return original to mime
-        val sized = File(artworkDir, "sized/$hash-$size.jpg")
-        if (!sized.isFile) {
-            val bytes = resize(original, size) ?: tools.resize(original, size) ?: return original to mime
-            sized.parentFile.mkdirs()
-            val tmp = File(sized.parentFile, "${sized.name}.tmp")
-            tmp.writeBytes(bytes)
-            tmp.renameTo(sized)
-        }
-        return sized to "image/jpeg"
+        return covers.sized(art.first, art.second, size)
     }
-
-    /** [image] scaled to fit [size] × [size], as JPEG, in this process (much quicker than starting ffmpeg). */
-    private fun resize(image: File, size: Int): ByteArray? = runCatching {
-        val src = javax.imageio.ImageIO.read(image) ?: return null
-        val scale = minOf(1.0, size.toDouble() / maxOf(src.width, src.height))
-        val w = maxOf(1, (src.width * scale).toInt())
-        val h = maxOf(1, (src.height * scale).toInt())
-        val out = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB)
-        out.createGraphics().apply {
-            setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-            setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY)
-            drawImage(src.getScaledInstance(w, h, java.awt.Image.SCALE_AREA_AVERAGING), 0, 0, null)
-            dispose()
-        }
-        val writer = javax.imageio.ImageIO.getImageWritersByFormatName("jpeg").next()
-        val params = writer.defaultWriteParam.apply { compressionMode = javax.imageio.ImageWriteParam.MODE_EXPLICIT; compressionQuality = 0.85f }
-        java.io.ByteArrayOutputStream().also { bytes ->
-            javax.imageio.ImageIO.createImageOutputStream(bytes).use { stream ->
-                writer.output = stream
-                writer.write(null, javax.imageio.IIOImage(out, null, null), params)
-            }
-            writer.dispose()
-        }.toByteArray()
-    }.getOrNull()
 
     private fun Connection.resolve(id: String): String {
         var current = id

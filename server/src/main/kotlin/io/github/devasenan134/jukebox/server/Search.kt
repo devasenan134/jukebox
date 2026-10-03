@@ -253,25 +253,29 @@ object Fuzzy {
         var total = 0.0
         var allFound = true
         for ((n, q) in query.withIndex()) {
-            val best = name.maxOf { word(q, it, typing = n == query.lastIndex) }
+            val best = name.maxOf { word(q, it, typing = n == query.lastIndex, need = GOOD) }
             if (best < GOOD) { allFound = false; break }
             total += best
         }
         val byWords = if (allFound) total / query.size else 0.0
-        val joined = word(query.joinToString(""), name.joinToString(""), typing = true).takeIf { it >= 0.8 }?.times(0.95) ?: 0.0
+        val joined = word(query.joinToString(""), name.joinToString(""), typing = true, need = 0.8).takeIf { it >= 0.8 }?.times(0.95) ?: 0.0
         val score = maxOf(byWords, joined)
         if (score == 0.0) return 0.0
         // Prefer names the query covers fully: "roja" ranks the movie Roja above "Roja Poonthottam".
         return score * (0.85 + 0.15 * minOf(1.0, query.size.toDouble() / name.size))
     }
 
-    private fun word(q: String, w: String, typing: Boolean): Double {
+    /** How well [q] matches the word [w]; a score below [need] is only ever compared with [need], so it may be rough. */
+    private fun word(q: String, w: String, typing: Boolean, need: Double = 0.0): Double {
         if (q == w) return 1.0
         if (typing && q.length >= 2 && w.startsWith(q)) return 0.96
         if (q.length < 3) return 0.0
         // A near miss counts for less than the real word, so exact matches come first
         // and short words need to be spelled nearly right ("kamal" doesn't find "kadal").
-        val whole = (1.0 - distance(q, w).toDouble() / maxOf(q.length, w.length)) * 0.9
+        // The lengths alone often rule a word out (it's at least that many edits away): skip the full comparison then.
+        val longest = maxOf(q.length, w.length)
+        val reachable = (1.0 - kotlin.math.abs(q.length - w.length).toDouble() / longest) * 0.9 >= need
+        val whole = if (reachable) (1.0 - distance(q, w).toDouble() / longest) * 0.9 else 0.0
         val start = if (typing && w.length > q.length) (1.0 - distance(q, w.take(q.length)).toDouble() / q.length) * 0.85 else 0.0
         return maxOf(whole, start)
     }

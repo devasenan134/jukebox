@@ -4,6 +4,8 @@ import { subsonic } from '../api/subsonic'
 import { social } from '../api/social'
 import { mixSource, mixSongToSong } from '../api/types'
 import { useLikes, likes } from '../state/likes'
+import { useQuery } from '@tanstack/react-query'
+import { prefetchAlbum, queryClient } from '../state/queries'
 import { useMyPlaylists } from '../state/library'
 import { activity } from '../state/history'
 import { session } from '../state/session'
@@ -61,7 +63,7 @@ export function Cover({ coverArt, size = 300, corner = 8, className, style, roun
 
 export function AlbumCard({ album, onClick, className }: { album: Album; onClick: () => void; className?: string }) {
   return (
-    <div className={`card${className ? ' ' + className : ''}`} onClick={onClick}>
+    <div className={`card${className ? ' ' + className : ''}`} onClick={onClick} onPointerEnter={() => prefetchAlbum(album.id)} onPointerDown={() => prefetchAlbum(album.id)}>
       <Cover coverArt={album.coverArt} />
       <div className="name title-small ellipsis">{album.name}</div>
       <div className="body-small muted ellipsis">{[album.year, album.artist].filter(Boolean).join(' · ')}</div>
@@ -491,20 +493,17 @@ export function PlayShuffleRow({ onPlay, onShuffle, children }: { onPlay: () => 
   )
 }
 
-/** Keeps a value that's loaded asynchronously, with loading and error states and a retry. */
-export function useLoad<T>(load: () => Promise<T>, deps: unknown[]) {
-  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean }>({ loading: true })
-  const [attempt, setAttempt] = useState(0)
-  useEffect(() => {
-    let alive = true
-    setState((s) => ({ data: s.data, loading: true }))
-    load()
-      .then((data) => alive && setState({ data, loading: false }))
-      .catch((e) => alive && setState({ error: (e as Error).message || 'Something went wrong', loading: false }))
-    return () => {
-      alive = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, attempt])
-  return { ...state, retry: () => setAttempt((a) => a + 1), set: (data: T) => setState({ data, loading: false }) }
+/**
+ * A value loaded from the server and kept in the website's cache under [key] (state/queries.ts): the first
+ * visit waits for it, later visits show it at once and refresh it in the background when it's old.
+ */
+export function useLoad<T>(key: unknown[], load: () => Promise<T>, staleTime?: number) {
+  const q = useQuery({ queryKey: key, queryFn: load, staleTime })
+  return {
+    data: q.data,
+    error: q.error ? q.error.message || 'Something went wrong' : undefined,
+    loading: q.isPending,
+    retry: () => void q.refetch(),
+    set: (data: T) => queryClient.setQueryData(key, data),
+  }
 }

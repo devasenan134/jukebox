@@ -46,6 +46,11 @@ class SubsonicApi(
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val passed = ConcurrentHashMap<String, Long>()
+    private val ids = ConcurrentHashMap<String, Pair<Long, Long>>()
+
+    /** The account's id, remembered as long as its sign-in is. */
+    private suspend fun idOf(username: String): Long =
+        ids[username]?.takeIf { it.second > clock() }?.first ?: userId(username).also { ids[username] = it to clock() + REMEMBER_MS }
 
     class Failure(val code: Int, message: String) : Exception(message)
 
@@ -95,7 +100,7 @@ class SubsonicApi(
                     call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=604800, immutable")
                     call.respond(LocalFileContent(file, ContentType.parse(type)))
                 }
-                else -> ok(call, answer(name, p, userId(username)))
+                else -> ok(call, answer(name, p, idOf(username)))
             }
         } catch (e: Failure) {
             fail(call, e.code, e.message ?: "")

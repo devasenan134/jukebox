@@ -41,7 +41,7 @@ class PlaylistRow(
  */
 class Listening(private val db: Db, private val clock: () -> Long = System::currentTimeMillis) {
 
-    suspend fun personal(userId: Long): Personal = db.tx {
+    suspend fun personal(userId: Long): Personal = db.read {
         val likes = query("SELECT item_type, item_id, liked_at FROM likes WHERE user_id = ?", userId) { Triple(it.getString(1), it.getString(2), it.getLong(3)) }
         Personal(
             likedSongs = likes.filter { it.first == "recording" }.associate { it.second to it.third },

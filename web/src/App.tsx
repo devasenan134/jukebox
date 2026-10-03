@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useRef } from 'react'
+import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigationType } from 'react-router-dom'
 import { setLoginRejectedHandler } from './api/subsonic'
 import { MiniPlayer } from './player/MiniPlayer'
 import * as player from './player/player'
@@ -39,6 +39,14 @@ export default function App() {
 function Main() {
   const open = usePlayerOpen((s) => s.open)
   const location = useLocation()
+  const navigationType = useNavigationType()
+  // Where each page was scrolled to: Back returns to the same place, a new page starts at the top.
+  const scroller = useRef<HTMLDivElement>(null)
+  const positions = useRef(new Map<string, number>())
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (el) el.scrollTop = navigationType === 'POP' ? (positions.current.get(location.key) ?? 0) : 0
+  }, [location.key, navigationType])
   useEffect(() => {
     player.restoreQueue()
     // Signed in before the friends side was: sign in to it now, then load likes, playlists and mixes.
@@ -52,7 +60,7 @@ function Main() {
   }, [])
   return (
     <div className="app">
-      <div className="content">
+      <div className="content" ref={scroller} onScroll={(e) => positions.current.set(location.key, e.currentTarget.scrollTop)}>
         <ErrorBoundary resetKey={location.pathname + location.search}>
         <Routes>
           <Route path="/" element={<HomeScreen />} />

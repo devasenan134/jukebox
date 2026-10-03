@@ -18,7 +18,7 @@ export function NowPlaying() {
   const repeat = usePlayer((s) => s.repeat)
   const position = usePosition(250)
   const song = item?.song
-  const lyrics = useLoad(async () => (song ? subsonic.lyrics(song.id) : []), [song?.id])
+  const lyrics = useLoad(['lyrics', song?.id], async () => (song ? subsonic.lyrics(song.id) : []))
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()

@@ -2,17 +2,21 @@ package io.github.devasenan134.jukebox.server
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.sqlite.SQLiteConfig
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSet
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * A single SQLite file holds everything: users, sessions, invites, friends and chat.
  * For a group of friends one connection is plenty; [tx] runs one piece of work at a time.
  */
-class Db(path: String) {
+class Db(private val path: String) {
     private val connection: Connection
 
     init {
@@ -24,6 +28,36 @@ class Db(path: String) {
         }
         migrate()
     }
+
+    /**
+     * Read-only connections for [read], opened when first needed. With WAL, readers don't wait for the writer
+     * or for each other, so a page's requests (and its covers) are answered side by side.
+     */
+    private val readers = ArrayBlockingQueue<Connection>(READERS)
+    private val opened = AtomicInteger()
+
+    /** Runs [block] on a read-only connection, as one snapshot of the database. For work that changes nothing. */
+    suspend fun <T> read(block: Connection.() -> T): T = withContext(Dispatchers.IO) {
+        val c = readers.poll() ?: if (opened.incrementAndGet() <= READERS) openReader() else readers.take()
+        try {
+            c.autoCommit = false
+            try { c.block() } finally { c.rollback(); c.autoCommit = true }
+        } finally {
+            readers.put(c)
+        }
+    }
+
+    private fun openReader(): Connection =
+        DriverManager.getConnection("jdbc:sqlite:$path", SQLiteConfig().apply { setReadOnly(true); busyTimeout = 10_000 }.toProperties())
+
+    private val catalogChanges = AtomicLong()
+
+    /**
+     * Goes up whenever the music catalog changes (a scan finished, people or recordings merged), so caches
+     * built from it know to rebuild without asking the database on every request.
+     */
+    val catalogVersion: Long get() = catalogChanges.get()
+    fun catalogChanged() { catalogChanges.incrementAndGet() }
 
     /** Runs [block] inside a transaction on the IO thread pool. */
     suspend fun <T> tx(block: Connection.() -> T): T = withContext(Dispatchers.IO) {
@@ -50,6 +84,8 @@ class Db(path: String) {
     }
 
     private companion object {
+        const val READERS = 4
+
         val SCHEMA_V1 = """
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY,

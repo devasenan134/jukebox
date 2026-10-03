@@ -2,6 +2,11 @@ package io.github.devasenan134.jukebox.server
 
 import io.ktor.http.HttpStatusCode
 import io.github.devasenan134.jukebox.server.library.event
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.put
@@ -10,6 +15,7 @@ import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
+import org.slf4j.LoggerFactory
 import kotlin.random.Random
 
 @Serializable data class HomeMixes(val sections: List<MixSection>, val analyzedSongs: Int, val totalSongs: Int)
@@ -27,6 +33,8 @@ data class PlayEvent(
     /** Where it was played from, e.g. "mix:daily-1" (only for statistics). */
     val source: String? = null,
 )
+
+private val log = LoggerFactory.getLogger("jukebox.mixes")
 
 @Serializable data class PlaysRequest(val events: List<PlayEvent>)
 
@@ -52,13 +60,37 @@ class MixService(
     @Volatile private var together: Pair<String, Together>? = null
     @Volatile private var togetherAt = 0L
 
+    private val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val rebuilding = ConcurrentHashMap<Long, Job>()
+
+    /**
+     * What [user] had last time, at once, while a fresh copy is worked out in the background (after a song
+     * played, say). Only the very first time does anyone wait for it.
+     */
+    private suspend fun current(user: UserDto): Built {
+        val cached = built[user.id] ?: return build(user)
+        if (clock() - cached.checkedAt >= RECHECK_MS) {
+            rebuilding.computeIfAbsent(user.id) {
+                background.launch {
+                    try { build(user) } catch (e: Exception) { log.warn("Couldn't work out mixes for {}", user.username, e) } finally { rebuilding.remove(user.id) }
+                }
+            }
+        }
+        return cached
+    }
+
+    /** Loads the library for mixes now, so the first person to open Home doesn't wait for it. */
+    fun warm() {
+        background.launch { runCatching { source.snapshot() } }
+    }
+
     suspend fun home(user: UserDto): HomeMixes {
-        val b = build(user)
+        val b = current(user)
         return HomeMixes(b.home.map { s -> s.copy(mixes = s.mixes.map { it.summary() }) }, b.lib.analyzed, b.lib.songs.size)
     }
 
     suspend fun mix(user: UserDto, id: String): MixDto {
-        val b = build(user)
+        val b = current(user)
         // Stations on Home are only a name and a cover; their songs are picked when they're opened.
         val mix = b.home.asSequence().flatMap { it.mixes }.firstOrNull { it.id == id && !it.endless } ?: b.maker.byId(id)
         mix?.let { suggested(user, id, "mix", it.songs, 0) }

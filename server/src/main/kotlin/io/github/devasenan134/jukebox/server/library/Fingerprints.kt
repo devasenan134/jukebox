@@ -61,6 +61,7 @@ class Fingerprints(private val db: Db, private val tools: AudioTools, private va
             query("SELECT (SELECT count(*) FROM files WHERE audio_md5 IS NULL AND missing_since IS NULL) + " +
                 "(SELECT count(*) FROM recordings WHERE fingerprint IS NULL AND merged_into IS NULL)") { it.getInt(1) }.first()
         }
+        if (merged > 0) db.catalogChanged()
         DeepPassReport(hashed, fingerprinted, merged, left).also { if (hashed + fingerprinted > 0) log.info("Deep pass: {}", it) }
     }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import type { Album } from '../api/types'
 import { subsonic } from '../api/subsonic'
 import { AlbumCard, ScreenHeader } from '../ui/components'
@@ -17,38 +18,22 @@ const SORTS = [
 export function AlbumsScreen() {
   const nav = useNav()
   const [sort, setSort] = useState(0)
-  const [albums, setAlbums] = useState<Album[]>([])
-  const [done, setDone] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const loading = useRef(false)
   const end = useRef<HTMLDivElement>(null)
-
-  const more = async (reset = false) => {
-    if (loading.current) return
-    loading.current = true
-    try {
-      const s = SORTS[sort]
-      const page = await subsonic.albumList(s.type, PAGE, reset ? 0 : albums.length, { ...s.extra })
-      setAlbums((a) => (reset ? page : [...a, ...page]))
-      setDone(page.length < PAGE)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      loading.current = false
-    }
-  }
-
-  useEffect(() => {
-    setAlbums([])
-    setDone(false)
-    void more(true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sort])
+  // Pages already seen stay loaded: coming back shows them at once, at the same place.
+  const q = useInfiniteQuery({
+    queryKey: ['albums', sort],
+    queryFn: ({ pageParam }) => subsonic.albumList(SORTS[sort].type, PAGE, pageParam, { ...SORTS[sort].extra }),
+    initialPageParam: 0,
+    getNextPageParam: (last: Album[], pages) => (last.length < PAGE ? undefined : pages.length * PAGE),
+  })
+  const albums = q.data?.pages.flat() ?? []
+  const done = !q.hasNextPage && !q.isPending
+  const error = q.error?.message
 
   useEffect(() => {
     const el = end.current
     if (!el || done) return
-    const io = new IntersectionObserver((e) => e[0].isIntersecting && void more())
+    const io = new IntersectionObserver((e) => e[0].isIntersecting && !q.isFetching && void q.fetchNextPage())
     io.observe(el)
     return () => io.disconnect()
   })
@@ -63,7 +48,7 @@ export function AlbumsScreen() {
           </button>
         ))}
       </div>
-      {error && <ErrorBox message={error} onRetry={() => { setError(null); void more(true) }} />}
+      {error && <ErrorBox message={error} onRetry={() => void q.refetch()} />}
       <div className="grid">
         {albums.map((a) => (
           <AlbumCard key={a.id} album={a} onClick={() => nav.openAlbum(a.id)} />

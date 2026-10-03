@@ -4,6 +4,7 @@ import * as player from '../player/player'
 import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, ScreenHeader, songCount, SongRow, useLoad } from '../ui/components'
 import { ErrorBox, Loading } from '../ui/kit'
 import { useNav } from '../ui/nav'
+import { keys } from '../state/queries'
 import { activity } from '../state/history'
 import { likes, useLikes } from '../state/likes'
 
@@ -11,7 +12,7 @@ import { likes, useLikes } from '../state/likes'
 export function AlbumScreen() {
   const { id = '' } = useParams()
   const nav = useNav()
-  const data = useLoad(() => subsonic.album(id), [id])
+  const data = useLoad(keys.album(id), () => subsonic.album(id))
   const liked = useLikes((s) => s.albums.some((a) => a.id === id))
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />

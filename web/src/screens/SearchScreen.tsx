@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import type { SearchResult } from '../api/types'
 import { subsonic } from '../api/subsonic'
@@ -13,28 +14,24 @@ export function SearchScreen() {
   const nav = useNav()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState(params.get('q') ?? '')
-  const [result, setResult] = useState<SearchResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
+  const [typed, setTyped] = useState(query.trim())
   useEffect(() => {
     const q = query.trim()
     setParams(q ? { q } : {}, { replace: true })
-    if (q.length < 2) return setResult(null)
-    let alive = true
-    setBusy(true)
-    const t = setTimeout(() => {
-      subsonic.search(q)
-        .then((r) => alive && (setResult(r), setError(null)))
-        .catch((e) => alive && setError((e as Error).message))
-        .finally(() => alive && setBusy(false))
-    }, 250)
-    return () => {
-      alive = false
-      clearTimeout(t)
-    }
+    const t = setTimeout(() => setTyped(q), 180)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
+  // Results stay cached: coming back to a search shows them at once; while typing, the last results stay up.
+  const search = useQuery({
+    queryKey: ['search', typed],
+    queryFn: () => subsonic.search(typed),
+    enabled: typed.length >= 2,
+    placeholderData: keepPreviousData,
+  })
+  const result: SearchResult | null = query.trim().length >= 2 ? (search.data ?? null) : null
+  const error = search.error?.message
+  const busy = search.isFetching
 
   const songs = result?.song ?? []
   const people = result?.artist ?? []

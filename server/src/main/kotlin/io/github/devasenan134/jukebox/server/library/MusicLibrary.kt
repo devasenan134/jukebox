@@ -48,6 +48,7 @@ class MusicLibrary(
     private val fingerprints = Fingerprints(db, tools) { roots }
     /** One person, one entry: spellings folded together after each scan; `people-overrides.txt` next to the artwork corrects it. */
     val people = PeopleMerger(db, File(artworkDir.parentFile, "people-overrides.txt"))
+    val covers = Covers(artworkDir, tools)
     private val lock = Mutex()
     @Volatile private var scanning = false
     @Volatile private var roots: Map<Long, String> = emptyMap()
@@ -62,6 +63,7 @@ class MusicLibrary(
                 .also {
                     refreshRoots()
                     runCatching { people.run() }.onFailure { log.error("Merging people failed", it) }
+                    runCatching { covers.warm(db) }.onFailure { log.warn("Making small covers failed", it) }
                 }
         } finally {
             scanning = false
@@ -79,8 +81,8 @@ class MusicLibrary(
             refreshRoots()
             while (isActive) {
                 scanAll()
-                // Fingerprint in batches until done or it's time to rescan.
-                val until = System.currentTimeMillis() + rescanEveryMinutes * 60_000
+                // Fingerprint in batches until done or it's time to rescan (0: scan only at start and when asked).
+                val until = if (rescanEveryMinutes > 0) System.currentTimeMillis() + rescanEveryMinutes * 60_000 else Long.MAX_VALUE
                 while (isActive && System.currentTimeMillis() < until) {
                     val left = if (fingerprintsOn) runCatching { lock.withLock { fingerprints.run(limit = 50) }.left }
                         .onFailure { log.warn("Fingerprint pass failed", it) }.getOrDefault(0) else 0

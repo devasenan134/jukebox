@@ -12,7 +12,7 @@ import { useNav } from '../ui/nav'
 export function ArtistsScreen() {
   const nav = useNav()
   const [filter, setFilter] = useState('')
-  const data = useLoad(() => subsonic.artists(), [])
+  const data = useLoad(['artists'], () => subsonic.artists())
   const composers = useMemo(() => (data.data ?? []).filter(isComposer).filter((a) => a.name.toLowerCase().includes(filter.trim().toLowerCase())), [data.data, filter])
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
@@ -50,11 +50,11 @@ export function PersonRow({ artist, onClick }: { artist: Artist; onClick: () => 
 export function ArtistScreen() {
   const { id = '' } = useParams()
   const nav = useNav()
-  const data = useLoad(async () => {
+  const data = useLoad(['artist', id], async () => {
     const artist = await subsonic.artist(id)
     const songs = isComposer(artist) ? [] : await subsonic.songsBy(artist.id, artist.name)
     return { artist, songs }
-  }, [id])
+  })
   if (data.loading && !data.data) return <Loading />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const { artist, songs } = data.data!
