@@ -426,7 +426,9 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     }?.let { (lib, path, format) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(format) } }
 
     /** A cover (by artwork, album, release or song id), resized to fit [size] when asked. */
-    suspend fun cover(id: String, size: Int?): Pair<File, String>? {
+    suspend fun cover(requested: String, size: Int?): Pair<File, String>? {
+        // Mixes name an album's cover Navidrome's way ("al-<album>").
+        val id = requested.removePrefix("al-")
         val art = db.tx {
             queryOne("SELECT hash, mime FROM artwork WHERE id = ?", id) { it.getString(1) to it.getString(2) }
                 ?: queryOne(

@@ -4,7 +4,16 @@ import io.github.devasenan134.jukebox.server.Config
 import io.github.devasenan134.jukebox.server.Navidrome
 import io.github.devasenan134.jukebox.server.jukeboxServer
 import io.github.devasenan134.jukebox.server.library.TestAudio
+import io.github.devasenan134.jukebox.server.eventJson
+import io.ktor.client.call.body
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.get
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -192,5 +201,45 @@ class SubsonicTest {
             c.createStatement().executeQuery("SELECT type FROM events ORDER BY seq").use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
         }
         assertEquals(listOf("liked", "liked", "unliked", "played", "played", "playlist_created", "playlist_changed", "playlist_deleted"), types)
+    }
+
+    @Test
+    fun `mixes are made from Jukebox's own catalog, and their songs play`() = testApplication {
+        TestAudio.airaa(root, 1, "Kaariga", 300)
+        TestAudio.airaa(root, 2, "Megathoodham", 500)
+        TestAudio.song(root, "Roja (1992)/01 - Chinna Chinna Aasai.m4a", 650, mapOf("title" to "Chinna Chinna Aasai", "album" to "Roja",
+            "artist" to "Minmini", "album_artist" to "A.R. Rahman", "composer" to "A.R. Rahman", "date" to "1992", "track" to "1"))
+        application {
+            jukeboxServer(
+                Config(0, File(data, "jukebox.db").path, "http://unused", "", "", libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
+                navidrome = SubsonicFakeNavidrome(),
+            )
+        }
+        val client = createClient { install(ContentNegotiation) { json(eventJson) } }
+        repeat(100) {
+            if (rest("getAlbumList2", "type=newest&size=10")["albumList2"]!!.jsonObject["album"]!!.jsonArray.size == 2) return@repeat
+            delay(200)
+        }
+        // Sign in to Jukebox's own API the way the app does, then open Home.
+        val session = client.post("/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(io.github.devasenan134.jukebox.server.LoginRequest("alice", "abc", SubsonicApi.md5("secretabc")))
+        }.body<io.github.devasenan134.jukebox.server.SessionResponse>()
+        val home = client.get("/mixes") { bearerAuth(session.sessionToken) }.body<io.github.devasenan134.jukebox.server.HomeMixes>()
+        assertEquals(3, home.totalSongs)
+        // A three-song library is too small for Home's rows, but a song's station is made the same way.
+        val firstSong = rest("getAlbumList2", "type=alphabeticalByName&size=1")["albumList2"]!!.jsonObject["album"]!!.jsonArray.first()
+            .jsonObject["id"]!!.jsonPrimitive.content.let { rest("getAlbum", "id=$it")["album"]!!.jsonObject["song"]!!.jsonArray.first().jsonObject["id"]!!.jsonPrimitive.content }
+        val songs = client.post("/mixes/radio") {
+            bearerAuth(session.sessionToken); contentType(ContentType.Application.Json)
+            setBody(io.github.devasenan134.jukebox.server.RadioRequest("radio-song-$firstSong", count = 5))
+        }.body<io.github.devasenan134.jukebox.server.MixDto>().songs
+        assertEquals(firstSong, songs.first().id)
+        assertTrue(songs.isNotEmpty())
+        // Its songs are Jukebox's recordings: they stream, and their covers load.
+        for (song in songs) {
+            assertEquals(HttpStatusCode.OK, raw("stream", "id=${song.id}").status)
+            assertEquals(HttpStatusCode.OK, raw("getCoverArt", "id=${song.coverArt}&size=64").status)
+        }
     }
 }

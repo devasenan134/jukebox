@@ -40,6 +40,7 @@ import io.ktor.websocket.readText
 import kotlinx.serialization.SerializationException
 import org.slf4j.LoggerFactory
 import io.github.devasenan134.jukebox.server.library.AudioTools
+import io.github.devasenan134.jukebox.server.library.JukeboxLibrary
 import io.github.devasenan134.jukebox.server.library.Listening
 import io.github.devasenan134.jukebox.server.library.MusicLibrary
 import io.github.devasenan134.jukebox.server.subsonic.SubsonicApi
@@ -66,7 +67,8 @@ fun Application.jukeboxServer(
     pushSender: PushSender = config.firebaseKeyFile?.let { FcmSender(it) } ?: NoPush,
     issueTracker: IssueTracker? = config.githubToken?.let { token -> config.githubRepo?.let { GitHubIssues(it, token) } },
     pushConfig: PushConfig? = config.firebaseAppConfigFile?.let { PushConfig.fromGoogleServices(it) },
-    music: MusicSource? = config.navidromeDb?.let { NavidromeLibrary(it, config.featuresDb) },
+    /** Where mixes, search and requests get their music; by default Jukebox's own library (or Navidrome's without one). */
+    music: MusicSource? = null,
     catalog: Catalog = ITunesCatalog(),
 ) {
     val db = Db(config.dbPath)
@@ -94,6 +96,9 @@ fun Application.jukeboxServer(
     val bugReports = BugReports(issueTracker)
     val playlistLikes = PlaylistLikes(db)
     val pictures = Pictures(db, navidrome, config.dbPath)
+    val music = music
+        ?: if (config.libraries != null) JukeboxLibrary(db, config.navidromeDb, config.featuresDb)
+        else config.navidromeDb?.let { NavidromeLibrary(it, config.featuresDb) }
     val mixes = music?.let { MixService(db, it, java.time.ZoneId.of(config.timeZone)) }
     // Without a cast file next to the database, search just has no actors.
     val search = music?.let { LibrarySearch(it, File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)) }
