@@ -40,6 +40,7 @@ import io.ktor.websocket.readText
 import kotlinx.serialization.SerializationException
 import org.slf4j.LoggerFactory
 import io.github.devasenan134.jukebox.server.library.AudioTools
+import io.github.devasenan134.jukebox.server.library.Listening
 import io.github.devasenan134.jukebox.server.library.MusicLibrary
 import io.github.devasenan134.jukebox.server.subsonic.SubsonicApi
 import io.github.devasenan134.jukebox.server.subsonic.SubsonicLibrary
@@ -106,7 +107,8 @@ fun Application.jukeboxServer(
             config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes,
         ).also { it.start(this) }
     }
-    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.tools, lib.artworkDir, lib::roots), signIn::checkToken) }
+    val listening = Listening(db)
+    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.tools, lib.artworkDir, lib::roots), signIn::checkToken, signIn::userId, listening) }
     val limiter = RateLimiter(maxPerMinute = 10)
     val cleanup = Cleanup(db, navidrome, hub)
     // Every 10 minutes, remove people whose Navidrome account is gone.
@@ -309,6 +311,19 @@ fun Application.jukeboxServer(
             post("/plays") {
                 mixes?.recordPlays(call.me(), call.receive<PlaysRequest>().events)
                 call.respond(HttpStatusCode.NoContent)
+            }
+
+            // The event log (docs/milestone-2.md), a page at a time after a sequence number (admins only; the
+            // recommendation engine reads it this way).
+            get("/events") {
+                if (!accounts.isAdmin(call.me().id) && !stats.isAdmin(call.me())) throw ApiError(HttpStatusCode.Forbidden, "Only admins can read the event log")
+                val after = call.request.queryParameters["after"]?.toLongOrNull() ?: 0
+                val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: 500).coerceIn(1, 5000)
+                call.respond(db.tx {
+                    query("SELECT seq, user_id, type, at, payload FROM events WHERE seq > ? ORDER BY seq LIMIT ?", after, limit) {
+                        EventDto(it.getLong(1), (it.getObject(2) as Number?)?.toLong(), it.getString(3), it.getLong(4), eventJson.parseToJsonElement(it.getString(5)))
+                    }
+                })
             }
 
             // The library: what's been scanned, and a rescan on demand (admins only).

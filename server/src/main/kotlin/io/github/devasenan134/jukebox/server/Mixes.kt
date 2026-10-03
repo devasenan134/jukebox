@@ -1,7 +1,11 @@
 package io.github.devasenan134.jukebox.server
 
 import io.ktor.http.HttpStatusCode
+import io.github.devasenan134.jukebox.server.library.event
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
 import java.time.ZoneId
@@ -102,6 +106,10 @@ class MixService(
                 songs.forEachIndexed { i, s ->
                     update("INSERT INTO suggestions (list_id, position, song_id) VALUES (?, ?, ?)", list, firstPosition + i, s.id)
                 }
+                event(user.id, "suggested", t) {
+                    put("mix", mixId.take(100)); put("kind", kind); put("first", firstPosition)
+                    putJsonArray("songs") { songs.forEach { add(it.id) } }
+                }
                 // A year of suggestions is plenty, like plays.
                 update("DELETE FROM suggestion_lists WHERE user_id = ? AND served_at < ?", user.id, t - 365 * MixMaker.DAY)
             }
@@ -155,10 +163,14 @@ class MixService(
         db.tx {
             for (e in events) {
                 if (e.songId.isBlank() || e.songId.length > 100 || e.playedMs < 0) continue
+                val at = e.at.coerceIn(t - 30 * MixMaker.DAY, t)
                 update(
                     "INSERT INTO plays (user_id, song_id, at, played_ms, duration_ms, skipped, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    user.id, e.songId, e.at.coerceIn(t - 30 * MixMaker.DAY, t), e.playedMs, e.durationMs, if (e.skipped) 1 else 0, e.source?.take(100),
+                    user.id, e.songId, at, e.playedMs, e.durationMs, if (e.skipped) 1 else 0, e.source?.take(100),
                 )
+                event(user.id, if (e.skipped) "skipped" else "listened", at) {
+                    put("song", e.songId); put("playedMs", e.playedMs); put("durationMs", e.durationMs); e.source?.let { put("source", it.take(100)) }
+                }
             }
             // A year of plays is plenty.
             update("DELETE FROM plays WHERE user_id = ? AND at < ?", user.id, t - 365 * MixMaker.DAY)

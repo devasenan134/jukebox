@@ -75,6 +75,12 @@ class SignIn(private val db: Db, private val passwords: Passwords, private val n
         update("UPDATE users SET password_enc = ? WHERE id = ?", passwords.encrypt(password), userId)
     }
 
+    /** The account [username] signed in with (made on first sign-in for an account that still lives in Navidrome). */
+    suspend fun userId(username: String): Long = db.tx {
+        queryOne("SELECT id FROM users WHERE username = ? AND deleted_at IS NULL", username.trim()) { it.getLong(1) }
+            ?: insert("INSERT INTO users (username, display_name, created_at) VALUES (?, ?, ?)", username.trim(), username.trim(), System.currentTimeMillis())
+    }
+
     /** Whether [username] signs in with Jukebox (true) or still with Navidrome. */
     suspend fun hasPassword(username: String) = storedPassword(username) != null
 

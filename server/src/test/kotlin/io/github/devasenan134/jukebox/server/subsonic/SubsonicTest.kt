@@ -30,7 +30,7 @@ import kotlin.test.assertTrue
 private class SubsonicFakeNavidrome : Navidrome(Config(0, "", "http://unused", "", "")) {
     override suspend fun users() = null
     override suspend fun checkLogin(username: String, salt: String, token: String) =
-        username == "alice" && token == SubsonicApi.md5("secret$salt")
+        username in setOf("alice", "bob") && token == SubsonicApi.md5("secret$salt")
 }
 
 class SubsonicTest {
@@ -125,8 +125,72 @@ class SubsonicTest {
         assertEquals("image/jpeg", cover.headers[HttpHeaders.ContentType])
         assertTrue(cover.readRawBytes().size in 100..20_000)
 
-        // Likes come with milestone 2.
-        assertEquals("failed", rest("star", "id=$id")["status"]!!.jsonPrimitive.content)
+        // Liking works (milestone 2; the next test goes through likes, plays and playlists).
+        assertEquals("ok", rest("star", "id=$id")["status"]!!.jsonPrimitive.content)
         assertEquals("ok", rest("getStarred2")["status"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `likes, play counts and playlists, each written to the event log`() = testApplication {
+        TestAudio.airaa(root, 1, "Kaariga", 300)
+        TestAudio.airaa(root, 2, "Megathoodham", 500)
+        TestAudio.airaa(root, 1, "She Hates You", 700, score = true)
+        application {
+            jukeboxServer(
+                Config(0, File(data, "jukebox.db").path, "http://unused", "", "", libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
+                navidrome = SubsonicFakeNavidrome(), music = null,
+            )
+        }
+        var albums = emptyList<JsonObject>()
+        repeat(100) {
+            albums = rest("getAlbumList2", "type=alphabeticalByName&size=10")["albumList2"]!!.jsonObject["album"]!!.jsonArray.map { it.jsonObject }
+            if (albums.size == 2) return@repeat
+            delay(200)
+        }
+        val airaa = albums.first()["id"]!!.jsonPrimitive.content
+        val score = albums.last()["id"]!!.jsonPrimitive.content
+        val songs = rest("getAlbum", "id=$airaa")["album"]!!.jsonObject["song"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content }
+        val (kaariga, megam) = songs
+
+        // Likes: a song and an album, shown as starred everywhere, listed by getStarred2; unliking removes it.
+        assertEquals("ok", rest("star", "id=$kaariga&albumId=$score")["status"]!!.jsonPrimitive.content)
+        val starred = rest("getStarred2")["starred2"]!!.jsonObject
+        assertEquals(listOf(kaariga), starred["song"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+        assertEquals(listOf(score), starred["album"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+        val inAlbum = rest("getAlbum", "id=$airaa")["album"]!!.jsonObject["song"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(inAlbum.first()["starred"] != null && inAlbum.last()["starred"] == null)
+        rest("unstar", "id=$kaariga")
+        assertTrue(rest("getStarred2")["starred2"]!!.jsonObject["song"]!!.jsonArray.isEmpty())
+        // Someone else's likes are their own.
+        val other = rest("getStarred2", user = "bob")
+        assertTrue(other["starred2"]!!.jsonObject["album"]!!.jsonArray.isEmpty())
+
+        // Plays: "now playing" doesn't count, a submitted play does; Recently played and Most played follow.
+        rest("scrobble", "id=$megam&submission=false")
+        rest("scrobble", "id=$megam&submission=true&time=1000")
+        rest("scrobble", "id=$megam&submission=true&time=2000")
+        val song = rest("getSong", "id=$megam")["song"]!!.jsonObject
+        assertEquals(2, song["playCount"]!!.jsonPrimitive.int)
+        assertEquals(listOf(airaa), rest("getAlbumList2", "type=recent")["albumList2"]!!.jsonObject["album"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+        assertEquals(listOf(airaa), rest("getAlbumList2", "type=frequent")["albumList2"]!!.jsonObject["album"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+
+        // Playlists: make one, add, remove, rename; only its owner may change it; delete.
+        val made = rest("createPlaylist", "name=Road+trip&songId=$kaariga&songId=$megam")["playlist"]!!.jsonObject
+        val playlistId = made["id"]!!.jsonPrimitive.content
+        assertEquals(2, made["songCount"]!!.jsonPrimitive.int)
+        rest("updatePlaylist", "playlistId=$playlistId&songIndexToRemove=0&songIdToAdd=$kaariga&name=Night+drive")
+        val changed = rest("getPlaylist", "id=$playlistId")["playlist"]!!.jsonObject
+        assertEquals("Night drive", changed["name"]!!.jsonPrimitive.content)
+        assertEquals(listOf(megam, kaariga), changed["entry"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+        assertEquals(listOf("Night drive"), rest("getPlaylists")["playlists"]!!.jsonObject["playlist"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content })
+        assertEquals(50, rest("deletePlaylist", "id=$playlistId", user = "bob")["error"]!!.jsonObject["code"]!!.jsonPrimitive.int)
+        assertTrue(rest("getPlaylists", user = "bob")["playlists"]!!.jsonObject["playlist"]!!.jsonArray.isEmpty())
+        assertEquals("ok", rest("deletePlaylist", "id=$playlistId")["status"]!!.jsonPrimitive.content)
+
+        // Every change is in the event log, in order.
+        val types = java.sql.DriverManager.getConnection("jdbc:sqlite:${File(data, "jukebox.db").path}").use { c ->
+            c.createStatement().executeQuery("SELECT type FROM events ORDER BY seq").use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
+        }
+        assertEquals(listOf("liked", "liked", "unliked", "played", "played", "playlist_created", "playlist_changed", "playlist_deleted"), types)
     }
 }

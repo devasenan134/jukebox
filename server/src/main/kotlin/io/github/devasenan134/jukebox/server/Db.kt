@@ -42,7 +42,7 @@ class Db(path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -397,6 +397,53 @@ class Db(path: String) {
             ALTER TABLE users ADD COLUMN password_enc TEXT;
             ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE users ADD COLUMN email TEXT
+        """.trimIndent()
+
+        // What people do with the music (docs/milestone-2.md). likes: a recording, album (an album view's id) or
+        // person. play_counts: songs played to the end (Subsonic scrobbles), like Navidrome's play counts; the
+        // detailed plays (how long, skipped, from where) stay in plays. playlists and their songs in order.
+        // events: everything that happened, numbered, for the recommendation engine to follow.
+        val SCHEMA_V22 = """
+            CREATE TABLE likes (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                item_type TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                liked_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, item_type, item_id)
+            );
+            CREATE INDEX likes_by_item ON likes(item_type, item_id);
+            CREATE TABLE play_counts (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                recording_id TEXT NOT NULL,
+                count INTEGER NOT NULL,
+                last_played INTEGER NOT NULL,
+                PRIMARY KEY (user_id, recording_id)
+            );
+            CREATE TABLE playlists (
+                id TEXT PRIMARY KEY,
+                owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                comment TEXT,
+                public INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                changed_at INTEGER NOT NULL
+            );
+            CREATE INDEX playlists_by_owner ON playlists(owner_id);
+            CREATE TABLE playlist_entries (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                recording_id TEXT NOT NULL,
+                added_at INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, position)
+            );
+            CREATE TABLE events (
+                seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                type TEXT NOT NULL,
+                at INTEGER NOT NULL,
+                payload TEXT NOT NULL
+            );
+            CREATE INDEX events_by_user ON events(user_id, at)
         """.trimIndent()
 
         // Mixes by Jukebox: what the app played (with skips), mixes saved to Your Library,

@@ -49,6 +49,8 @@ fun clockTime(ms: Long): String = "%d:%02d".format(ms / 60_000, ms / 1000 % 60)
 // Requests and responses
 
 @Serializable data class LoginRequest(val username: String, val salt: String, val token: String)
+/** One line of the event log. */
+@Serializable data class EventDto(val seq: Long, val userId: Long?, val type: String, val at: Long, val payload: kotlinx.serialization.json.JsonElement)
 @Serializable data class ChangePasswordRequest(val current: String, val new: String)
 @Serializable data class SignupRequest(val inviteCode: String, val username: String, val password: String, val displayName: String? = null)
 @Serializable data class SessionResponse(val sessionToken: String, val user: UserDto)

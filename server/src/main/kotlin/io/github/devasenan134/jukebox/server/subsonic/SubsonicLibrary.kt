@@ -3,6 +3,8 @@ package io.github.devasenan134.jukebox.server.subsonic
 import io.github.devasenan134.jukebox.server.Db
 import io.github.devasenan134.jukebox.server.Fuzzy
 import io.github.devasenan134.jukebox.server.library.AudioTools
+import io.github.devasenan134.jukebox.server.library.Personal
+import io.github.devasenan134.jukebox.server.library.PlaylistRow
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.serialization.json.JsonArray
@@ -86,7 +88,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }.also { viewsCache = it }
     }
 
-    suspend fun albumList(type: String, size: Int, offset: Int, fromYear: Int?, toYear: Int?): List<JsonObject> {
+    suspend fun albumList(type: String, size: Int, offset: Int, fromYear: Int?, toYear: Int?, me: Personal = Personal.NOBODY): List<JsonObject> {
         val all = views().list
         val sorted = when (type) {
             "newest" -> all.sortedWith(compareByDescending<View> { it.created }.thenBy { it.sort })
@@ -97,26 +99,51 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
                 if (from > to) inRange.sortedWith(compareByDescending<View> { it.year }.thenBy { it.sort })
                 else inRange.sortedWith(compareBy<View> { it.year }.thenBy { it.sort })
             }
-            // Plays and likes come with milestone 2: nothing is recent, frequent or starred yet.
-            "recent", "frequent", "highest", "starred" -> emptyList()
+            "recent", "frequent" -> {
+                // Each album view's plays: most recent, and how many in all.
+                val byView = HashMap<String, Pair<Long, Int>>()
+                for ((recording, views) in viewsOf(me.plays.keys)) {
+                    val (count, last) = me.plays.getValue(recording)
+                    for (v in views) byView.merge(v, last to count) { a, b -> maxOf(a.first, b.first) to a.second + b.second }
+                }
+                val byId = views().byId
+                val ids = if (type == "recent") byView.entries.sortedByDescending { it.value.first } else byView.entries.sortedByDescending { it.value.second }
+                ids.mapNotNull { byId[it.key] }
+            }
+            "starred" -> me.likedAlbums.entries.sortedByDescending { it.value }.mapNotNull { views().byId[it.key] }
+            "highest" -> emptyList()
             else -> all.sortedWith(compareBy<View> { it.sort }.thenBy { it.name })
         }
-        return sorted.drop(offset.coerceAtLeast(0)).take(size.coerceIn(1, 500)).map { albumJson(it, null) }
+        return sorted.drop(offset.coerceAtLeast(0)).take(size.coerceIn(1, 500)).map { albumJson(it, null, me) }
     }
 
-    suspend fun album(id: String): JsonObject? {
+    /** The album views each recording appears on (its album's songs view, or a score's view). */
+    private suspend fun viewsOf(recordings: Collection<String>): Map<String, Set<String>> {
+        if (recordings.isEmpty()) return emptyMap()
+        val known = views().byId
+        return db.tx {
+            recordings.chunked(500).flatMap { chunk ->
+                query("""SELECT t.recording_id, CASE WHEN rl.kind = 'score' THEN rl.id ELSE rl.album_id END FROM tracks t
+                         JOIN releases rl ON rl.id = t.release_id WHERE t.recording_id IN (${chunk.joinToString(",") { "?" }})""", *chunk.toTypedArray()) {
+                    it.getString(1) to it.getString(2)
+                }
+            }
+        }.filter { it.second in known }.groupBy({ it.first }, { it.second }).mapValues { it.value.toSet() }
+    }
+
+    suspend fun album(id: String, me: Personal = Personal.NOBODY): JsonObject? {
         val view = views().byId[id] ?: return null
         val songs = db.tx { songsOf(view.albumId, view.scoreId) }
-        return albumJson(view, songs)
+        return albumJson(view, songs, me)
     }
 
     /** Album list entries for album views by id, in that order. */
-    private suspend fun albumsById(ids: List<String>): List<JsonObject> {
+    private suspend fun albumsById(ids: List<String>, me: Personal = Personal.NOBODY): List<JsonObject> {
         val byId = views().byId
-        return ids.mapNotNull { byId[it] }.map { albumJson(it, null) }
+        return ids.mapNotNull { byId[it] }.map { albumJson(it, null, me) }
     }
 
-    private fun albumJson(v: View, songs: List<SongRow>?): JsonObject = buildJsonObject {
+    private fun albumJson(v: View, songs: List<SongRow>?, me: Personal = Personal.NOBODY): JsonObject = buildJsonObject {
         put("id", v.id)
         put("name", v.name)
         put("title", v.name)
@@ -129,7 +156,8 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         put("duration", songs?.sumOf { it.durationMs / 1000 } ?: v.durationS)
         v.year?.let { put("year", it) }
         put("created", iso(v.created))
-        if (songs != null) putJsonArray("song") { songs.forEach { add(it.json()) } }
+        me.likedAlbums[v.id]?.let { put("starred", iso(it)) }
+        if (songs != null) putJsonArray("song") { songs.forEach { add(it.json(me)) } }
     }
 
     // ---------- songs ----------
@@ -140,7 +168,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         val durationMs: Long, val coverId: String?, val singers: List<Pair<String, String>>, val suffix: String?, val bitrate: Int?,
         val size: Long?, val created: Long,
     ) {
-        fun json(extra: JsonObjectBuilder.() -> Unit = {}) = buildJsonObject {
+        fun json(me: Personal = Personal.NOBODY, extra: JsonObjectBuilder.() -> Unit = {}) = buildJsonObject {
             put("id", id)
             put("parent", albumViewId)
             put("isDir", false)
@@ -163,6 +191,8 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
             put("type", "music")
             put("mediaType", "song")
             put("created", iso(created))
+            me.likedSongs[id]?.let { put("starred", iso(it)) }
+            me.plays[id]?.let { (count, last) -> put("playCount", count); put("played", iso(last)) }
             extra()
         }
     }
@@ -200,7 +230,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         query("""$songSelect WHERE r.id = ? ORDER BY CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'score' THEN 1 ELSE 2 END,
                  coalesce(f.bitrate, 0) DESC LIMIT 1""", recordingId, map = ::row).firstOrNull()
 
-    suspend fun song(id: String): JsonObject? = db.tx {
+    suspend fun song(id: String, me: Personal = Personal.NOBODY): JsonObject? = db.tx {
         val rid = resolve(id)
         val song = mainSong(rid) ?: return@tx null
         val credits = query(
@@ -212,7 +242,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
             Triple((it.getObject(1) as Number?)?.toInt(), (it.getObject(2) as Number?)?.toInt(), it.getString(3))
         }
         val composers = credits.filter { it.first == "composer" }
-        song.json {
+        song.json(me) {
             if (composers.isNotEmpty()) {
                 put("displayComposer", composers.joinToString(", ") { it.third })
                 put("displayAlbumArtist", composers.joinToString(", ") { it.third })
@@ -262,7 +292,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }
     }
 
-    suspend fun artist(requested: String): JsonObject? = db.tx {
+    suspend fun artist(requested: String, me: Personal = Personal.NOBODY): JsonObject? = db.tx {
         // An old id of a spelling that was merged leads to the person.
         val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", requested) { it.getString(1) } ?: return@tx null
         val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@tx null
@@ -276,7 +306,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     }?.let { (person, albumIds) ->
         // Every view of those albums: the songs and, for films, the background score; newest first.
         val albums = views().list.filter { it.albumId in albumIds }
-            .sortedWith(compareByDescending<View> { it.year }.thenBy { it.sort }).map { albumJson(it, null) }
+            .sortedWith(compareByDescending<View> { it.year }.thenBy { it.sort }).map { albumJson(it, null, me) }
         JsonObject(person + ("album" to JsonArray(albums)) + ("albumCount" to kotlinx.serialization.json.JsonPrimitive(albums.size)))
     }
 
@@ -307,7 +337,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }.also { index = it }
     }
 
-    suspend fun search(query: String, artistCount: Int, artistOffset: Int, albumCount: Int, albumOffset: Int, songCount: Int, songOffset: Int): JsonObject {
+    suspend fun search(query: String, artistCount: Int, artistOffset: Int, albumCount: Int, albumOffset: Int, songCount: Int, songOffset: Int, me: Personal = Personal.NOBODY): JsonObject {
         val q = Fuzzy.words(query.trim('"'))
         val idx = index()
         fun ranked(list: List<Entry>, count: Int, offset: Int, singerToo: Boolean = false): List<String> {
@@ -320,15 +350,49 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         val artistIds = ranked(idx.people, artistCount, artistOffset, singerToo = true)
         val albumIds = ranked(idx.albums, albumCount, albumOffset)
         val songIds = ranked(idx.songs, songCount, songOffset, singerToo = true)
-        val albums = albumsById(albumIds)
+        val albums = albumsById(albumIds, me)
         return db.tx {
             val artists = artistIds.mapNotNull { people("WHERE p.id = ?", it).firstOrNull() }
-            val songs = songIds.mapNotNull { mainSong(it)?.json() }
+            val songs = songIds.mapNotNull { mainSong(it)?.json(me) }
             buildJsonObject {
                 put("artist", JsonArray(artists))
                 put("album", JsonArray(albums))
                 put("song", JsonArray(songs))
             }
+        }
+    }
+
+    // ---------- likes and playlists ----------
+
+    /** Your liked songs, albums and people, newest first. */
+    suspend fun starred(me: Personal): JsonObject {
+        val albums = albumsById(me.likedAlbums.entries.sortedByDescending { it.value }.map { it.key }, me)
+        return db.tx {
+            val songs = me.likedSongs.entries.sortedByDescending { it.value }.mapNotNull { mainSong(it.key)?.json(me) }
+            val people = me.likedPeople.entries.sortedByDescending { it.value }.mapNotNull { people("WHERE p.id = ?", it.key).firstOrNull() }
+            buildJsonObject {
+                put("song", JsonArray(songs))
+                put("album", JsonArray(albums))
+                put("artist", JsonArray(people))
+            }
+        }
+    }
+
+    /** A playlist, with its songs when [withSongs]; its cover is its first song's. */
+    suspend fun playlistJson(p: PlaylistRow, me: Personal, withSongs: Boolean): JsonObject = db.tx {
+        val songs = p.songIds.mapNotNull { mainSong(it) }
+        buildJsonObject {
+            put("id", p.id)
+            put("name", p.name)
+            p.comment?.let { put("comment", it) }
+            put("owner", p.owner)
+            put("public", p.public)
+            put("songCount", songs.size)
+            put("duration", songs.sumOf { it.durationMs / 1000 })
+            put("created", iso(p.created))
+            put("changed", iso(p.changed))
+            songs.firstOrNull()?.coverId?.let { put("coverArt", it) }
+            if (withSongs) putJsonArray("entry") { songs.forEach { add(it.json(me)) } }
         }
     }
 
