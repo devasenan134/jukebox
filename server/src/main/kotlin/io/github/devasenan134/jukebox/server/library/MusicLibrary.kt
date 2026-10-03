@@ -46,6 +46,8 @@ class MusicLibrary(
     private val saavnIds: Map<String, String> = saavnIdMap?.takeIf { it.isFile }?.let(::readSaavnIds).orEmpty()
     val scanner = Scanner(db, tools, artworkDir, externalIds = { _, path -> saavnIds[path] }, threads = 3)
     private val fingerprints = Fingerprints(db, tools) { roots }
+    /** One person, one entry: spellings folded together after each scan; `people-overrides.txt` next to the artwork corrects it. */
+    val people = PeopleMerger(db, File(artworkDir.parentFile, "people-overrides.txt"))
     private val lock = Mutex()
     @Volatile private var scanning = false
     @Volatile private var roots: Map<Long, String> = emptyMap()
@@ -57,7 +59,10 @@ class MusicLibrary(
         scanning = true
         try {
             libraries.mapNotNull { l -> runCatching { scanner.scan(l) }.onFailure { log.error("Scanning {} failed", l.name, it) }.getOrNull() }
-                .also { refreshRoots() }
+                .also {
+                    refreshRoots()
+                    runCatching { people.run() }.onFailure { log.error("Merging people failed", it) }
+                }
         } finally {
             scanning = false
         }

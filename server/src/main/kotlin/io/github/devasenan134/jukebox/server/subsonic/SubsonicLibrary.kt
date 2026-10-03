@@ -191,7 +191,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
                   (SELECT count(DISTINCT c.album_id) FROM album_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
                   EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'singer'),
                   EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer')
-             FROM people p $where""", *args,
+             FROM people p ${if (where.isBlank()) "WHERE" else "$where AND"} p.merged_into IS NULL""", *args,
     ) {
         val albums = it.getInt(4)
         buildJsonObject {
@@ -207,7 +207,8 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
     }
 
     suspend fun artists(): JsonObject = db.tx {
-        val all = people("WHERE EXISTS (SELECT 1 FROM album_credits c WHERE c.person_id = p.id) OR EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id) ORDER BY p.sort_name")
+        val all = people("WHERE (EXISTS (SELECT 1 FROM album_credits c WHERE c.person_id = p.id) OR EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id))")
+            .sortedBy { it["name"].toString().trim('"').lowercase() }
         buildJsonObject {
             put("ignoredArticles", "The A")
             putJsonArray("index") {
@@ -217,7 +218,9 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         }
     }
 
-    suspend fun artist(id: String): JsonObject? = db.tx {
+    suspend fun artist(requested: String): JsonObject? = db.tx {
+        // An old id of a spelling that was merged leads to the person.
+        val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", requested) { it.getString(1) } ?: return@tx null
         val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@tx null
         // Every view of their albums: the songs and, for films, the background score.
         val albumIds = query(
@@ -239,11 +242,14 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
 
     /** Search words for everything, kept in memory and rebuilt when a scan changed the catalog. */
     private suspend fun index(): Index {
-        val version = db.tx { queryOne("SELECT coalesce(max(finished_at), 0) || '/' || (SELECT count(*) FROM recordings) FROM scans") { it.getString(1) } } ?: "0"
+        val version = db.tx { queryOne("SELECT coalesce(max(finished_at), 0) || '/' || (SELECT count(*) FROM recordings) || '/' || (SELECT count(*) FROM people WHERE merged_into IS NULL) FROM scans") { it.getString(1) } } ?: "0"
         index?.takeIf { it.version == version }?.let { return it }
         return db.tx {
             val albums = query("SELECT vid, name FROM ($views)") { Entry(it.getString(1), Fuzzy.words(it.getString(2))) }
-            val people = query("SELECT id, name FROM people") { Entry(it.getString(1), Fuzzy.words(it.getString(2))) }
+            // People are found by their other spellings too.
+            val people = query("SELECT id, name, coalesce(aliases, '') FROM people WHERE merged_into IS NULL") {
+                Entry(it.getString(1), Fuzzy.words(it.getString(2)), Fuzzy.words(it.getString(3).replace('\n', ' ')))
+            }
             val songs = query(
                 """SELECT r.id, r.title, (SELECT group_concat(p.name, ' ') FROM recording_credits c JOIN people p ON p.id = c.person_id
                                           WHERE c.recording_id = r.id AND c.role = 'singer')
@@ -263,7 +269,7 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
                 e.id to maxOf(Fuzzy.match(q, e.words), if (singerToo && e.alsoWords.isNotEmpty()) Fuzzy.match(q, e.alsoWords) * 0.9 else 0.0)
             }.filter { it.second > 0 }.sortedByDescending { it.second }.drop(offset).take(count).map { it.first }.toList()
         }
-        val artistIds = ranked(idx.people, artistCount, artistOffset)
+        val artistIds = ranked(idx.people, artistCount, artistOffset, singerToo = true)
         val albumIds = ranked(idx.albums, albumCount, albumOffset)
         val songIds = ranked(idx.songs, songCount, songOffset, singerToo = true)
         return db.tx {

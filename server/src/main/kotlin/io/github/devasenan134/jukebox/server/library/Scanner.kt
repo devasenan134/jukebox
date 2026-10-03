@@ -261,7 +261,8 @@ class Scanner(
 
     private fun Connection.personId(name: String): String {
         val key = Names.personKey(name).ifEmpty { name.lowercase() }
-        return queryOne("SELECT id FROM people WHERE sound_key = ?", key) { it.getString(1) }
+        // A spelling merged into another person's main spelling (PeopleMerger) credits that person.
+        return queryOne("SELECT coalesce(merged_into, id) FROM people WHERE sound_key = ?", key) { it.getString(1) }
             ?: newId().also { insert("INSERT INTO people (id, name, sort_name, sound_key) VALUES (?, ?, ?, ?)", it, name, Names.sortTitle(name), key) }
     }
 
