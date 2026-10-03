@@ -28,7 +28,8 @@ class Cleanup(private val db: Db, private val navidrome: Navidrome, private val 
 
         data class Ours(val id: Long, val username: String, val navidromeId: String?)
         val ours = db.tx {
-            query("SELECT id, username, navidrome_id FROM users WHERE deleted_at IS NULL") { Ours(it.getLong(1), it.getString(2), it.getString(3)) }
+            // Only accounts that still live in Navidrome; Jukebox's own accounts (with a password here) aren't Navidrome's to remove.
+            query("SELECT id, username, navidrome_id FROM users WHERE deleted_at IS NULL AND password_enc IS NULL") { Ours(it.getLong(1), it.getString(2), it.getString(3)) }
         }
 
         // Users from before ids were stored get their id from their current username, once.

@@ -72,7 +72,9 @@ fun Application.jukeboxServer(
     val friends = Friends(db)
     val hub = Hub(friends::friendIds)
     friends.hub = hub
-    val accounts = Accounts(db, navidrome, onFriendsAdded = friends::announceFriendship)
+    // Passwords are kept encrypted with a key that lives next to the database (docs/milestone-2.md).
+    val signIn = SignIn(db, Passwords(File(File(config.dbPath).absoluteFile.parentFile, "secret.key")), navidrome.takeIf { config.navidromeUrl.isNotBlank() })
+    val accounts = Accounts(db, navidrome, signIn, onFriendsAdded = friends::announceFriendship)
     val chat = Chat(db, friends, hub, PictureFolder(config.dbPath, "group-pictures"), config.dbPath)
     val listen = ListenTogether(hub, chat::members, this, config.listenOwnerGraceMs, config.songRequestCooldownMs)
     chat.listenersOf = listen::listeners
@@ -104,7 +106,7 @@ fun Application.jukeboxServer(
             config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes,
         ).also { it.start(this) }
     }
-    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.tools, lib.artworkDir, lib::roots), navidrome) }
+    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.tools, lib.artworkDir, lib::roots), signIn::checkToken) }
     val limiter = RateLimiter(maxPerMinute = 10)
     val cleanup = Cleanup(db, navidrome, hub)
     // Every 10 minutes, remove people whose Navidrome account is gone.
@@ -199,6 +201,13 @@ fun Application.jukeboxServer(
         authenticate("session") {
             get("/me") { call.respond(call.me()) }
             patch("/me") { call.respond(accounts.rename(call.me().id, call.receive<RenameRequest>().displayName)) }
+            // A new password (Jukebox accounts); your other devices are signed out.
+            post("/me/password") {
+                val body = call.receive<ChangePasswordRequest>()
+                val token = call.request.headers[HttpHeaders.Authorization].orEmpty().removePrefix("Bearer ").trim()
+                accounts.changePassword(call.me(), body.current, body.new, token)
+                call.respond(HttpStatusCode.NoContent)
+            }
             // Profile pictures: the body is the image itself.
             put("/me/avatar") { call.respond(pictures.setAvatar(call.me().id, Picture(call.receive<ByteArray>()))) }
             delete("/me/avatar") { call.respond(pictures.removeAvatar(call.me().id)) }
@@ -305,7 +314,7 @@ fun Application.jukeboxServer(
             // The library: what's been scanned, and a rescan on demand (admins only).
             route("/library") {
                 fun libraryOn() = musicLibrary ?: throw ApiError(HttpStatusCode.NotFound, "This server has no library of its own")
-                suspend fun ApplicationCall.admin() { if (!stats.isAdmin(me())) throw ApiError(HttpStatusCode.Forbidden, "Only admins can do this") }
+                suspend fun ApplicationCall.admin() { if (!accounts.isAdmin(me().id) && !stats.isAdmin(me())) throw ApiError(HttpStatusCode.Forbidden, "Only admins can do this") }
                 get("/status") { call.admin(); call.respond(libraryOn().status()) }
                 post("/scan") {
                     call.admin()

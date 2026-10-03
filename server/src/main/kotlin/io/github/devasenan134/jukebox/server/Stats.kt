@@ -67,6 +67,8 @@ class Stats(private val navidromeDb: String?, private val db: Db, private val hi
 
     /** Admin means admin in Navidrome, checked against Navidrome's own user table. */
     suspend fun isAdmin(user: UserDto): Boolean {
+        // Jukebox's own flag first; Navidrome's, for accounts that still live there.
+        if (db.tx { queryOne("SELECT is_admin FROM users WHERE id = ?", user.id) { it.getInt(1) == 1 } } == true) return true
         val users = snapshot()?.users ?: return false
         val navidromeId = db.tx { queryOne("SELECT navidrome_id FROM users WHERE id = ?", user.id) { it.getString(1) } }
         return users.any { it.isAdmin && (it.id == navidromeId || (navidromeId == null && it.userName.equals(user.username, true))) }
@@ -74,11 +76,12 @@ class Stats(private val navidromeDb: String?, private val db: Db, private val hi
 
     /** Everyone here who is a Navidrome admin (they hear about new music requests). */
     suspend fun adminIds(): List<Long> {
-        val admins = snapshot()?.users?.filter { it.isAdmin } ?: return emptyList()
+        val local = db.tx { query("SELECT id FROM users WHERE is_admin = 1 AND deleted_at IS NULL") { it.getLong(1) } }
+        val admins = snapshot()?.users?.filter { it.isAdmin } ?: return local
         val users = db.tx { query("SELECT id, navidrome_id, username FROM users WHERE deleted_at IS NULL") { Triple(it.getLong(1), it.getString(2), it.getString(3)) } }
-        return users.filter { (_, navidromeId, username) ->
+        return (users.filter { (_, navidromeId, username) ->
             admins.any { it.id == navidromeId || (navidromeId == null && it.userName.equals(username, true)) }
-        }.map { it.first }
+        }.map { it.first } + local).distinct()
     }
 
     suspend fun report(user: UserDto, timeZone: String?): StatsDto {

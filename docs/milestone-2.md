@@ -71,8 +71,7 @@ Your Library (liked songs, playlists, albums, people), like buttons, playlists (
 remove), Recently played and Home mixes once the mix maker runs on Jukebox, built screen by screen to match
 the Android app, with the smoke test (`scripts/smoke`) growing with each screen.
 
-## Decisions
+## Decisions (2026-10-03)
 
-1. Carry passwords over from Navidrome (nobody resets), or have everyone set a new one?
-2. Keep Subsonic token sign-in for other players (passwords stored encrypted with Jukebox's key), or allow
-   only the app's own sign-in?
+1. Passwords are carried over from Navidrome: nobody resets.
+2. Subsonic token sign-in stays, so other Subsonic players work; passwords are kept encrypted with Jukebox's key.

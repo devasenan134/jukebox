@@ -1,6 +1,5 @@
 package io.github.devasenan134.jukebox.server.subsonic
 
-import io.github.devasenan134.jukebox.server.Navidrome
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -31,10 +30,15 @@ import java.util.concurrent.ConcurrentHashMap
  * The Subsonic API (the part the Jukebox app and web app use, docs/milestone-1.md), at /rest/<call> and
  * /rest/<call>.view, answered in JSON.
  *
- * Sign-in is still checked with Navidrome in milestone 1 (Navidrome has the passwords). A good check is
- * remembered for a few minutes, so streaming and covers don't ask Navidrome every time.
+ * Sign-in is checked by SignIn (Jukebox's own passwords, or Navidrome's for an account not imported yet).
+ * A good check is remembered for a few minutes, so streaming and covers don't decrypt it every time.
  */
-class SubsonicApi(private val library: SubsonicLibrary, private val navidrome: Navidrome, private val clock: () -> Long = System::currentTimeMillis) {
+class SubsonicApi(
+    private val library: SubsonicLibrary,
+    /** Whether token = md5(password + salt) for the user ([io.github.devasenan134.jukebox.server.SignIn]). */
+    private val checkToken: suspend (username: String, salt: String, token: String) -> Boolean,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
     private val passed = ConcurrentHashMap<String, Long>()
 
     class Failure(val code: Int, message: String) : Exception(message)
@@ -52,7 +56,7 @@ class SubsonicApi(private val library: SubsonicLibrary, private val navidrome: N
         }
         val key = "$user|$salt|$token"
         if ((passed[key] ?: 0) > clock()) return
-        if (!navidrome.checkLogin(user, salt, token)) throw Failure(40, "Wrong username or password")
+        if (!checkToken(user, salt, token)) throw Failure(40, "Wrong username or password")
         passed[key] = clock() + REMEMBER_MS
         if (passed.size > 10_000) passed.entries.removeIf { it.value < clock() }
     }

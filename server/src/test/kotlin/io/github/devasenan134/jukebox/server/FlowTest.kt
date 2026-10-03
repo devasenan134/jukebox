@@ -73,7 +73,8 @@ class FlowTest {
         val bob = client.postJson(
             "/auth/signup", SignupRequest(invite.code.lowercase().replace("-", ""), "bob", "quiet-river-song", "Bob"),
         ).body<SessionResponse>()
-        assertEquals(listOf("bob"), navidrome.created)
+        // Bob's is a Jukebox account, not Navidrome's (see the password test below).
+        assertEquals(emptyList(), navidrome.created)
         // The same code can't be used twice.
         val reused = client.postJson("/auth/signup", SignupRequest(invite.code, "eve", "quiet-river-song"))
         assertEquals(HttpStatusCode.BadRequest, reused.status)
@@ -144,6 +145,32 @@ class FlowTest {
     }
 
     @Test
+    fun `a Jukebox account signs in with its own password and can change it`() = testApplication {
+        val navidrome = FakeNavidrome()
+        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), navidrome) }
+        val client = createClient { install(ContentNegotiation) { json(eventJson) } }
+        val alice = client.login("alice")
+        val code = client.postJson("/invites", Unit, alice.sessionToken).body<InviteDto>().code
+        val bob = client.postJson("/auth/signup", SignupRequest(code, "bob", "quiet-river-song", "Bob")).body<SessionResponse>()
+        assertEquals(emptyList(), navidrome.created)
+
+        // Signing in the way Subsonic players do: token = md5(password + salt), Navidrome isn't asked.
+        val salt = "c0ffee"
+        fun login(password: String) = LoginRequest("bob", salt, Passwords.md5(password + salt))
+        assertEquals(HttpStatusCode.OK, client.postJson("/auth/login", login("quiet-river-song")).status)
+        assertEquals(HttpStatusCode.Unauthorized, client.postJson("/auth/login", login("wrong")).status)
+        // A taken username can't be signed up again.
+        val again = client.postJson("/invites", Unit, alice.sessionToken).body<InviteDto>()
+        assertEquals(HttpStatusCode.Conflict, client.postJson("/auth/signup", SignupRequest(again.code, "bob", "quiet-river-song")).status)
+
+        // Changing the password: the current one must be right; afterwards only the new one works.
+        assertEquals(HttpStatusCode.Forbidden, client.postJson("/me/password", ChangePasswordRequest("nope", "bright-harbor-lamp"), bob.sessionToken).status)
+        assertEquals(HttpStatusCode.NoContent, client.postJson("/me/password", ChangePasswordRequest("quiet-river-song", "bright-harbor-lamp"), bob.sessionToken).status)
+        assertEquals(HttpStatusCode.Unauthorized, client.postJson("/auth/login", login("quiet-river-song")).status)
+        assertEquals(HttpStatusCode.OK, client.postJson("/auth/login", login("bright-harbor-lamp")).status)
+    }
+
+    @Test
     fun `people deleted from Navidrome are cleaned up`() = testApplication {
         val navidrome = FakeNavidrome()
         val path = dbFile()
@@ -152,8 +179,13 @@ class FlowTest {
 
         val alice = client.login("alice")
         val carol = client.login("carol")
+        // Bob's account lives in Navidrome; Eve signed up with an invite, so hers is Jukebox's.
+        val bob = client.login("bob")
+        client.patch("/me") { bearerAuth(bob.sessionToken); contentType(ContentType.Application.Json); setBody(RenameRequest("Bob")) }
+        client.postJson("/friends/requests", AddFriendRequest("alice"), bob.sessionToken)
+        client.postJson("/friends/requests/${bob.user.id}/accept", Unit, alice.sessionToken)
         val code = client.postJson("/invites", Unit, alice.sessionToken).body<InviteDto>().code
-        val bob = client.postJson("/auth/signup", SignupRequest(code, "bob", "quiet-river-song", "Bob")).body<SessionResponse>()
+        client.postJson("/auth/signup", SignupRequest(code, "eve", "quiet-river-song", "Eve"))
         client.postJson("/friends/requests", AddFriendRequest("carol"), alice.sessionToken)
         client.postJson("/friends/requests/${alice.user.id}/accept", Unit, carol.sessionToken)
         val dm = client.postJson("/conversations/dm", NewDmRequest(bob.user.id), alice.sessionToken).body<ConversationDto>()
@@ -170,10 +202,10 @@ class FlowTest {
         navidrome.accounts = mutableMapOf("nd-alice" to "alice")
         assertEquals(emptyList(), cleanup.run().removed)
 
-        // Bob's account is deleted in Navidrome.
+        // Bob's account is deleted in Navidrome. Eve isn't in Navidrome at all, and stays: her account is Jukebox's.
         navidrome.accounts = mutableMapOf("nd-alice" to "alice", "nd-carol" to "carol")
         assertEquals(listOf("bob"), cleanup.run().removed)
-        assertEquals(listOf("carol"), client.friends(alice).map { it.user.username })
+        assertEquals(setOf("carol", "eve"), client.friends(alice).map { it.user.username }.toSet())
         assertEquals(HttpStatusCode.Unauthorized, client.get("/me") { bearerAuth(bob.sessionToken) }.status)
         // His old message is still there, marked as left, but the DM is closed.
         val history = client.getJson<List<MessageDto>>("/conversations/${dm.id}/messages", alice)
@@ -202,7 +234,7 @@ class FlowTest {
         // and logging in with the new name is still her.
         navidrome.accounts!!["nd-carol"] = "caroline"
         assertEquals(listOf("carol" to "caroline"), cleanup.run().renamed)
-        assertEquals(listOf("caroline"), client.friends(alice).map { it.user.username })
+        assertEquals(setOf("caroline", "eve"), client.friends(alice).map { it.user.username }.toSet())
         assertEquals(carol.user.id, client.login("caroline").user.id)
 
         // Alice's account is deleted and a *different* "alice" is created before the cleanup runs:

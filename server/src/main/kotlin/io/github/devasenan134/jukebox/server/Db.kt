@@ -42,7 +42,7 @@ class Db(path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -389,6 +389,14 @@ class Db(path: String) {
         val SCHEMA_V20 = """
             ALTER TABLE people ADD COLUMN merged_into TEXT REFERENCES people(id);
             CREATE INDEX people_by_merged ON people(merged_into)
+        """.trimIndent()
+
+        // Jukebox signs people in itself (docs/milestone-2.md). password_enc: the password encrypted with the
+        // server's key (Passwords), which Subsonic sign-in needs; NULL while the account still lives in Navidrome.
+        val SCHEMA_V21 = """
+            ALTER TABLE users ADD COLUMN password_enc TEXT;
+            ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE users ADD COLUMN email TEXT
         """.trimIndent()
 
         // Mixes by Jukebox: what the app played (with skips), mixes saved to Your Library,
