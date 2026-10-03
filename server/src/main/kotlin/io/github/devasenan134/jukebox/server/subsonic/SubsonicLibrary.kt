@@ -31,61 +31,105 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
 
     // ---------- albums ----------
 
-    /** Every album view: (id, name, album id, release id for a score or null, year, cover, created, sort). */
-    private val views = """
-        SELECT a.id AS vid, a.title AS name, a.id AS album_id, NULL AS score_id, a.year, a.cover_id, a.created_at, a.sort_title
-          FROM albums a WHERE EXISTS (SELECT 1 FROM releases rl JOIN tracks t ON t.release_id = rl.id JOIN files f ON f.track_id = t.id
-                                      WHERE rl.album_id = a.id AND rl.kind != 'score' AND f.missing_since IS NULL)
-        UNION ALL
-        SELECT rl.id, a.title || ' (Original Background Score)', a.id, rl.id, a.year, coalesce(rl.cover_id, a.cover_id), a.created_at, a.sort_title || ' ~'
-          FROM releases rl JOIN albums a ON a.id = rl.album_id
-         WHERE rl.kind = 'score' AND EXISTS (SELECT 1 FROM tracks t JOIN files f ON f.track_id = t.id WHERE t.release_id = rl.id AND f.missing_since IS NULL)
-    """.trimIndent()
+    /**
+     * What an album list shows for one album view, kept in memory: the catalog only changes when a scan or a
+     * merge finishes, and working it out per request (EXISTS over every album) made lists take seconds.
+     */
+    private class View(
+        val id: String, val name: String, val albumId: String, val scoreId: String?, val year: Int?, val coverId: String?,
+        val created: Long, val sort: String, val songCount: Int, val durationS: Long, val composers: List<Pair<String, String>>,
+    )
 
-    suspend fun albumList(type: String, size: Int, offset: Int, fromYear: Int?, toYear: Int?): List<JsonObject> = db.tx {
-        val (where, order) = when (type) {
-            "alphabeticalByName" -> "" to "sort_title, name"
-            "newest" -> "" to "created_at DESC, sort_title"
-            "random" -> "" to "random()"
-            "byYear" -> {
-                val (lo, hi) = (fromYear ?: 0) to (toYear ?: 9999)
-                "WHERE year BETWEEN ${minOf(lo, hi)} AND ${maxOf(lo, hi)}" to (if ((fromYear ?: 0) > (toYear ?: 9999)) "year DESC" else "year") + ", sort_title"
+    private class Views(val version: String, val list: List<View>, val byId: Map<String, View>)
+
+    @Volatile private var viewsCache: Views? = null
+
+    /** Changes whenever a scan finishes, recordings merge, or people merge. */
+    private suspend fun catalogVersion(): String = db.tx {
+        queryOne("""SELECT coalesce(max(finished_at), 0) || '/' || (SELECT count(*) FROM recordings WHERE merged_into IS NULL)
+                    || '/' || (SELECT count(*) FROM people WHERE merged_into IS NULL) FROM scans""") { it.getString(1) }
+    } ?: "0"
+
+    private suspend fun views(): Views {
+        val version = catalogVersion()
+        viewsCache?.takeIf { it.version == version }?.let { return it }
+        return db.tx {
+            val composers = HashMap<String, MutableList<Pair<String, String>>>()
+            query("""SELECT c.album_id, p.id, p.name FROM album_credits c JOIN people p ON p.id = c.person_id
+                     WHERE c.role = 'composer' ORDER BY c.album_id, c.position""") {
+                composers.getOrPut(it.getString(1)) { mutableListOf() } += it.getString(2) to it.getString(3)
             }
-            // Plays and likes come with milestone 2: nothing is recent, frequent or starred yet.
-            "recent", "frequent", "highest", "starred" -> return@tx emptyList()
-            else -> "" to "sort_title, name"
-        }
-        query("SELECT vid FROM ($views) $where ORDER BY $order LIMIT ? OFFSET ?", size.coerceIn(1, 500), offset.coerceAtLeast(0)) { it.getString(1) }
-            .mapNotNull { albumJson(it, withSongs = false) }
+            // Songs and length of each view: distinct recordings with a file on disk.
+            fun counts(groupBy: String, scores: Boolean) = query(
+                """SELECT g, count(*), sum(d) FROM (SELECT DISTINCT $groupBy AS g, r.id, r.duration_ms AS d
+                     FROM releases rl JOIN tracks t ON t.release_id = rl.id JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+                     JOIN recordings r ON r.id = t.recording_id WHERE rl.kind ${if (scores) "=" else "!="} 'score') GROUP BY g""",
+            ) { it.getString(1) to (it.getInt(2) to it.getLong(3) / 1000) }.toMap()
+            val songs = counts("rl.album_id", scores = false)
+            val scores = counts("rl.id", scores = true)
+            val list = query("SELECT id, title, year, cover_id, created_at, sort_title FROM albums") { rs ->
+                val id = rs.getString(1)
+                songs[id]?.let { (n, d) ->
+                    View(id, rs.getString(2), id, null, (rs.getObject(3) as Number?)?.toInt(), rs.getString(4), rs.getLong(5), rs.getString(6), n, d, composers[id].orEmpty())
+                }
+            }.filterNotNull() + query(
+                """SELECT rl.id, a.title, a.id, a.year, coalesce(rl.cover_id, a.cover_id), a.created_at, a.sort_title
+                     FROM releases rl JOIN albums a ON a.id = rl.album_id WHERE rl.kind = 'score'""",
+            ) { rs ->
+                val id = rs.getString(1)
+                scores[id]?.let { (n, d) ->
+                    View(id, rs.getString(2) + " (Original Background Score)", rs.getString(3), id, (rs.getObject(4) as Number?)?.toInt(),
+                        rs.getString(5), rs.getLong(6), rs.getString(7) + " ~", n, d, composers[rs.getString(3)].orEmpty())
+                }
+            }.filterNotNull()
+            Views(version, list, list.associateBy { it.id })
+        }.also { viewsCache = it }
     }
 
-    suspend fun album(id: String): JsonObject? = db.tx { albumJson(id, withSongs = true) }
-
-    private fun Connection.albumJson(id: String, withSongs: Boolean): JsonObject? {
-        val v = queryOne("SELECT vid, name, album_id, score_id, year, cover_id, created_at FROM ($views) WHERE vid = ?", id) {
-            listOf(it.getString(1), it.getString(2), it.getString(3), it.getString(4), it.getObject(5), it.getString(6), it.getLong(7))
-        } ?: return null
-        val (vid, name, albumId, scoreId) = v
-        val songs = songsOf(albumId as String, scoreId as String?)
-        val composers = query(
-            "SELECT p.id, p.name FROM album_credits c JOIN people p ON p.id = c.person_id WHERE c.album_id = ? AND c.role = 'composer' ORDER BY c.position",
-            albumId,
-        ) { it.getString(1) to it.getString(2) }
-        return buildJsonObject {
-            put("id", vid as String)
-            put("name", name as String)
-            put("title", name)
-            if (composers.isNotEmpty()) {
-                put("artist", composers.joinToString(", ") { it.second })
-                put("artistId", composers.first().first)
+    suspend fun albumList(type: String, size: Int, offset: Int, fromYear: Int?, toYear: Int?): List<JsonObject> {
+        val all = views().list
+        val sorted = when (type) {
+            "newest" -> all.sortedWith(compareByDescending<View> { it.created }.thenBy { it.sort })
+            "random" -> all.shuffled()
+            "byYear" -> {
+                val (from, to) = (fromYear ?: 0) to (toYear ?: 9999)
+                val inRange = all.filter { (it.year ?: -1) in minOf(from, to)..maxOf(from, to) }
+                if (from > to) inRange.sortedWith(compareByDescending<View> { it.year }.thenBy { it.sort })
+                else inRange.sortedWith(compareBy<View> { it.year }.thenBy { it.sort })
             }
-            (v[5] as String?)?.let { put("coverArt", it) }
-            put("songCount", songs.size)
-            put("duration", songs.sumOf { it.durationMs / 1000 })
-            (v[4] as Number?)?.let { put("year", it.toInt()) }
-            put("created", iso(v[6] as Long))
-            if (withSongs) putJsonArray("song") { songs.forEach { add(it.json()) } }
+            // Plays and likes come with milestone 2: nothing is recent, frequent or starred yet.
+            "recent", "frequent", "highest", "starred" -> emptyList()
+            else -> all.sortedWith(compareBy<View> { it.sort }.thenBy { it.name })
         }
+        return sorted.drop(offset.coerceAtLeast(0)).take(size.coerceIn(1, 500)).map { albumJson(it, null) }
+    }
+
+    suspend fun album(id: String): JsonObject? {
+        val view = views().byId[id] ?: return null
+        val songs = db.tx { songsOf(view.albumId, view.scoreId) }
+        return albumJson(view, songs)
+    }
+
+    /** Album list entries for album views by id, in that order. */
+    private suspend fun albumsById(ids: List<String>): List<JsonObject> {
+        val byId = views().byId
+        return ids.mapNotNull { byId[it] }.map { albumJson(it, null) }
+    }
+
+    private fun albumJson(v: View, songs: List<SongRow>?): JsonObject = buildJsonObject {
+        put("id", v.id)
+        put("name", v.name)
+        put("title", v.name)
+        if (v.composers.isNotEmpty()) {
+            put("artist", v.composers.joinToString(", ") { it.second })
+            put("artistId", v.composers.first().first)
+        }
+        v.coverId?.let { put("coverArt", it) }
+        put("songCount", songs?.size ?: v.songCount)
+        put("duration", songs?.sumOf { it.durationMs / 1000 } ?: v.durationS)
+        v.year?.let { put("year", it) }
+        put("created", iso(v.created))
+        if (songs != null) putJsonArray("song") { songs.forEach { add(it.json()) } }
     }
 
     // ---------- songs ----------
@@ -222,14 +266,17 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         // An old id of a spelling that was merged leads to the person.
         val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", requested) { it.getString(1) } ?: return@tx null
         val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@tx null
-        // Every view of their albums: the songs and, for films, the background score.
+        // Their albums (credited on the album, or singing on it).
         val albumIds = query(
-            """SELECT vid FROM ($views) WHERE album_id IN (SELECT album_id FROM album_credits WHERE person_id = ?)
-               OR album_id IN (SELECT rl.album_id FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
-                               JOIN releases rl ON rl.id = t.release_id WHERE c.person_id = ?)
-               ORDER BY year DESC, sort_title""", id, id,
-        ) { it.getString(1) }
-        val albums = albumIds.mapNotNull { albumJson(it, withSongs = false) }
+            """SELECT album_id FROM album_credits WHERE person_id = ?
+               UNION SELECT rl.album_id FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
+                     JOIN releases rl ON rl.id = t.release_id WHERE c.person_id = ?""", id, id,
+        ) { it.getString(1) }.toSet()
+        person to albumIds
+    }?.let { (person, albumIds) ->
+        // Every view of those albums: the songs and, for films, the background score; newest first.
+        val albums = views().list.filter { it.albumId in albumIds }
+            .sortedWith(compareByDescending<View> { it.year }.thenBy { it.sort }).map { albumJson(it, null) }
         JsonObject(person + ("album" to JsonArray(albums)) + ("albumCount" to kotlinx.serialization.json.JsonPrimitive(albums.size)))
     }
 
@@ -242,10 +289,11 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
 
     /** Search words for everything, kept in memory and rebuilt when a scan changed the catalog. */
     private suspend fun index(): Index {
-        val version = db.tx { queryOne("SELECT coalesce(max(finished_at), 0) || '/' || (SELECT count(*) FROM recordings) || '/' || (SELECT count(*) FROM people WHERE merged_into IS NULL) FROM scans") { it.getString(1) } } ?: "0"
+        val version = catalogVersion()
         index?.takeIf { it.version == version }?.let { return it }
+        val viewsNow = views().list
         return db.tx {
-            val albums = query("SELECT vid, name FROM ($views)") { Entry(it.getString(1), Fuzzy.words(it.getString(2))) }
+            val albums = viewsNow.map { Entry(it.id, Fuzzy.words(it.name)) }
             // People are found by their other spellings too.
             val people = query("SELECT id, name, coalesce(aliases, '') FROM people WHERE merged_into IS NULL") {
                 Entry(it.getString(1), Fuzzy.words(it.getString(2)), Fuzzy.words(it.getString(3).replace('\n', ' ')))
@@ -272,9 +320,9 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         val artistIds = ranked(idx.people, artistCount, artistOffset, singerToo = true)
         val albumIds = ranked(idx.albums, albumCount, albumOffset)
         val songIds = ranked(idx.songs, songCount, songOffset, singerToo = true)
+        val albums = albumsById(albumIds)
         return db.tx {
             val artists = artistIds.mapNotNull { people("WHERE p.id = ?", it).firstOrNull() }
-            val albums = albumIds.mapNotNull { albumJson(it, withSongs = false) }
             val songs = songIds.mapNotNull { mainSong(it)?.json() }
             buildJsonObject {
                 put("artist", JsonArray(artists))
@@ -331,12 +379,38 @@ class SubsonicLibrary(private val db: Db, private val tools: AudioTools, private
         if (size == null || size <= 0 || size >= 1500) return original to mime
         val sized = File(artworkDir, "sized/$hash-$size.jpg")
         if (!sized.isFile) {
-            val bytes = tools.resize(original, size) ?: return original to mime
+            val bytes = resize(original, size) ?: tools.resize(original, size) ?: return original to mime
             sized.parentFile.mkdirs()
-            sized.writeBytes(bytes)
+            val tmp = File(sized.parentFile, "${sized.name}.tmp")
+            tmp.writeBytes(bytes)
+            tmp.renameTo(sized)
         }
         return sized to "image/jpeg"
     }
+
+    /** [image] scaled to fit [size] × [size], as JPEG, in this process (much quicker than starting ffmpeg). */
+    private fun resize(image: File, size: Int): ByteArray? = runCatching {
+        val src = javax.imageio.ImageIO.read(image) ?: return null
+        val scale = minOf(1.0, size.toDouble() / maxOf(src.width, src.height))
+        val w = maxOf(1, (src.width * scale).toInt())
+        val h = maxOf(1, (src.height * scale).toInt())
+        val out = java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB)
+        out.createGraphics().apply {
+            setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION, java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+            setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY)
+            drawImage(src.getScaledInstance(w, h, java.awt.Image.SCALE_AREA_AVERAGING), 0, 0, null)
+            dispose()
+        }
+        val writer = javax.imageio.ImageIO.getImageWritersByFormatName("jpeg").next()
+        val params = writer.defaultWriteParam.apply { compressionMode = javax.imageio.ImageWriteParam.MODE_EXPLICIT; compressionQuality = 0.85f }
+        java.io.ByteArrayOutputStream().also { bytes ->
+            javax.imageio.ImageIO.createImageOutputStream(bytes).use { stream ->
+                writer.output = stream
+                writer.write(null, javax.imageio.IIOImage(out, null, null), params)
+            }
+            writer.dispose()
+        }.toByteArray()
+    }.getOrNull()
 
     private fun Connection.resolve(id: String): String {
         var current = id

@@ -825,3 +825,9 @@ a {
   overflow-x: auto;
   scrollbar-width: none;
 }
+
+/* The navigation is made of links; they shouldn't look like underlined web links. */
+a.nav-item {
+  text-decoration: none;
+  color: inherit;
+}

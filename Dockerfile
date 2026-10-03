@@ -27,7 +27,7 @@ COPY --from=web /web/dist /app/web
 ENV DB_PATH=/data/jukebox.db
 ENV WEB_DIR=/app/web
 # The heap stays small: a home server runs other things too. Override with JAVA_OPTS.
-ENV JAVA_OPTS=-Xmx512m
+ENV JAVA_OPTS="-Xmx512m -Djava.awt.headless=true"
 VOLUME /data
 EXPOSE 8095
 ENTRYPOINT ["/app/bin/jukebox"]

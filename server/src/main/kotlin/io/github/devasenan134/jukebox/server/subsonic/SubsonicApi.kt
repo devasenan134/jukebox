@@ -2,6 +2,7 @@ package io.github.devasenan134.jukebox.server.subsonic
 
 import io.github.devasenan134.jukebox.server.Navidrome
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Parameters
 import io.ktor.server.http.content.LocalFileContent
@@ -79,6 +80,8 @@ class SubsonicApi(private val library: SubsonicLibrary, private val navidrome: N
                 }
                 "getCoverArt" -> {
                     val (file, type) = library.cover(p.need("id"), p["size"]?.toIntOrNull()) ?: throw Failure(70, "Cover not found")
+                    // A cover's id names one image for good: browsers can keep it.
+                    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=604800, immutable")
                     call.respond(LocalFileContent(file, ContentType.parse(type)))
                 }
                 else -> ok(call, answer(name, p))

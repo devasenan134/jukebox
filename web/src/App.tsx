@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { setLoginRejectedHandler } from './api/subsonic'
 import { MiniPlayer } from './player/MiniPlayer'
 import * as player from './player/player'
@@ -13,6 +13,7 @@ import { SearchScreen } from './screens/SearchScreen'
 import { useSession } from './state/session'
 import { Icon, IconButton, Toasts } from './ui/kit'
 import { usePlayerOpen } from './ui/nav'
+import { ErrorBoundary } from './ui/ErrorBoundary'
 
 const TABS = [
   { label: 'Home', path: '/', icon: 'home' },
@@ -34,10 +35,12 @@ export default function App() {
 
 function Main() {
   const open = usePlayerOpen((s) => s.open)
+  const location = useLocation()
   useEffect(() => player.restoreQueue(), [])
   return (
     <div className="app">
       <div className="content">
+        <ErrorBoundary resetKey={location.pathname + location.search}>
         <Routes>
           <Route path="/" element={<HomeScreen />} />
           <Route path="/search" element={<SearchScreen />} />
@@ -48,8 +51,13 @@ function Main() {
           <Route path="/singer/:id" element={<ArtistScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
+        </ErrorBoundary>
       </div>
-      <MiniPlayer onOpen={() => usePlayerOpen.getState().setOpen(true)} />
+      <div className="mini-slot">
+        <ErrorBoundary>
+          <MiniPlayer onOpen={() => usePlayerOpen.getState().setOpen(true)} />
+        </ErrorBoundary>
+      </div>
       <nav className="bottom-nav">
         {TABS.map((t) => (
           <NavLink key={t.path} to={t.path} end={t.path === '/'} className={({ isActive }) => `nav-item${isActive ? ' selected' : ''}`}>
@@ -61,7 +69,11 @@ function Main() {
           <IconButton icon="logout" label="Log out" onClick={() => { player.stop(); useSession.getState().clear() }} />
         </div>
       </nav>
-      {open && <NowPlaying />}
+      {open && (
+        <ErrorBoundary>
+          <NowPlaying />
+        </ErrorBoundary>
+      )}
     </div>
   )
 }

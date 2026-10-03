@@ -203,7 +203,9 @@ export function SongRow({ song, onClick, isCurrent, showCover, onOpenAlbum, onRe
   const saved = (liked && !inLikedSongs) || (inPlaylists ?? []).some((n) => n !== inOwnPlaylist)
   const current = useIsCurrent(song.id)
   const showAsCurrent = isCurrent ?? current.isCurrent
-  const playing = showAsCurrent && usePlayer((s) => s.isPlaying)
+  // Hooks run on every render, the same ones in the same order (React needs that): read, then decide.
+  const isPlaying = usePlayer((s) => s.isPlaying)
+  const playing = showAsCurrent && isPlaying
   const jamListener = useJamListener()
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const [sharing, setSharing] = useState(false)
