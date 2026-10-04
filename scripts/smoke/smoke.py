@@ -55,7 +55,7 @@ async def main():
             await page.click(".fab-play")
             await page.wait_for_timeout(1500)
             check(len(await visible_text()) > 20, "page still shows content after pressing Play")
-            check(await page.locator("button[aria-label='Next']").count() > 0, "mini player shows after pressing Play")
+            check(await page.locator("button[aria-label='Next']:visible").count() > 0, "mini player shows after pressing Play")
             await shot("3-playing")
 
             # A song row: click the second song.
@@ -65,16 +65,20 @@ async def main():
                 await page.wait_for_timeout(1000)
                 check(len(await visible_text()) > 20, "page still shows content after picking a song")
 
-            # The full player with lyrics.
-            await page.locator("[aria-label='Next']").first.locator("xpath=ancestor::div[2]").click(position={"x": 60, "y": 20})
+            # The full player with lyrics: from the player bar on desktop, the mini player on a phone.
+            if name == "desktop":
+                await page.locator(".player-bar [aria-label='Open the player']").click()
+            else:
+                await page.locator(".mini-slot [aria-label='Next']").locator("xpath=ancestor::div[2]").click(position={"x": 60, "y": 20})
             await page.wait_for_timeout(1200)
-            check(await page.get_by_text("Now playing").count() > 0, "full player opens from the mini player")
+            check(await page.get_by_text("PLAYING FROM").count() > 0, "full player opens from the mini player")
             await shot("4-now-playing")
             await page.keyboard.press("Escape")
             await page.wait_for_timeout(500)
 
-            async def tab(name):
-                await page.get_by_role("link", name=name).click()
+            async def tab(label):
+                # The bottom tabs on a phone, the side panel on desktop.
+                await page.locator(f"a:visible:has-text('{label}')").first.click()
                 await page.wait_for_timeout(1500)
 
             t = time.time()
@@ -87,7 +91,7 @@ async def main():
 
             for chip, step in (("Albums", "6-albums"), ("Music directors", "7-composers")):
                 await tab("Home")
-                await page.get_by_role("button", name=chip, exact=True).click()
+                await page.locator(".content").get_by_role("button", name=chip, exact=True).click()
                 await page.wait_for_timeout(1500)
                 check(len(await visible_text()) > 20, f"{chip} shows content")
                 await shot(step)
@@ -102,8 +106,8 @@ async def main():
             await page.get_by_text("Mouna Raagam").first.click()
             await page.wait_for_selector(".song-row", timeout=10000)
             # (The phone run is the same user: already liked there.)
-            if await page.locator("button[aria-label='Like']").count():
-                await page.locator("button[aria-label='Like']").first.click()
+            if await page.locator(".hero-bar button[aria-label='Like']").count():
+                await page.locator(".hero-bar button[aria-label='Like']").first.click()
             await page.locator(".song-row button[aria-label='More']").first.click()
             like = page.get_by_text("Like", exact=True)
             await (like.click() if await like.count() else page.keyboard.press("Escape"))

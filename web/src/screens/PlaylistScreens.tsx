@@ -9,30 +9,17 @@ import { activity, useRecentPlaylists } from '../state/history'
 import { useMixes, useMyPlaylists } from '../state/library'
 import { likes, useLikes } from '../state/likes'
 import { useSession } from '../state/session'
-import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, ScreenHeader, songCount, SongRow, useLoad } from '../ui/components'
-import { Dialog, ErrorBox, IconButton, Loading, MoreMenu, NameDialog, toast } from '../ui/kit'
-import { LikedTile, madeForName, MixCover, updatedText } from '../ui/mixes'
+import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
+import { Dialog, ErrorBox, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
+import { LikedTile, madeForName, MixCover, mixTint, updatedText } from '../ui/mixes'
 import { useNav } from '../ui/nav'
 import { keys, playlistChanged } from '../state/queries'
 
 // Liked songs, a playlist and a mix: a picture, a name, Play and Shuffle, then the songs
 // (ui/library/LibraryScreen.kt, DetailScreens.kt and PlaylistEditing.kt; ui/mixes/MixScreen.kt).
 
-/** The big picture and the lines under it, centred, at the top of a page. */
-function Header({ art, title, lines }: { art: React.ReactNode; title: string; lines: (string | null | undefined)[] }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 24px', textAlign: 'center' }}>
-      {art}
-      <div className="headline-small" style={{ marginTop: 16, fontWeight: 700 }} data-testid="page-title">{title}</div>
-      {lines.filter(Boolean).map((l, i) => (
-        <div key={i} className={i === 0 ? 'body-medium muted' : 'body-small muted'} style={{ marginTop: 2 }}>{l}</div>
-      ))}
-    </div>
-  )
-}
-
-const BIG_ART = 'min(240px, 64vw)'
-const totals = (songs: { duration?: number }[]) => `${songCount(songs.length)} · ${formatTotalDuration(songs.reduce((t, s) => t + (s.duration ?? 0), 0))}`
+const total = (songs: { duration?: number }[]) => formatTotalDuration(songs.reduce((t, s) => t + (s.duration ?? 0), 0))
 
 /** All your liked songs, newest likes first. */
 export function LikedSongsScreen() {
@@ -43,16 +30,24 @@ export function LikedSongsScreen() {
     activity.liked()
     player.play(songs, index, shuffle, 'liked')
   }
+  const name = useSession((s) => s.social?.user.displayName || s.credentials?.username)
   return (
-    <div className="page">
-      <ScreenHeader title="" onBack={nav.back} />
-      <Header art={<div style={{ width: BIG_ART }}><LikedTile size={240} fill /></div>} title="Liked songs" lines={[totals(songs)]} />
+    <Collection
+      art={<div className="art"><LikedTile size={240} fill /></div>}
+      tint="hsl(250 45% 38%)"
+      kind="Playlist"
+      title="Liked songs"
+      meta={<Meta parts={[name && <b>{name}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />}
+    >
       {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} />}
-      {songs.length === 0 && <div className="muted" style={{ padding: 16 }}>Songs you like show up here. Tap ♡ in the player, or Like in a song's menu.</div>}
-      {songs.map((s, i) => (
-        <SongRow key={s.id} song={s} showCover inLikedSongs onOpenAlbum={nav.openAlbum} onClick={() => play(i)} />
-      ))}
-    </div>
+      {songs.length === 0 && <div className="muted" style={{ padding: 24 }}>Songs you like show up here. Tap ♡ in the player, or Like in a song's menu.</div>}
+      <div className="tracks">
+        {songs.length > 0 && <TrackHead />}
+        {songs.map((s, i) => (
+          <SongRow key={s.id} song={s} index={i} showCover inLikedSongs onOpenAlbum={nav.openAlbum} onClick={() => play(i)} />
+        ))}
+      </div>
+    </Collection>
   )
 }
 
@@ -67,7 +62,7 @@ export function PlaylistScreen() {
   const [deleting, setDeleting] = useState(false)
   const [editing, setEditing] = useState<Song[] | null>(null)
 
-  if (data.loading && !data.data) return <Loading />
+  if (data.loading && !data.data) return <PageSkeleton />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const playlist = data.data!
   const songs = playlist.entry ?? []
@@ -96,60 +91,61 @@ export function PlaylistScreen() {
     void change(() => subsonic.replacePlaylist(id, list.map((s) => s.id)), 'Saved')
   }
 
+  const menu = mine && (
+    <MoreMenu
+      items={[
+        { label: 'Edit songs', onClick: () => setEditing(songs), hidden: songs.length === 0 },
+        { label: 'Rename', onClick: () => setRenaming(true) },
+        {
+          label: playlist.public ? 'Make private' : 'Make public',
+          onClick: () => void change(() => subsonic.updatePlaylist(id, { public: !playlist.public }), playlist.public ? 'Only you can see it now' : 'Your friends can find it now'),
+        },
+        { label: 'Delete playlist', onClick: () => setDeleting(true) },
+      ]}
+    />
+  )
   return (
-    <div className="page">
-      <ScreenHeader
-        title=""
-        onBack={nav.back}
-        actions={
-          mine && !editing ? (
-            <MoreMenu
-              items={[
-                { label: 'Edit songs', onClick: () => setEditing(songs), hidden: songs.length === 0 },
-                { label: 'Rename', onClick: () => setRenaming(true) },
-                {
-                  label: playlist.public ? 'Make private' : 'Make public',
-                  onClick: () => void change(() => subsonic.updatePlaylist(id, { public: !playlist.public }), playlist.public ? 'Only you can see it now' : 'Your friends can find it now'),
-                },
-                { label: 'Delete playlist', onClick: () => setDeleting(true) },
-              ]}
-            />
-          ) : undefined
-        }
-      />
-      <Header
-        art={<Cover coverArt={playlist.coverArt} size={600} corner={12} style={{ width: BIG_ART, aspectRatio: '1', boxShadow: '0 12px 32px rgba(0,0,0,.25)' }} />}
-        title={playlist.name}
-        lines={[
-          ['Playlist', playlist.owner && `by ${playlist.owner}`, mine ? (playlist.public ? 'Public' : 'Private') : null].filter(Boolean).join(' · '),
-          playlist.comment,
-          totals(songs),
-        ]}
-      />
+    <Collection
+      coverArt={playlist.coverArt}
+      kind={mine ? (playlist.public ? 'Public playlist' : 'Private playlist') : 'Playlist'}
+      title={playlist.name}
+      meta={
+        <>
+          {playlist.comment && <div style={{ width: '100%', marginBottom: 4 }}>{playlist.comment}</div>}
+          <Meta parts={[playlist.owner && <b>{playlist.owner}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />
+        </>
+      }
+    >
       {editing ? (
         <EditSongs songs={editing} onChange={setEditing} onCancel={() => setEditing(null)} onSave={saveOrder} />
       ) : (
         <>
           {songs.length > 0 ? (
             <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
-              {!mine && <LikeButton liked={liked} onToggle={() => likes().togglePlaylist(playlist)} />}
+              {!mine && <LikeButton liked={liked} onToggle={() => likes().togglePlaylist(playlist)} big />}
+              {menu}
             </PlayShuffleRow>
           ) : (
-            <div className="muted" style={{ padding: 16, textAlign: 'center' }}>
-              {mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}
+            <div className="hero-bar">
+              {menu}
+              <span className="muted">{mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
             </div>
           )}
-          {songs.map((s, i) => (
-            <SongRow
-              key={`${s.id}-${i}`}
-              song={s}
-              showCover
-              onOpenAlbum={nav.openAlbum}
-              onClick={() => play(i)}
-              onRemoveFromPlaylist={mine ? () => void remove(i) : undefined}
-              inOwnPlaylist={mine ? playlist.name : undefined}
-            />
-          ))}
+          <div className="tracks">
+            {songs.length > 0 && <TrackHead />}
+            {songs.map((s, i) => (
+              <SongRow
+                key={`${s.id}-${i}`}
+                song={s}
+                index={i}
+                showCover
+                onOpenAlbum={nav.openAlbum}
+                onClick={() => play(i)}
+                onRemoveFromPlaylist={mine ? () => void remove(i) : undefined}
+                inOwnPlaylist={mine ? playlist.name : undefined}
+              />
+            ))}
+          </div>
         </>
       )}
       {renaming && (
@@ -165,7 +161,7 @@ export function PlaylistScreen() {
         />
       )}
       {deleting && <DeleteDialog playlist={playlist} onClose={() => setDeleting(false)} onDeleted={() => nav.back()} />}
-    </div>
+    </Collection>
   )
 }
 
@@ -238,7 +234,7 @@ export function MixScreen() {
   const nav = useNav()
   const data = useLoad(['mix', id], () => social.mix(id))
   const followed = useMixes((s) => s.followed.some((m) => m.id === id))
-  if (data.loading && !data.data) return <Loading />
+  if (data.loading && !data.data) return <PageSkeleton />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const mix = data.data!
   const songs = mix.songs.map(mixSongToSong)
@@ -252,22 +248,27 @@ export function MixScreen() {
       .then(() => toast(followed ? 'Removed from Your Library' : 'Saved to Your Library'))
       .catch(() => toast("Couldn't save it"))
   return (
-    <div className="page">
-      <ScreenHeader title="" onBack={nav.back} />
-      <Header
-        art={<div style={{ width: BIG_ART }}><MixCover mix={mix} size={240} fill /></div>}
-        title={mix.title}
-        lines={[
-          mix.description,
-          [mix.personal && madeFor ? `Made for ${madeFor}` : null, `by ${MIX_AUTHOR}`, mix.endless ? 'Station' : songCount(songs.length), updatedText(mix.updatedAt)].filter(Boolean).join(' · '),
-        ]}
-      />
+    <Collection
+      art={<div className="art"><MixCover mix={mix} size={240} fill /></div>}
+      tint={mixTint(mix)}
+      kind={mix.endless ? 'Station' : 'Mix'}
+      title={mix.title}
+      meta={
+        <>
+          {mix.description && <div style={{ width: '100%', marginBottom: 4 }}>{mix.description}</div>}
+          <Meta parts={[<b>{MIX_AUTHOR}</b>, mix.personal && madeFor && `Made for ${madeFor}`, !mix.endless && songCount(songs.length), updatedText(mix.updatedAt)]} />
+        </>
+      }
+    >
       <PlayShuffleRow onPlay={() => play(0)} onShuffle={mix.endless ? undefined : () => play(0, true)}>
-        <LikeButton liked={followed} onToggle={() => void toggle()} />
+        <LikeButton liked={followed} onToggle={() => void toggle()} big />
       </PlayShuffleRow>
-      {songs.map((s, i) => (
-        <SongRow key={`${s.id}-${i}`} song={s} showCover onOpenAlbum={nav.openAlbum} onClick={() => play(i)} />
-      ))}
-    </div>
+      <div className="tracks">
+        <TrackHead />
+        {songs.map((s, i) => (
+          <SongRow key={`${s.id}-${i}`} song={s} index={i} showCover onOpenAlbum={nav.openAlbum} onClick={() => play(i)} />
+        ))}
+      </div>
+    </Collection>
   )
 }

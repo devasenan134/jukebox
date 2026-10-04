@@ -430,9 +430,10 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
     /** A cover (by artwork, album, release or song id), resized to fit [size] when asked. */
     suspend fun cover(requested: String, size: Int?): Pair<File, String>? {
         // Mixes name an album's cover Navidrome's way ("al-<album>"); old ids from before the import still work.
-        val id = mapped(requested.removePrefix("al-").removePrefix("mf-").substringBefore('_'))
+        val id = mapped(requested.removePrefix("al-").removePrefix("mf-").removePrefix("ar-").substringBefore('_'))
         val art = db.read {
             queryOne("SELECT hash, mime FROM artwork WHERE id = ?", id) { it.getString(1) to it.getString(2) }
+                ?: personCover(id)
                 ?: queryOne(
                     """SELECT w.hash, w.mime FROM artwork w WHERE w.id = coalesce(
                          (SELECT cover_id FROM albums WHERE id = ?), (SELECT cover_id FROM releases WHERE id = ?),
@@ -443,6 +444,22 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
                 ) { it.getString(1) to it.getString(2) }
         } ?: return null
         return covers.sized(art.first, art.second, size)
+    }
+
+    /**
+     * A person has no photo here, so their picture (a "This Is" mix, a station) is the cover of their newest
+     * album: one they're credited on as a whole (a composer's), else one they sing on.
+     */
+    private fun Connection.personCover(id: String): Pair<String, String>? {
+        val person = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", id) { it.getString(1) } ?: return null
+        return queryOne(
+            """SELECT w.hash, w.mime FROM album_credits c JOIN albums a ON a.id = c.album_id JOIN artwork w ON w.id = a.cover_id
+                WHERE c.person_id = ? ORDER BY coalesce(a.year, 0) DESC LIMIT 1""", person,
+        ) { it.getString(1) to it.getString(2) } ?: queryOne(
+            """SELECT w.hash, w.mime FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
+                 JOIN releases rl ON rl.id = t.release_id JOIN albums a ON a.id = rl.album_id JOIN artwork w ON w.id = a.cover_id
+                WHERE c.person_id = ? ORDER BY coalesce(a.year, 0) DESC LIMIT 1""", person,
+        ) { it.getString(1) to it.getString(2) }
     }
 
     private fun Connection.resolve(id: String): String {

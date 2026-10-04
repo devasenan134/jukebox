@@ -3,7 +3,9 @@ import * as player from './player'
 import { usePlayer, currentItem, positionMs } from './player'
 import { useListen } from '../social/listen'
 import { session } from '../state/session'
-import { Cover } from '../ui/components'
+import { Cover, LikeButton } from '../ui/components'
+import { useCoverColor } from '../ui/coverColor'
+import { likes, useLikes } from '../state/likes'
 import { IconButton } from '../ui/kit'
 import { JamIcon } from '../ui/appIcons'
 
@@ -37,6 +39,8 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   const durationMs = usePlayer((s) => s.durationMs)
   const position = usePosition(500)
   const { ownsJam, listening } = useJamRole()
+  const tint = useCoverColor(item?.song.coverArt)
+  const liked = useLikes((s) => !!item && s.songs.some((x) => x.id === item.song.id))
   // How far the bar is dragged sideways. Swipe past the threshold to skip, then it springs back.
   const [dx, setDx] = useState(0)
   const drag = useRef<{ x: number; y: number; on: boolean } | null>(null)
@@ -73,10 +77,7 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
 
   const progress = durationMs > 0 ? Math.min(1, position / durationMs) : 0
   return (
-    <div style={{ background: 'var(--surface-container-low)', boxShadow: '0 -1px 0 var(--outline-variant)' }}>
-      <div style={{ height: 2, background: 'var(--surface-variant)' }}>
-        <div style={{ height: 2, width: `${progress * 100}%`, background: 'var(--primary)' }} />
-      </div>
+    <div style={{ background: tint, borderRadius: 8, overflow: 'hidden', position: 'relative', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', transition: 'background 0.4s' }}>
       <div
         onPointerDown={onDown}
         onPointerMove={onMove}
@@ -84,16 +85,17 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
         onPointerCancel={onUp}
         onClick={() => !moved.current && onOpen()}
         style={{
-          display: 'flex', alignItems: 'center', padding: '8px 12px', cursor: 'pointer', touchAction: 'pan-y', height: 'calc(var(--mini-height) - 2px)',
+          display: 'flex', alignItems: 'center', padding: '0 4px 0 8px', cursor: 'pointer', touchAction: 'pan-y', height: 'var(--mini-height)',
           transform: dx ? `translateX(${dx}px)` : undefined, opacity: 1 - Math.min(0.6, Math.abs(dx) / 400),
           transition: drag.current?.on ? 'none' : 'transform 0.2s',
         }}
       >
-        <Cover coverArt={item.song.coverArt} size={150} corner={6} style={{ width: 44, height: 44, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0, padding: '0 12px' }}>
-          <div className="body-large ellipsis">{item.song.title}</div>
-          <div className="body-small muted ellipsis">{item.song.artist}</div>
+        <Cover coverArt={item.song.coverArt} size={150} corner={4} style={{ width: 44, height: 44, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0, padding: '0 10px' }}>
+          <div className="body-medium ellipsis" style={{ fontWeight: 700 }}>{item.song.title}</div>
+          <div className="body-small ellipsis" style={{ color: 'rgba(255,255,255,0.75)' }}>{item.song.artist}</div>
         </div>
+        {!listening && <LikeButton liked={liked} onToggle={() => likes().toggleSong(item.song)} />}
         {listening ? (
           // Nothing to control: the jam's owner does. The icon opens the player.
           <button className="icon-btn" aria-label="Listening together" onClick={onOpen} style={{ color: 'var(--primary)' }}>
@@ -108,10 +110,13 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
                 style={{ color: 'var(--primary)', marginRight: 4, animation: 'spin 2.4s linear infinite', animationPlayState: isPlaying ? 'running' : 'paused' }}
               />
             )}
-            <IconButton icon={isPlaying ? 'pause' : 'play_arrow'} filled label={isPlaying ? 'Pause' : 'Play'} onClick={() => player.togglePlay()} />
-            <IconButton icon="skip_next" filled label="Next" onClick={() => player.next()} />
+            <IconButton icon={isPlaying ? 'pause' : 'play_arrow'} filled label={isPlaying ? 'Pause' : 'Play'} onClick={() => player.togglePlay()} size={30} style={{ color: '#fff' }} />
+            <IconButton icon="skip_next" filled label="Next" onClick={() => player.next()} style={{ color: '#fff' }} />
           </>
         )}
+      </div>
+      <div style={{ position: 'absolute', left: 8, right: 8, bottom: 0, height: 2, background: 'rgba(255,255,255,0.25)', borderRadius: 1 }}>
+        <div style={{ height: 2, width: `${progress * 100}%`, background: '#fff', borderRadius: 1 }} />
       </div>
     </div>
   )

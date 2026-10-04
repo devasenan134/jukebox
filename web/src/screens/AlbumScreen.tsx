@@ -1,12 +1,14 @@
 import { useParams } from 'react-router-dom'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
-import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, ScreenHeader, songCount, SongRow, useLoad } from '../ui/components'
-import { ErrorBox, Loading } from '../ui/kit'
-import { useNav } from '../ui/nav'
-import { keys } from '../state/queries'
 import { activity } from '../state/history'
 import { likes, useLikes } from '../state/likes'
+import { keys } from '../state/queries'
+import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
+import { formatTotalDuration, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { ErrorBox, MoreMenu } from '../ui/kit'
+import { startStation } from '../ui/components'
+import { useNav } from '../ui/nav'
 
 /** An album (a film's songs, or its background score): cover, music director, and the songs by disc. */
 export function AlbumScreen() {
@@ -14,7 +16,7 @@ export function AlbumScreen() {
   const nav = useNav()
   const data = useLoad(keys.album(id), () => subsonic.album(id))
   const liked = useLikes((s) => s.albums.some((a) => a.id === id))
-  if (data.loading && !data.data) return <Loading />
+  if (data.loading && !data.data) return <PageSkeleton />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const album = data.data!
   const songs = album.song ?? []
@@ -25,28 +27,42 @@ export function AlbumScreen() {
   }
 
   return (
-    <div className="page">
-      <ScreenHeader title="" onBack={nav.back} />
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 24px', textAlign: 'center' }}>
-        <Cover coverArt={album.coverArt} size={600} corner={12} style={{ width: 'min(260px, 70vw)', aspectRatio: '1', boxShadow: '0 12px 32px rgba(0,0,0,.25)' }} />
-        <div className="headline-small" style={{ marginTop: 16, fontWeight: 700 }}>{album.name}</div>
-        <div className="body-medium muted" style={{ marginTop: 4 }}>
-          {album.artistId ? (
-            <a className="primary-text" style={{ cursor: 'pointer' }} onClick={() => nav.openArtist(album.artistId!)}>{album.artist}</a>
-          ) : album.artist}
-          {album.year ? ` · ${album.year}` : ''}
-        </div>
-        <div className="body-small muted" style={{ marginTop: 2 }}>{songCount(album.songCount)} · {formatTotalDuration(album.duration)}</div>
-      </div>
+    <Collection
+      coverArt={album.coverArt}
+      kind="Album"
+      title={album.name}
+      meta={
+        <Meta
+          parts={[
+            album.artistId ? (
+              <b><a href={`/artist/${album.artistId}`} onClick={(e) => { e.preventDefault(); nav.openArtist(album.artistId!) }}>{album.artist}</a></b>
+            ) : album.artist && <b>{album.artist}</b>,
+            album.year,
+            songCount(album.songCount),
+            formatTotalDuration(album.duration),
+          ]}
+        />
+      }
+    >
       <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
-        <LikeButton liked={liked} onToggle={() => likes().toggleAlbum(album)} />
+        <LikeButton liked={liked} onToggle={() => likes().toggleAlbum(album)} big />
+        <MoreMenu
+          icon="more_horiz"
+          items={[
+            { label: 'Start album radio', onClick: () => void startStation('album', album.id) },
+            { label: 'Go to music director', onClick: () => album.artistId && nav.openArtist(album.artistId), hidden: !album.artistId },
+          ]}
+        />
       </PlayShuffleRow>
-      {discs.map((disc) => (
-        <div key={disc}>
-          {discs.length > 1 && <div className="label-large muted" style={{ padding: '12px 16px 4px' }}>{`Disc ${disc}`}</div>}
-          {songs.map((s, i) => ((s.discNumber ?? 1) === disc ? <SongRow key={s.id + i} song={s} onClick={() => play(i)} /> : null))}
-        </div>
-      ))}
-    </div>
+      <div className="tracks">
+        <TrackHead album={false} />
+        {discs.map((disc) => (
+          <div key={disc}>
+            {discs.length > 1 && <div className="label-large muted" style={{ padding: '12px 16px 4px' }}>{`Disc ${disc}`}</div>}
+            {songs.map((s, i) => ((s.discNumber ?? 1) === disc ? <SongRow key={s.id + i} song={s} onClick={() => play(i)} /> : null))}
+          </div>
+        ))}
+      </div>
+    </Collection>
   )
 }

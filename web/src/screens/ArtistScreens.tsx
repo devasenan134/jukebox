@@ -4,8 +4,10 @@ import type { Artist } from '../api/types'
 import { isComposer } from '../api/types'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
-import { AlbumCard, PlayShuffleRow, ScreenHeader, SongRow, useLoad } from '../ui/components'
-import { ErrorBox, Icon, Loading } from '../ui/kit'
+import { AlbumCard, PlayShuffleRow, ScreenHeader, SectionTitle, songCount, SongRow, startStation, useLoad } from '../ui/components'
+import { CardsSkeleton, Collection, Meta, PageSkeleton, PersonAvatar, TrackHead } from '../ui/collection'
+import { PersonCard } from './SearchScreen'
+import { ErrorBox, Icon, MoreMenu } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
 /** Music directors, A to Z, with a filter box. */
@@ -14,20 +16,22 @@ export function ArtistsScreen() {
   const [filter, setFilter] = useState('')
   const data = useLoad(['artists'], () => subsonic.artists())
   const composers = useMemo(() => (data.data ?? []).filter(isComposer).filter((a) => a.name.toLowerCase().includes(filter.trim().toLowerCase())), [data.data, filter])
-  if (data.loading && !data.data) return <Loading />
+  if (data.loading && !data.data) return <div className="page"><CardsSkeleton rows={3} /></div>
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   return (
     <div className="page">
-      <ScreenHeader title="Music directors" />
-      <div style={{ padding: '0 16px 8px' }}>
+      <ScreenHeader title="Music directors" onBack={nav.back} />
+      <div style={{ padding: '0 16px 12px' }}>
         <div className="search-box">
           <Icon name="filter_list" />
-          <input value={filter} placeholder="Filter" onChange={(e) => setFilter(e.target.value)} />
+          <input value={filter} placeholder="Find a music director" onChange={(e) => setFilter(e.target.value)} />
         </div>
       </div>
-      {composers.map((a) => (
-        <PersonRow key={a.id} artist={a} onClick={() => nav.openArtist(a.id)} />
-      ))}
+      <div className="grid">
+        {composers.map((a) => (
+          <PersonCard key={a.id} artist={a} className="" onClick={() => nav.openArtist(a.id)} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -55,25 +59,35 @@ export function ArtistScreen() {
     const songs = isComposer(artist) ? [] : await subsonic.songsBy(artist.id, artist.name)
     return { artist, songs }
   })
-  if (data.loading && !data.data) return <Loading />
+  if (data.loading && !data.data) return <PageSkeleton />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
   const { artist, songs } = data.data!
   const albums = artist.album ?? []
+  const source = `singer:${artist.id}`
   return (
-    <div className="page">
-      <ScreenHeader title={artist.name} onBack={nav.back} />
+    <Collection
+      art={<PersonAvatar name={artist.name} size={232} />}
+      round
+      kind={songs.length > 0 ? 'Singer' : 'Music director'}
+      title={artist.name}
+      meta={<Meta parts={[songs.length > 0 ? songCount(songs.length) : `${albums.length} albums`]} />}
+    >
       {songs.length > 0 ? (
         <>
-          <PlayShuffleRow onPlay={() => player.play(songs, 0, false, `singer:${artist.id}`)} onShuffle={() => player.play(songs, 0, true, `singer:${artist.id}`)}>
-            <div className="body-medium muted">{songs.length} songs</div>
+          <PlayShuffleRow onPlay={() => player.play(songs, 0, false, source)} onShuffle={() => player.play(songs, 0, true, source)}>
+            <MoreMenu items={[{ label: 'Start radio', onClick: () => void startStation('singer', artist.id) }]} />
           </PlayShuffleRow>
-          {songs.map((s, i) => (
-            <SongRow key={s.id} song={s} showCover onOpenAlbum={nav.openAlbum} onClick={() => player.play(songs, i, false, `singer:${artist.id}`)} />
-          ))}
+          <div className="tracks">
+            <TrackHead />
+            {songs.map((s, i) => (
+              <SongRow key={s.id} song={s} index={i} showCover onOpenAlbum={nav.openAlbum} onClick={() => player.play(songs, i, false, source)} />
+            ))}
+          </div>
         </>
       ) : (
         <>
-          <div className="body-medium muted" style={{ padding: '0 16px 12px' }}>{albums.length} albums</div>
+          <PlayShuffleRow onPlay={() => void startStation('composer', artist.id)} />
+          <SectionTitle>Albums</SectionTitle>
           <div className="grid">
             {albums.map((a) => (
               <AlbumCard key={a.id} album={a} onClick={() => nav.openAlbum(a.id)} />
@@ -81,6 +95,6 @@ export function ArtistScreen() {
           </div>
         </>
       )}
-    </div>
+    </Collection>
   )
 }

@@ -133,6 +133,10 @@ class SubsonicTest {
         val cover = raw("getCoverArt", "id=${airaa["coverArt"]!!.jsonPrimitive.content}&size=64")
         assertEquals("image/jpeg", cover.headers[HttpHeaders.ContentType])
         assertTrue(cover.readRawBytes().size in 100..20_000)
+        // A person's picture ("ar-<id>", as mixes name it) is one of their albums' covers.
+        val personCover = raw("getCoverArt", "id=ar-${composer["id"]!!.jsonPrimitive.content}&size=64")
+        assertEquals(HttpStatusCode.OK, personCover.status)
+        assertEquals("image/jpeg", personCover.headers[HttpHeaders.ContentType])
 
         // Liking works (milestone 2; the next test goes through likes, plays and playlists).
         assertEquals("ok", rest("star", "id=$id")["status"]!!.jsonPrimitive.content)

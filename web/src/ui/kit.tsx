@@ -161,7 +161,7 @@ export function Menu({ items, anchor, onClose }: { items: MenuItem[]; anchor: DO
 }
 
 /** A ⋮ button that opens a menu. */
-export function MoreMenu({ items, label = 'More', icon = 'more_vert' }: { items: MenuItem[]; label?: string; icon?: string }) {
+export function MoreMenu({ items, label = 'More', icon = 'more_horiz' }: { items: MenuItem[]; label?: string; icon?: string }) {
   const [anchor, setAnchor] = useState<DOMRect | null>(null)
   return (
     <>

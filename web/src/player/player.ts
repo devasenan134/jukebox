@@ -5,6 +5,7 @@ import { subsonic } from '../api/subsonic'
 import { social } from '../api/social'
 import { session } from '../state/session'
 import { queueMemory, useRecentSongs } from '../state/history'
+import { queryClient } from '../state/queries'
 import { load, save, remove } from '../state/storage'
 
 // The web app's player: one <audio> element plus a queue that works like the Android app's
@@ -36,6 +37,8 @@ interface PlayerState {
   durationMs: number
   shuffle: boolean
   repeat: RepeatMode
+  /** 0 to 1, remembered in this browser. */
+  volume: number
 }
 
 export const usePlayer = create<PlayerState>(() => ({
@@ -47,7 +50,17 @@ export const usePlayer = create<PlayerState>(() => ({
   durationMs: 0,
   shuffle: false,
   repeat: 'off',
+  volume: savedVolume(),
 }))
+
+function savedVolume(): number {
+  try {
+    const v = Number(localStorage.getItem('player.volume'))
+    return Number.isFinite(v) && localStorage.getItem('player.volume') != null ? Math.min(1, Math.max(0, v)) : 1
+  } catch {
+    return 1
+  }
+}
 
 const st = () => usePlayer.getState()
 const setSt = (s: Partial<PlayerState>) => usePlayer.setState(s)
@@ -59,6 +72,19 @@ const toItems = (songs: Song[], source?: string): QueueItem[] => songs.map((song
 
 const audio = new Audio()
 audio.preload = 'auto'
+audio.volume = st().volume
+
+/** Sets the volume (0 to 1) and remembers it. */
+export function setVolume(v: number) {
+  const volume = Math.min(1, Math.max(0, v))
+  audio.volume = volume
+  setSt({ volume })
+  try {
+    localStorage.setItem('player.volume', String(volume))
+  } catch {
+    // Private mode: it just isn't remembered.
+  }
+}
 
 /** Current position in ms. Read it often (e.g. every 200 ms) for progress bars and lyrics. */
 export const positionMs = () => Math.round(audio.currentTime * 1000)
@@ -405,7 +431,8 @@ function scrobbleCheck() {
   if (!item || item.song.id === submittedId || duration <= 0) return
   if (positionMs() >= Math.min(duration / 2, 240_000)) {
     submittedId = item.song.id
-    subsonic.scrobble(item.song.id, true).catch(() => {})
+    // Counted: Home's Jump back in and Most played load again next time they're shown.
+    subsonic.scrobble(item.song.id, true).then(() => queryClient.invalidateQueries({ queryKey: ['home', 'lists'] })).catch(() => {})
   }
 }
 

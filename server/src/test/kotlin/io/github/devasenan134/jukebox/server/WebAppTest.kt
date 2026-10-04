@@ -1,7 +1,9 @@
 package io.github.devasenan134.jukebox.server
 
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import java.io.File
@@ -31,5 +33,9 @@ class WebAppTest {
         assertTrue(client.get("/health").bodyAsText().contains("ok"))
         // An API route that needs a session still answers as the API, not with the page.
         assertEquals(HttpStatusCode.Unauthorized, client.get("/me").status)
+        // /search is both a page and an API route: a browser opening it gets the page, an app gets the API.
+        assertTrue(client.get("/search") { header(HttpHeaders.Accept, "text/html,application/xhtml+xml") }.bodyAsText().contains("<title>Jukebox</title>"))
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/search?q=x") { header(HttpHeaders.Accept, "application/json") }.status)
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/search?q=x") { header(HttpHeaders.Accept, "text/html"); header(HttpHeaders.Authorization, "Bearer nope") }.status)
     }
 }

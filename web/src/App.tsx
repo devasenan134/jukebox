@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigationType } from 'react-router-dom'
 import { setLoginRejectedHandler } from './api/subsonic'
 import { MiniPlayer } from './player/MiniPlayer'
+import { PlayerBar } from './player/PlayerBar'
+import { Sidebar } from './shell/Sidebar'
 import * as player from './player/player'
 import { AlbumScreen } from './screens/AlbumScreen'
 import { AlbumsScreen } from './screens/AlbumsScreen'
@@ -15,7 +17,7 @@ import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistS
 import { useLikes } from './state/likes'
 import { useMixes, useMyPlaylists } from './state/library'
 import { signInToSocial, useSession } from './state/session'
-import { Icon, IconButton, Toasts } from './ui/kit'
+import { Icon, Toasts } from './ui/kit'
 import { usePlayerOpen } from './ui/nav'
 import { ErrorBoundary } from './ui/ErrorBoundary'
 
@@ -24,6 +26,12 @@ const TABS = [
   { label: 'Search', path: '/search', icon: 'search' },
   { label: 'Your Library', path: '/library', icon: 'library_music' },
 ]
+
+/** Signs out on this browser: stops the music and forgets the login. */
+function logOut() {
+  player.stop()
+  useSession.getState().clear()
+}
 
 export default function App() {
   const signedIn = useSession((s) => s.credentials != null)
@@ -78,21 +86,24 @@ function Main() {
         </Routes>
         </ErrorBoundary>
       </div>
+      <ErrorBoundary>
+        <Sidebar onLogOut={logOut} />
+      </ErrorBoundary>
       <div className="mini-slot">
         <ErrorBoundary>
           <MiniPlayer onOpen={() => usePlayerOpen.getState().setOpen(true)} />
         </ErrorBoundary>
       </div>
+      <ErrorBoundary>
+        <PlayerBar />
+      </ErrorBoundary>
       <nav className="bottom-nav">
         {TABS.map((t) => (
           <NavLink key={t.path} to={t.path} end={t.path === '/'} className={({ isActive }) => `nav-item${isActive ? ' selected' : ''}`}>
-            <span className="pill"><Icon name={t.icon} /></span>
-            <span className="label-medium">{t.label}</span>
+            <span className="pill"><Icon name={t.icon} size={26} /></span>
+            <span>{t.label}</span>
           </NavLink>
         ))}
-        <div className="nav-item" style={{ flex: '0 0 56px' }}>
-          <IconButton icon="logout" label="Log out" onClick={() => { player.stop(); useSession.getState().clear() }} />
-        </div>
       </nav>
       {open && (
         <ErrorBoundary>

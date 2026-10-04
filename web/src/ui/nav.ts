@@ -38,6 +38,8 @@ export function useNav() {
     openArtists: () => go('/artists'),
     openLikedSongs: () => go('/liked'),
     openPlaylists: () => go('/playlists'),
+    openLibrary: () => go('/library'),
+    openSearch: () => go('/search'),
     openSingers: () => go('/singers'),
     /** A singer's songs (a lyricist's or actor's page for them); a composer's movies go to openArtist. */
     openSinger: (a: Artist) => {

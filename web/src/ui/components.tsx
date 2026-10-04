@@ -5,7 +5,7 @@ import { social } from '../api/social'
 import { mixSource, mixSongToSong } from '../api/types'
 import { useLikes, likes } from '../state/likes'
 import { useQuery } from '@tanstack/react-query'
-import { prefetchAlbum, queryClient } from '../state/queries'
+import { keys, playlistChanged, prefetchAlbum, queryClient } from '../state/queries'
 import { useMyPlaylists } from '../state/library'
 import { activity } from '../state/history'
 import { session } from '../state/session'
@@ -42,20 +42,29 @@ export const songCount = (n: number) => (n === 1 ? '1 song' : `${n.toLocaleStrin
 export const likeCount = (n: number) => (n === 0 ? 'No likes yet' : n === 1 ? '1 like' : `${n.toLocaleString('en')} likes`)
 
 /** Album art from Navidrome, with a plain placeholder behind it while loading or if missing. */
-export function Cover({ coverArt, size = 300, corner = 8, className, style, round }: {
+export function Cover({ coverArt, size = 300, corner = 8, className, style, round, fallbacks }: {
   coverArt?: string | null
   size?: number
   corner?: number
   className?: string
   style?: React.CSSProperties
   round?: boolean
+  /** Other pictures to try, in order, if this one is missing (a mix's person, then its albums). */
+  fallbacks?: string[]
 }) {
-  const src = subsonic.coverUrl(coverArt, size)
+  const [attempt, setAttempt] = useState(0)
+  const choices = [coverArt, ...(fallbacks ?? [])]
+  const src = subsonic.coverUrl(choices[attempt], size)
   const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [src])
+  const key = choices.join('|')
+  useEffect(() => {
+    setAttempt(0)
+    setFailed(false)
+  }, [key])
+  const onError = () => (attempt + 1 < choices.length ? setAttempt(attempt + 1) : setFailed(true))
   const s: React.CSSProperties = { borderRadius: round ? '50%' : corner, ...style }
   return src && !failed ? (
-    <img className={`cover${className ? ' ' + className : ''}`} src={src} loading="lazy" alt="" style={s} onError={() => setFailed(true)} draggable={false} />
+    <img className={`cover${className ? ' ' + className : ''}`} src={src} loading="lazy" alt="" style={s} onError={onError} draggable={false} />
   ) : (
     <div className={`cover${className ? ' ' + className : ''}`} style={s} />
   )
@@ -64,10 +73,40 @@ export function Cover({ coverArt, size = 300, corner = 8, className, style, roun
 export function AlbumCard({ album, onClick, className }: { album: Album; onClick: () => void; className?: string }) {
   return (
     <div className={`card${className ? ' ' + className : ''}`} onClick={onClick} onPointerEnter={() => prefetchAlbum(album.id)} onPointerDown={() => prefetchAlbum(album.id)}>
-      <Cover coverArt={album.coverArt} />
+      <div className="art">
+        <Cover coverArt={album.coverArt} />
+        <CardPlay label={`Play ${album.name}`} play={() => playAlbum(album.id)} />
+      </div>
       <div className="name title-small ellipsis">{album.name}</div>
-      <div className="body-small muted ellipsis">{[album.year, album.artist].filter(Boolean).join(' · ')}</div>
+      <div className="body-small muted ellipsis">{[album.year, album.artist].filter(Boolean).join(' • ')}</div>
     </div>
+  )
+}
+
+/** Plays an album from the start (from a card, without opening it). */
+export async function playAlbum(id: string) {
+  try {
+    const album = await queryClient.fetchQuery({ queryKey: keys.album(id), queryFn: () => subsonic.album(id) })
+    activity.movie(album)
+    player.play(album.song ?? [], 0, false, `album:${album.id}`)
+  } catch (e) {
+    toast((e as Error).message || "Couldn't play it")
+  }
+}
+
+/** The round play button that rises onto a card's picture on hover. */
+export function CardPlay({ label, play }: { label: string; play: () => void }) {
+  return (
+    <button
+      className="card-play"
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation()
+        play()
+      }}
+    >
+      <Icon name="play_arrow" filled />
+    </button>
   )
 }
 
@@ -117,7 +156,7 @@ export function SpinningDisc({ spinning, size = 56 }: { spinning: boolean; size?
 }
 
 /** A heart: filled when liked. */
-export function LikeButton({ liked, onToggle }: { liked: boolean; onToggle: () => void }) {
+export function LikeButton({ liked, onToggle, big }: { liked: boolean; onToggle: () => void; big?: boolean }) {
   return (
     <IconButton
       icon="favorite"
@@ -125,6 +164,8 @@ export function LikeButton({ liked, onToggle }: { liked: boolean; onToggle: () =
       label={liked ? 'Remove from liked' : 'Like'}
       onClick={onToggle}
       color={liked ? 'var(--primary)' : undefined}
+      size={big ? 32 : undefined}
+      className={big ? 'big' : undefined}
     />
   )
 }
@@ -160,9 +201,15 @@ export function ScreenHeader({ title, onBack, note, onTitleClick, actions, color
   )
 }
 
-/** Section title used above rows and lists. */
-export function SectionTitle({ children }: { children: ReactNode }) {
-  return <div className="section-title title-large" style={{ fontWeight: 700 }}>{children}</div>
+/** Section title used above rows and lists, with an optional link on the right ("Show all"). */
+export function SectionTitle({ children, action }: { children: ReactNode; action?: { label: string; onClick: () => void } }) {
+  if (!action) return <h2 className="section-title">{children}</h2>
+  return (
+    <div className="section-head">
+      <h2 className="section-title">{children}</h2>
+      <button className="see-all" onClick={action.onClick}>{action.label}</button>
+    </div>
+  )
 }
 
 /** Whether you're listening along in someone else's jam (then queue actions ask its owner). */
@@ -185,11 +232,13 @@ export function useIsCurrent(songId: string) {
  * songs come from different albums, like search results). Swipe right: play next; swipe left: add
  * to the end of the queue (in someone else's jam: ask its owner to play it now / next).
  */
-export function SongRow({ song, onClick, isCurrent, showCover, onOpenAlbum, onRemoveFromPlaylist, inLikedSongs, inOwnPlaylist, note }: {
+export function SongRow({ song, onClick, isCurrent, showCover, index, onOpenAlbum, onRemoveFromPlaylist, inLikedSongs, inOwnPlaylist, note }: {
   song: Song
   onClick: () => void
   isCurrent?: boolean
   showCover?: boolean
+  /** Its place in a playlist or list (shown instead of the track number). */
+  index?: number
   onOpenAlbum?: (id: string) => void
   /** Set on a playlist you own: removes this song from it. */
   onRemoveFromPlaylist?: () => void
@@ -252,26 +301,39 @@ export function SongRow({ song, onClick, isCurrent, showCover, onOpenAlbum, onRe
           setMenu(new DOMRect(e.clientX, e.clientY, 0, 0))
         }}
       >
-        {showCover ? (
-          <div style={{ position: 'relative', width: 'var(--song-thumb)', height: 'var(--song-thumb)', flexShrink: 0 }}>
+        {(!showCover || index != null) && (
+          <div className="num body-medium">
+            {showAsCurrent && !showCover ? (
+              <PlayingBars playing={playing} />
+            ) : (
+              <>
+                <span className="n">{index != null ? index + 1 : (song.track ?? '')}</span>
+                <span className="on-hover"><Icon name={playing ? 'pause' : 'play_arrow'} filled size={18} /></span>
+              </>
+            )}
+          </div>
+        )}
+        {showCover && (
+          <div style={{ position: 'relative', width: 'var(--song-thumb)', height: 'var(--song-thumb)', flexShrink: 0, marginLeft: index != null ? 8 : 0 }}>
             <Cover coverArt={song.coverArt} size={150} corner={4} style={{ width: '100%', height: '100%' }} />
             {showAsCurrent && (
               <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <PlayingBars playing={playing} size={20} />
+                <PlayingBars playing={playing} size={16} />
               </div>
             )}
           </div>
-        ) : showAsCurrent ? (
-          <div className="num">
-            <PlayingBars playing={playing} />
-          </div>
-        ) : (
-          <div className="num body-medium muted">{song.track ?? ''}</div>
         )}
         <div className="text">
           <div className="title body-large ellipsis">{song.title}</div>
-          <div className="body-small muted ellipsis">{note ?? [song.artist, showCover ? song.album : undefined].filter(Boolean).join(' · ')}</div>
+          <div className="body-small muted ellipsis">{note ?? song.artist}</div>
         </div>
+        {showCover && (
+          <div className="album-col ellipsis">
+            {song.album && (onOpenAlbum && song.albumId ? (
+              <a href={`/album/${song.albumId}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenAlbum(song.albumId!) }}>{song.album}</a>
+            ) : song.album)}
+          </div>
+        )}
         {saved && (
           <span
             title="Saved. Tap to see where"
@@ -284,8 +346,8 @@ export function SongRow({ song, onClick, isCurrent, showCover, onOpenAlbum, onRe
             <Icon name="check_circle" filled size={20} style={{ color: 'var(--primary)' }} />
           </span>
         )}
-        <span className="body-small muted">{formatDuration(song.duration)}</span>
-        <IconButton icon="more_vert" label="More" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())} />
+        <span className="dur body-small">{formatDuration(song.duration)}</span>
+        <IconButton icon="more_horiz" label="More" className="row-more" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())} />
       </div>
       {menu && <Menu items={items} anchor={menu} onClose={() => setMenu(null)} />}
       {sharing && <ShareSongSheet song={song} onClose={() => setSharing(false)} />}
@@ -394,7 +456,10 @@ export function AddToPlaylistSheet({ song, onClose }: { song: Song; onClose: () 
     }
     if (failed.length) toast(`Couldn't change ${failed.join(', ')}`)
     else if (changed > 0) toast('Saved')
-    if (changed > 0) useMyPlaylists.getState().refresh()
+    if (changed > 0) {
+      useMyPlaylists.getState().refresh()
+      for (const p of playlists ?? []) playlistChanged(p.id)
+    }
     onClose()
   }
 
@@ -449,6 +514,7 @@ export function AddToPlaylistSheet({ song, onClose }: { song: Song; onClose: () 
           onConfirm={async (name) => {
             try {
               const created = await subsonic.createPlaylist(name, song.id)
+              playlistChanged()
               // It's made with the song already in it: show it ticked.
               setPlaylists((l) => [{ ...created, entry: [song], songCount: 1 }, ...(l ?? [])])
               setChecked((c) => ({ ...c, [created.id]: true }))
@@ -479,16 +545,15 @@ export async function startStation(kind: 'song' | 'album' | 'composer' | 'singer
   }
 }
 
-/** A row of big play and shuffle buttons with a like heart, as on movie and playlist pages. */
+/** Under a page's header: the big play button, shuffle, then the page's own buttons (like, more). */
 export function PlayShuffleRow({ onPlay, onShuffle, children }: { onPlay: () => void; onShuffle?: () => void; children?: ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', padding: '8px 16px', gap: 4 }}>
-      {children}
-      <div style={{ flex: 1 }} />
-      {onShuffle && <IconButton icon="shuffle" label="Shuffle" onClick={onShuffle} size={28} className="big" />}
+    <div className="hero-bar">
       <button className="fab-play" aria-label="Play" onClick={onPlay}>
         <Icon name="play_arrow" filled />
       </button>
+      {onShuffle && <IconButton icon="shuffle" label="Shuffle" onClick={onShuffle} size={30} className="big" />}
+      {children}
     </div>
   )
 }

@@ -65,12 +65,13 @@ export function MixCover({ mix, size = 150, fill }: { mix: Mix; size?: number; f
       {pastel ? (
         <Cover
           coverArt={mix.covers[0]}
+          fallbacks={mix.covers.slice(1)}
           size={300}
           round={mix.round}
           corner={size / 16}
           style={{
-            position: 'absolute', left: '50%', top: '50%', transform: `translate(-50%, ${tiny ? '-50%' : 'calc(-50% - 8%)'})`,
-            width: `${tiny ? 72 : 56}%`, height: `${tiny ? 72 : 56}%`,
+            position: 'absolute', left: '50%', top: tiny ? '50%' : '44%', transform: 'translate(-50%, -50%)',
+            width: `${tiny ? 72 : 48}%`, height: `${tiny ? 72 : 48}%`, boxShadow: '0 6px 18px rgba(0,0,0,0.25)',
           }}
         />
       ) : gradient ? null : mix.covers.length >= 4 ? (

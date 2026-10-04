@@ -2,6 +2,7 @@ package io.github.devasenan134.jukebox.server
 
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.createApplicationPlugin
 import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
@@ -25,6 +26,8 @@ import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondFile
 import io.ktor.server.routing.delete
@@ -146,6 +149,18 @@ fun Application.jukeboxServer(
 
     install(ContentNegotiation) { json(eventJson) }
     install(CallLogging)
+    // A few page addresses are also API addresses (/search). A browser opening the page asks for HTML and sends
+    // no session token; the apps ask for JSON with one. So a browser gets the web app there, the apps the API.
+    config.webDir?.let { dir ->
+        val index = File(dir, "index.html")
+        install(createApplicationPlugin("WebPagesSharedWithApi") {
+            onCall { call ->
+                if (call.request.httpMethod == HttpMethod.Get && call.request.path() in WEB_PAGES_SHARED_WITH_API && index.isFile &&
+                    call.request.headers[HttpHeaders.Accept].orEmpty().contains("text/html") && call.request.headers[HttpHeaders.Authorization] == null
+                ) call.respondFile(index)
+            }
+        })
+    }
     // Lists of albums and people are large JSON; squeezed, they reach the tunnel (and you) several times sooner.
     // Audio and pictures are already compressed and go as they are.
     install(Compression) {
@@ -541,3 +556,6 @@ class RateLimiter(private val maxPerMinute: Int) {
         if (recent.size > maxPerMinute) throw ApiError(HttpStatusCode.TooManyRequests, "Too many attempts, try again in a minute")
     }
 }
+
+/** Pages of the web app whose address is also an API route (the API answers when a session token is sent). */
+private val WEB_PAGES_SHARED_WITH_API = listOf("/search")
