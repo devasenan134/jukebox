@@ -380,3 +380,10 @@ useListen.setState({
     void requestSong(songToRef(song), playNow).then((m) => toast(m))
   },
 })
+
+/** Chats with something new, plus friend requests waiting: the number on the Friends tab. */
+export function useFriendsBadge() {
+  const chats = useSocial((s) => s.conversations.filter((c) => c.unread > 0).length)
+  const requests = useSocial((s) => s.requests.incoming.length)
+  return chats + requests
+}

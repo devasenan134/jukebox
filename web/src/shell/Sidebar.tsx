@@ -3,6 +3,7 @@ import { useEntryState, useLibraryEntries, useLibraryFilter, useNewPlaylist } fr
 import { PlayingBars } from '../ui/components'
 import { Icon, IconButton } from '../ui/kit'
 import { useNav } from '../ui/nav'
+import { useFriendsBadge } from '../social/social'
 
 /** Wide screens: Home and Search at the top, Your Library always in view below (like a desktop music app). */
 export function Sidebar() {
@@ -11,16 +12,19 @@ export function Sidebar() {
   const { entries, empty, hint } = useLibraryEntries(filter)
   const newPlaylist = useNewPlaylist()
   const state = useEntryState()
+  const badge = useFriendsBadge()
   return (
     <aside className="sidebar">
       <nav className="panel side-nav">
         {[
           { to: '/', label: 'Home', icon: 'home' },
           { to: '/search', label: 'Search', icon: 'search' },
+          { to: '/friends', label: 'Friends', icon: 'group' },
         ].map((l) => (
           <NavLink key={l.to} to={l.to} end={l.to === '/'} className={({ isActive }) => `side-link${isActive ? ' selected' : ''}`}>
             <Icon name={l.icon} size={26} />
             {l.label}
+            {l.to === '/friends' && badge > 0 && <span className="badge" style={{ position: 'static', marginLeft: 'auto' }}>{badge}</span>}
           </NavLink>
         ))}
       </nav>

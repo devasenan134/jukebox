@@ -1,15 +1,15 @@
-"""A stand-in for Navidrome's sign-in check, for testing Jukebox locally: user "tester", password "secret"."""
+"""A stand-in for Navidrome's sign-in check, for testing Jukebox locally: users "tester" and "friend", password "secret"."""
 import hashlib, json, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
-USER, PASSWORD = "tester", "secret"
+USERS, PASSWORD = {"tester", "friend"}, "secret"
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
-        good = q.get("u") == USER and q.get("t") == hashlib.md5((PASSWORD + q.get("s", "")).encode()).hexdigest()
+        good = q.get("u") in USERS and q.get("t") == hashlib.md5((PASSWORD + q.get("s", "")).encode()).hexdigest()
         body = {"subsonic-response": {"status": "ok", "version": "1.16.1"} if good else
                 {"status": "failed", "version": "1.16.1", "error": {"code": 40, "message": "Wrong username or password"}}}
         data = json.dumps(body).encode()

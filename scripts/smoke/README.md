@@ -11,3 +11,10 @@ PORT=8195 DB_PATH=/tmp/jb/jukebox.db NAVIDROME_URL=http://127.0.0.1:4599 LIBRARI
   WEB_DIR=web/dist FINGERPRINTS=off server/build/install/jukebox/bin/jukebox &
 uv run --with playwright python scripts/smoke/smoke.py http://127.0.0.1:8195 /tmp/jb/shots
 ```
+
+`friends.py` signs two people in (users `tester` and `friend`) in two browsers: they become friends, chat
+(messages arrive live), and listen together (both players end up on the same song).
+
+```bash
+uv run --with playwright python scripts/smoke/friends.py http://127.0.0.1:8195 /tmp/jb/friends
+```

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { queryClient } from '../state/queries'
+import { logoutSocial } from '../social/social'
 import { useLikes } from '../state/likes'
 import { useMixes } from '../state/library'
 import { credentialsFor, subsonic } from '../api/subsonic'
@@ -19,6 +20,7 @@ export function LoginScreen() {
   const navigate = useNavigate()
   // Signed out: forget everything the last account loaded, and start the next one on Home.
   useEffect(() => {
+    void logoutSocial()
     queryClient.clear()
     useLikes.getState().clear()
     useMixes.setState({ home: null, followed: [] })

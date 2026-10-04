@@ -318,6 +318,14 @@ export function seekTo(ms: number) {
   if (locked()) return
   audio.currentTime = ms / 1000
   updatePositionState()
+  seekListeners.forEach((f) => f())
+}
+
+/** Seeks made here (not by a jam's owner): the listen-together code passes them on. */
+const seekListeners = new Set<() => void>()
+export function onSeek(f: () => void) {
+  seekListeners.add(f)
+  return () => seekListeners.delete(f)
 }
 
 /** Plays the entry at play-order position pos. */

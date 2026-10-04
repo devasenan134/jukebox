@@ -4,3 +4,8 @@ Copyright 2026 devasenan134
 This product includes software developed as Isaipetti (https://github.com/devasenan134/isaipetti),
 licensed under the Apache License 2.0. The server started from Isaipetti's companion server at commit
 f85d9b6.
+
+The web app bundles these fonts:
+- Material Symbols Rounded, by Google, Apache License 2.0 (web/public/fonts, a subset made by web/scripts/icons.py)
+- Figtree, by Erik Kennedy, SIL Open Font License 1.1 (@fontsource-variable/figtree)
+- Noto Sans Tamil, by Google, SIL Open Font License 1.1 (@fontsource/noto-sans-tamil)

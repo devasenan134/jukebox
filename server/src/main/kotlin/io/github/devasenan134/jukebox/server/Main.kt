@@ -161,6 +161,10 @@ fun Application.jukeboxServer(
         val index = File(dir, "index.html")
         install(createApplicationPlugin("WebPagesSharedWithApi") {
             onCall { call ->
+                // The web app's built files have their content's hash in the name: browsers can keep them for good.
+                val path = call.request.path()
+                if (path.startsWith("/assets/")) call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=31536000, immutable")
+                else if (path.startsWith("/fonts/")) call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=604800")
                 if (call.request.httpMethod == HttpMethod.Get && call.request.path() in WEB_PAGES_SHARED_WITH_API && index.isFile &&
                     call.request.headers[HttpHeaders.Accept].orEmpty().contains("text/html") && call.request.headers[HttpHeaders.Authorization] == null
                 ) call.respondFile(index)

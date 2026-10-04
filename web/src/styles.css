@@ -41,9 +41,18 @@
   --mini-height: 64px;
   --sidebar-width: 300px;
   --player-height: 84px;
-  --display: 'Figtree', 'Noto Sans Tamil', system-ui, sans-serif;
-  --body: 'Figtree', 'Noto Sans Tamil', system-ui, sans-serif;
+  --display: 'Figtree Variable', 'Noto Sans Tamil', system-ui, sans-serif;
+  --body: 'Figtree Variable', 'Noto Sans Tamil', system-ui, sans-serif;
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* The icons, served by Jukebox: only the ones the app uses (web/scripts/icons.py makes the file). */
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
 }
 
 * {
@@ -1450,4 +1459,18 @@ a.nav-item:hover {
 .grid > .card {
   content-visibility: auto;
   contain-intrinsic-size: auto 240px;
+}
+
+/* Chat: the reply and react buttons next to a message show on hover (always on touch screens). */
+.bubble-tools {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.bubble-row:hover .bubble-tools {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bubble-tools {
+    display: none !important;
+  }
 }

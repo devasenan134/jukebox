@@ -14,6 +14,10 @@ import { NowPlaying } from './screens/NowPlaying'
 import { SearchScreen } from './screens/SearchScreen'
 import { LibraryScreen } from './screens/LibraryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { FriendsScreen } from './screens/FriendsScreen'
+import { ChatScreen } from './screens/ChatScreen'
+import { startSocial, useFriendsBadge } from './social/social'
+import { startJamSync } from './social/jamSync'
 import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistScreens'
 import { useLikes } from './state/likes'
 import { useMixes, useMyPlaylists } from './state/library'
@@ -26,6 +30,7 @@ const TABS = [
   { label: 'Home', path: '/', icon: 'home' },
   { label: 'Search', path: '/search', icon: 'search' },
   { label: 'Your Library', path: '/library', icon: 'library_music' },
+  { label: 'Friends', path: '/friends', icon: 'group' },
 ]
 
 export default function App() {
@@ -41,6 +46,7 @@ export default function App() {
 
 function Main() {
   const open = usePlayerOpen((s) => s.open)
+  const friendsBadge = useFriendsBadge()
   const location = useLocation()
   const navigationType = useNavigationType()
   // Where each page was scrolled to: Back returns to the same place, a new page starts at the top.
@@ -56,6 +62,8 @@ function Main() {
     const s = useSession.getState()
     const ready = s.social || !s.credentials ? Promise.resolve() : signInToSocial(s.credentials)
     ready.then(() => {
+      startSocial()
+      startJamSync()
       useLikes.getState().refresh()
       useMyPlaylists.getState().refresh()
       useMixes.getState().refresh()
@@ -78,6 +86,8 @@ function Main() {
           <Route path="/playlist/:id" element={<PlaylistScreen />} />
           <Route path="/mix/:id" element={<MixScreen />} />
           <Route path="/settings" element={<SettingsScreen />} />
+          <Route path="/friends" element={<FriendsScreen />} />
+          <Route path="/chat/:id" element={<ChatScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
         </ErrorBoundary>
@@ -96,7 +106,10 @@ function Main() {
       <nav className="bottom-nav">
         {TABS.map((t) => (
           <NavLink key={t.path} to={t.path} end={t.path === '/'} className={({ isActive }) => `nav-item${isActive ? ' selected' : ''}`}>
-            <span className="pill"><Icon name={t.icon} size={26} /></span>
+            <span className="pill">
+              <Icon name={t.icon} size={26} />
+              {t.path === '/friends' && friendsBadge > 0 && <span className="badge">{friendsBadge}</span>}
+            </span>
             <span>{t.label}</span>
           </NavLink>
         ))}
@@ -109,3 +122,4 @@ function Main() {
     </div>
   )
 }
+
