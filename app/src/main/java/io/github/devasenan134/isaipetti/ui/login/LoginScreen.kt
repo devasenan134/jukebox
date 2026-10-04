@@ -10,7 +10,11 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -39,17 +43,22 @@ import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.PasswordStrength
 import kotlinx.coroutines.launch
 
+/** The server the app uses unless you change it under "Additional settings" (if you run your own). */
+const val DEFAULT_SERVER = "jukebox.craftingtable.cc"
+
 /**
- * Log in with an existing Navidrome account, or sign up with an invite code from a friend.
- * No server addresses are built into the app: whoever runs the servers tells friends what to type.
+ * Log in, or sign up with an invite code from a friend. The app connects to [DEFAULT_SERVER]; someone running
+ * their own server types its address under "Additional settings". Jukebox serves music and friends at one
+ * address; a separate friends server can still be given for the older two-server setup.
  */
 @Composable
 fun LoginScreen() {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     var signingUp by rememberSaveable { mutableStateOf(false) }
-    var server by rememberSaveable { mutableStateOf("") }
+    var server by rememberSaveable { mutableStateOf(DEFAULT_SERVER) }
     var friendsServer by rememberSaveable { mutableStateOf("") }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var inviteCode by rememberSaveable { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
     var displayName by rememberSaveable { mutableStateOf("") }
@@ -62,11 +71,12 @@ fun LoginScreen() {
         error = null
         scope.launch {
             try {
-                val social = friendsServer.takeIf { it.isNotBlank() }?.let(SubsonicApi::normalizeServer)
+                // One server does both (Jukebox), unless a separate friends server was given.
+                val social = SubsonicApi.normalizeServer(friendsServer.ifBlank { server })
                 val credentials = SubsonicApi.credentialsFor(server, username, password).copy(socialServer = social)
                 if (signingUp) {
-                    // The friends server creates the Navidrome account, then we log in to both.
-                    val response = app.social.apiFor(social!!).signup(inviteCode, username.trim(), password, displayName.trim())
+                    // The server makes the account, then we log in.
+                    val response = app.social.apiFor(social).signup(inviteCode, username.trim(), password, displayName.trim())
                     app.session.saveSocial(SocialSession(response.sessionToken, response.user))
                 }
                 app.api.ping(credentials) // checks the server address and password
@@ -83,7 +93,7 @@ fun LoginScreen() {
     // New accounts must pass the password rules; logging in accepts whatever password you already have.
     val passwordCheck = if (signingUp && password.isNotEmpty()) PasswordRules.check(password, username) else null
     val canSubmit = !busy && server.isNotBlank() && username.isNotBlank() && password.isNotEmpty() &&
-        (!signingUp || (friendsServer.isNotBlank() && inviteCode.isNotBlank() && passwordCheck?.problem == null))
+        (!signingUp || (inviteCode.isNotBlank() && passwordCheck?.problem == null))
 
     Surface(Modifier.fillMaxSize()) {
         Column(
@@ -96,20 +106,6 @@ fun LoginScreen() {
             val reason by app.session.logoutReason.collectAsStateWithLifecycle()
             reason?.let { Text(it, color = MaterialTheme.colorScheme.tertiary, textAlign = TextAlign.Center) }
 
-            OutlinedTextField(
-                value = server, onValueChange = { server = it.trim() }, label = { Text("Music server") },
-                placeholder = { Text("music.example.com") },
-                singleLine = true, modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            )
-            OutlinedTextField(
-                value = friendsServer, onValueChange = { friendsServer = it.trim() },
-                label = { Text(if (signingUp) "Friends server" else "Friends server (optional)") },
-                placeholder = { Text("friends.example.com") },
-                supportingText = { Text("For friends, chat, listening together and mixes. Ask whoever invited you") },
-                singleLine = true, modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            )
             if (signingUp) {
                 OutlinedTextField(
                     value = inviteCode, onValueChange = { inviteCode = it.uppercase() }, label = { Text("Invite code") },
@@ -147,6 +143,41 @@ fun LoginScreen() {
                 error = null
             }) {
                 Text(if (signingUp) "Already have an account? Log in" else "Got an invite code? Sign up")
+            }
+
+            // Where the app connects. Only someone running their own server needs to change it.
+            TextButton(onClick = { showSettings = !showSettings }) {
+                Text("Additional settings")
+                Icon(
+                    if (showSettings) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (showSettings) "Hide" else "Show",
+                )
+            }
+            if (!showSettings) {
+                Text(
+                    "Server: ${server.ifBlank { DEFAULT_SERVER }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                OutlinedTextField(
+                    value = server, onValueChange = { server = it.trim() }, label = { Text("Server") },
+                    placeholder = { Text(DEFAULT_SERVER) },
+                    supportingText = { Text("Running your own Jukebox? Type its address") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                )
+                OutlinedTextField(
+                    value = friendsServer, onValueChange = { friendsServer = it.trim() },
+                    label = { Text("Friends server (optional)") },
+                    placeholder = { Text("Same as the server") },
+                    supportingText = { Text("Only if friends and chat run at a different address") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                )
+                if (server != DEFAULT_SERVER || friendsServer.isNotEmpty()) {
+                    TextButton(onClick = { server = DEFAULT_SERVER; friendsServer = "" }) { Text("Use $DEFAULT_SERVER") }
+                }
             }
         }
     }
