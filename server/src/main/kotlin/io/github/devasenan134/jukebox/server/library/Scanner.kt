@@ -106,6 +106,8 @@ class Scanner(
         val present = found.mapTo(HashSet()) { it.path }
         val gone = known.values.filter { it.path !in present }.toMutableList()
         val folderCovers = HashMap<String, String?>()
+        // Albums whose composers this scan has started over (they're read again from the files that changed).
+        val recredited = HashSet<String>()
         var added = 0
         var updated = 0
         var moved = 0
@@ -115,7 +117,7 @@ class Scanner(
             val existing = known[f.path]
             val movedFrom = if (existing == null) movedFile(f, p, gone)?.also { gone.remove(it); moved++ } else null
             runCatching {
-                db.tx { save(library, libId, f, p, existing ?: movedFrom, folderCovers) }
+                db.tx { save(library, libId, f, p, existing ?: movedFrom, folderCovers, recredited) }
             }.onFailure { log.warn("Couldn't add {}", f.path, it); unreadable++ }
                 .onSuccess { if (existing != null) updated++ else if (movedFrom == null) added++ }
         }
@@ -148,7 +150,9 @@ class Scanner(
     }
 
     /** Writes one file into the catalog: its recording, album, release, track, people, lyrics and cover. */
-    private fun Connection.save(library: LibraryDef, libId: Long, f: Found, p: Probed, existing: Known?, folderCovers: HashMap<String, String?>) {
+    private fun Connection.save(
+        library: LibraryDef, libId: Long, f: Found, p: Probed, existing: Known?, folderCovers: HashMap<String, String?>, recredited: MutableSet<String>,
+    ) {
         val now = clock()
         val titleTag = p.tag("title") ?: f.file.nameWithoutExtension.replace(Regex("""^\d+(-\d+)?\s*-\s*"""), "")
         val (baseTitle, version) = Names.version(titleTag)
@@ -213,7 +217,11 @@ class Scanner(
         credit("recording_credits", "recording_id", recordingId, "singer", Names.people(p.tag("artist")))
         credit("recording_credits", "recording_id", recordingId, "composer", Names.people(p.tag("composer") ?: p.tag("album_artist")))
         credit("recording_credits", "recording_id", recordingId, "lyricist", Names.people(p.tag("lyricist", "writer")))
-        credit("album_credits", "album_id", albumId, "composer", Names.people(p.tag("album_artist", "composer")), replace = false)
+        // An album's composers come from its files' album artist tags. The first retagged file starts them over, so a
+        // retagged album loses the composers it no longer names (a new file only adds to them).
+        val albumComposers = Names.people(p.tag("album_artist", "composer"))
+        if (existing != null && albumComposers.isNotEmpty() && recredited.add(albumId)) update("DELETE FROM album_credits WHERE album_id = ? AND role = 'composer'", albumId)
+        credit("album_credits", "album_id", albumId, "composer", albumComposers, replace = false)
 
         // Cover: the folder's image, else the one in the file.
         val folder = f.file.parentFile?.path.orEmpty()

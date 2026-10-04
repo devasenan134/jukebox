@@ -61,10 +61,20 @@ object Names {
 
     /** The people named in a tag, in order, without repeats: "A, B & C" → [A, B, C]. */
     fun people(tag: String?): List<String> =
-        tag.orEmpty().split(separators).map { it.trim().trim('-', ',').trim() }.filter { it.length > 1 && it.lowercase() !in notPeople }
+        tag.orEmpty().split(separators).map { person(it) }.filter { it.length > 1 && it.lowercase().replace(".", " ").trim() !in notPeople }
             .distinctBy { Fuzzy.key(it) }
 
-    private val notPeople = setOf("various artists", "various", "unknown", "unknown artist", "[unknown artist]")
+    private val chorus = Regex("""\s+(chorus|group)$""", RegexOption.IGNORE_CASE)
+    private val initialsTail = Regex("""\s*\((traditional|[A-Z0-9]{2,6})\)$""")
+
+    /** A name without what isn't part of it: "K J Yesudas Chorus" → "K J Yesudas", "Aaryan Dinesh (ADK)" → "Aaryan Dinesh". */
+    private fun person(raw: String): String =
+        raw.trim().trim('-', ',').trim().replace(initialsTail, "").replace(chorus, "").trim()
+
+    private val notPeople = setOf(
+        "various artists", "various artiste", "various", "unknown", "unknown artist", "[unknown artist]", "n a", "na",
+        "chorus", "kids", "group", "traditional", "others",
+    )
 
     /** One key for a person however the name is spelled ("M.S. Viswanathan" = "M. S. Viswanathan"). */
     fun personKey(name: String) = Fuzzy.key(name.replace(".", " "))
