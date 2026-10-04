@@ -22,7 +22,7 @@ android {
         versionName = "0.12.0"
 
         // Where the app looks for new versions (GitHub Releases).
-        buildConfigField("String", "GITHUB_REPO", "\"${privateSetting("ISAIPETTI_GITHUB_REPO") ?: "devasenan134/isaipetti"}\"")
+        buildConfigField("String", "GITHUB_REPO", "\"${privateSetting("ISAIPETTI_GITHUB_REPO") ?: "devasenan134/jukebox"}\"")
     }
 
     signingConfigs {

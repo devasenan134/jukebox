@@ -10,6 +10,6 @@ Milestones in the order they're built. Each one leaves the app working.
 | 3 | Realtime gateway | One WebSocket per device: presence, playback state across devices, jam, notifications; the social module behind a setting | |
 | 4 | Jukebox API v2 | Albums with film details, people, lyrics search in the API; the app and web app move to it; Navidrome is switched off | |
 | 5 | Data plane | Mobile-quality copies made ahead of time, prefetch, offline downloads | |
-| 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, the Android app and web app in this repo, APK releases | |
+| 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, APK releases (the Android app and web app are in this repo already) | |
 | – | Engine | The recommendation engine in its own repository, following the event stream | Later |
 

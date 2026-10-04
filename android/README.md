@@ -1,14 +1,14 @@
-# Part 3: the Isaipetti Android app
+# The Android app
 
-Kotlin with Jetpack Compose and Media3. The app has **no server addresses or Firebase settings built in**: people type their music server and friends server when they log in, and the friends server provides its Firebase settings for notifications. Any build of this app works with anyone's servers.
+Kotlin with Jetpack Compose and Media3. The app connects to `jukebox.craftingtable.cc` unless you change the
+server under **Additional settings** on the login screen, so it works with anyone's Jukebox. Firebase settings
+for notifications come from the server; none are built in.
 
 ## Install (for friends)
 
 1. Download the newest `isaipetti-<version>.apk` from the repository's [Releases](../../../releases) and open it on your phone. Allow installing from your browser or file manager when Android asks.
-2. Open Isaipetti and enter what the person who invited you sent:
-   - **Music server**, e.g. `music.example.com`
-   - **Friends server**, e.g. `friends.example.com`
-   - With an invite code, tap **Got an invite code? Sign up**. With an account, log in.
+2. Open the app and log in, or tap **Got an invite code? Sign up** with the code a friend sent you. Someone
+   running their own Jukebox types its address under **Additional settings** first.
 
 The app checks Releases for new versions and offers to install them (*Settings → App version* checks manually). The first time, Android asks you to allow Isaipetti to install apps.
 
