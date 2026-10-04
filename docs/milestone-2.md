@@ -71,7 +71,7 @@ Your Library (liked songs, playlists, albums, people), like buttons, playlists (
 remove), Recently played and Home mixes once the mix maker runs on Jukebox, built screen by screen to match
 the Android app, with the smoke test (`scripts/smoke`) growing with each screen.
 
-Done (2026-10-04): Home, Search, Your Library, Liked songs, playlists, mixes, albums and people, the player,
+Done (2026-10-03): Home, Search, Your Library, Liked songs, playlists, mixes, albums and people, the player,
 Settings (profile, password, invites, devices), Friends, chat (songs, pictures, voice notes, replies,
 reactions, edits) and listening together. The look is a dark music app (headers coloured by the cover).
 Not yet on the website: voice recording, GIFs and stickers, pins, forwarding, group settings, admin stats,
