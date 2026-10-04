@@ -80,6 +80,18 @@ def similarity(a, b):
     return 1.0 - prev[len(b)] / max(len(a), len(b))
 
 
+def vowel_typo(a, b):
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(diff) == 1 and a[diff[0]] in "aeiou" and b[diff[0]] in "aeiou"
+    long, short = (a, b) if len(a) > len(b) else (b, a)
+    return any(long[i] in "aeiou" and long[:i] + long[i + 1:] == short for i in range(len(long)))
+
+
 def parts(name):
     ws = words(name)
     return "".join(w for w in ws if len(w) == 1), [w for w in ws if len(w) > 1]
@@ -102,6 +114,10 @@ def alike(a, b):
         return letters[0] == letters[1]
     if ia and ib and ia != ib and not (set(ia) <= set(ib) or set(ib) <= set(ia)):
         return False
+    if len(wa) == len(wb) == 1 and not ia and not ib:
+        # One bare word: one vowel changed, added or dropped at most (Ilaiyaraaja / Ilayaraja), never a consonant
+        # (Hariharan / Haricharan, Mano / Manoj).
+        return vowel_typo(wa[0], wb[0])
     if len(wa) == len(wb):
         sa, sb = sorted(wa), sorted(wb)
         if all(similarity(x, y) >= 0.75 for x, y in zip(sa, sb)):
@@ -109,8 +125,12 @@ def alike(a, b):
         return similarity("".join(wa), "".join(wb)) >= 0.85
     # One name has more full words ("Ghibran" / "Mohamaad Ghibran"): the shorter one's words must all be in the
     # longer one, and be the longest word there (a surname or the name people use, not a stray initial).
-    short, long = (wa, wb) if len(wa) < len(wb) else (wb, wa)
-    return all(any(similarity(x, y) >= 0.8 for y in long) for x in short) and max(len(x) for x in short) >= 5
+    # Nearly exact words only ("Thaman S" is not "Anthony Daasan"), and the shorter one's initials must be the
+    # longer one's initials or the first letters of its other words.
+    (si, short), (li, long) = ((ia, wa), (ib, wb)) if len(wa) < len(wb) else ((ib, wb), (ia, wa))
+    if not set(si) <= set(li) | {w[0] for w in long}:
+        return False
+    return all(any(similarity(x, y) >= 0.9 for y in long) for x in short) and max(len(x) for x in short) >= 5
 
 
 # Names that aren't a person (or not one we can tell): never credited.
