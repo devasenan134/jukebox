@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { Artist } from '../api/types'
-import { isComposer } from '../api/types'
+import { isComposer, mixSongToSong } from '../api/types'
+import { social } from '../api/social'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { AlbumCard, PlayShuffleRow, ScreenHeader, SectionTitle, songCount, SongRow, startStation, useLoad } from '../ui/components'
@@ -91,6 +92,51 @@ export function ArtistScreen() {
           <div className="grid">
             {albums.map((a) => (
               <AlbumCard key={a.id} album={a} onClick={() => nav.openAlbum(a.id)} />
+            ))}
+          </div>
+        </>
+      )}
+    </Collection>
+  )
+}
+
+/** A lyricist or actor (from search): the films they wrote for or acted in, then their songs (ui/library/PersonScreen.kt). */
+export function PersonScreen() {
+  const { id = '' } = useParams()
+  const nav = useNav()
+  const data = useLoad(['person', id], () => social.person(id))
+  if (data.loading && !data.data) return <PageSkeleton />
+  if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
+  const { person, movies, songs: hits } = data.data!
+  const songs = hits.map(mixSongToSong)
+  const source = `person:${person.id}`
+  const role = person.roles.includes('lyricist') ? 'Lyricist' : person.roles.includes('actor') ? 'Actor' : 'Artist'
+  return (
+    <Collection
+      art={<PersonAvatar name={person.name} size={232} />}
+      round
+      kind={role}
+      title={person.name}
+      meta={<Meta parts={[movies.length > 0 && `${movies.length} films`, songCount(songs.length)]} />}
+    >
+      {songs.length > 0 && <PlayShuffleRow onPlay={() => player.play(songs, 0, false, source)} onShuffle={() => player.play(songs, 0, true, source)} />}
+      {movies.length > 0 && (
+        <>
+          <SectionTitle>Films</SectionTitle>
+          <div className="row-scroll">
+            {movies.map((m) => (
+              <AlbumCard key={m.id} album={{ id: m.id, name: m.name, year: m.year, artist: m.composer, coverArt: m.coverArt, songCount: m.songCount, duration: 0 }} onClick={() => nav.openAlbum(m.id)} className="tile" />
+            ))}
+          </div>
+        </>
+      )}
+      {songs.length > 0 && (
+        <>
+          <SectionTitle>Songs</SectionTitle>
+          <div className="tracks">
+            <TrackHead />
+            {songs.map((s, i) => (
+              <SongRow key={s.id} song={s} index={i} showCover onOpenAlbum={nav.openAlbum} onClick={() => player.play(songs, i, false, source)} />
             ))}
           </div>
         </>

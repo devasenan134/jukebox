@@ -7,7 +7,7 @@ import { Sidebar } from './shell/Sidebar'
 import * as player from './player/player'
 import { AlbumScreen } from './screens/AlbumScreen'
 import { AlbumsScreen } from './screens/AlbumsScreen'
-import { ArtistScreen, ArtistsScreen } from './screens/ArtistScreens'
+import { ArtistScreen, ArtistsScreen, PersonScreen } from './screens/ArtistScreens'
 import { HomeScreen } from './screens/HomeScreen'
 import { LoginScreen } from './screens/LoginScreen'
 import { NowPlaying } from './screens/NowPlaying'
@@ -81,6 +81,7 @@ function Main() {
           <Route path="/artists" element={<ArtistsScreen />} />
           <Route path="/artist/:id" element={<ArtistScreen />} />
           <Route path="/singer/:id" element={<ArtistScreen />} />
+          <Route path="/person/:id" element={<PersonScreen />} />
           <Route path="/library" element={<LibraryScreen />} />
           <Route path="/liked" element={<LikedSongsScreen />} />
           <Route path="/playlist/:id" element={<PlaylistScreen />} />
