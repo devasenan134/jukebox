@@ -56,6 +56,7 @@ class ImporterTest {
             "CREATE TABLE scrobbles (user_id TEXT, media_file_id TEXT, submission_time INT)",
             "INSERT INTO user VALUES ('ndAliceAAAAAAAAAAAAAAA', 'alice', 'Alice', 'a@x', '${navidromePassword("alice-secret")}', 1, '2026-09-01 10:00:00')",
             "INSERT INTO user VALUES ('ndBobBBBBBBBBBBBBBBBBB', 'bob', 'Bob', '', '${navidromePassword("bob-secret")}', 0, '2026-09-01 10:00:00')",
+            "INSERT INTO user VALUES ('ndBotXXXXXXXXXXXXXXXXX', 'isaipetti-bot', 'Bot', '', '${navidromePassword("bot-secret")}', 1, '2026-09-01 10:00:00')",
             "INSERT INTO media_file VALUES ('ndSongKaarigaXXXXXXXXX', 'Airaa (2019)/01 - Kaariga.m4a', 'Kaariga', 'ndAlbumAiraaXXXXXXXXXX', 20, 0)",
             "INSERT INTO artist VALUES ('ndArtistSundaramXXXXXX', 'Sundaramurthy K.S.')",
             "INSERT INTO annotation VALUES ('ndBobBBBBBBBBBBBBBBBBB', 'ndSongKaarigaXXXXXXXXX', 'media_file', 3, '2026-09-20 08:00:00', 1, '2026-09-20 08:00:00')",
@@ -84,7 +85,7 @@ class ImporterTest {
         // (This social database has every Jukebox table, empty: the import must still never touch the catalog.)
         val importer = Importer(db, passwords)
         repeat(2) { // running it again gives the same result
-            val report = importer.run(nd, socialPath, null, data)
+            val report = importer.run(nd, socialPath, null, data, skipUsers = setOf("isaipetti-bot"))
             assertEquals(2, report.users)
             assertEquals(2, report.passwordsCarried)
             assertEquals(1, report.admins)
@@ -93,6 +94,8 @@ class ImporterTest {
         val signIn = SignIn(db, passwords, navidrome = null)
         assertTrue(signIn.checkPassword("bob", "bob-secret"), "Bob's Navidrome password works on Jukebox")
         assertTrue(signIn.checkPassword("alice", "alice-secret"))
+        // The old server's admin helper isn't a person: it isn't brought over.
+        assertEquals(null, db.tx { queryOne("SELECT id FROM users WHERE username = 'isaipetti-bot'") { it.getLong(1) } })
         db.tx {
             // Social ids are kept; Bob is still signed in; Alice is an admin.
             assertEquals("Bobby", queryOne("SELECT display_name FROM users WHERE id = 7") { it.getString(1) })

@@ -52,6 +52,8 @@ class Importer(private val db: Db, private val passwords: Passwords) {
     suspend fun run(
         navidromeDb: String, socialDb: String, socialData: File?, jukeboxData: File, oldNavidromeDbs: List<String> = emptyList(),
         artworkDir: File = File(jukeboxData, "artwork"),
+        /** Navidrome accounts that aren't people (the old server's admin helper): not brought over. */
+        skipUsers: Set<String> = emptySet(),
     ): ImportReport {
         // Pictures people gave their playlists, which Navidrome keeps next to its database.
         val playlistPictures = File(File(navidromeDb).absoluteFile.parentFile, "artwork/playlist")
@@ -59,7 +61,7 @@ class Importer(private val db: Db, private val passwords: Passwords) {
         val social = DriverManager.getConnection("jdbc:sqlite:file:$socialDb?mode=ro")
         val old = oldNavidromeDbs.map { DriverManager.getConnection("jdbc:sqlite:file:$it?mode=ro") }
         try {
-            val report = db.tx { import(nd, social, old, playlistPictures, artworkDir) }
+            val report = db.tx { import(nd, social, old, playlistPictures, artworkDir, skipUsers.map { it.lowercase() }.toSet()) }
             val files = socialData?.let { copyFiles(it, jukeboxData) } ?: 0
             return report.copy(files = files).also { log.info("Import: {}", it) }
         } finally {
@@ -69,7 +71,7 @@ class Importer(private val db: Db, private val passwords: Passwords) {
         }
     }
 
-    private fun Connection.import(nd: Connection, social: Connection, old: List<Connection>, playlistPictures: File, artworkDir: File): ImportReport {
+    private fun Connection.import(nd: Connection, social: Connection, old: List<Connection>, playlistPictures: File, artworkDir: File, skipUsers: Set<String>): ImportReport {
         // ---- what each Navidrome id became ----
         val byPath = query("SELECT path, recording_id FROM files") { it.getString(1) to it.getString(2) }.toMap()
         val byTitle = query("SELECT id, title_key, duration_ms FROM recordings WHERE merged_into IS NULL") { Triple(it.getString(1), it.getString(2), it.getLong(3)) }
@@ -139,6 +141,7 @@ class Importer(private val db: Db, private val passwords: Passwords) {
             listOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getBoolean(6), rs.getString(7))
         }.forEach { u ->
             val (ndId, userName, name, email, enc) = u.map { it as? String }
+            if (userName?.lowercase() in skipUsers) return@forEach
             val admin = u[5] as Boolean
             val id = queryOne("SELECT id FROM users WHERE navidrome_id = ?", ndId) { it.getLong(1) }
                 ?: queryOne("SELECT id FROM users WHERE username = ? COLLATE NOCASE", userName) { it.getLong(1) }

@@ -71,15 +71,18 @@ private const val MAX_BODY_BYTES = 1024 * 1024L
 fun main(args: Array<String>) {
     val config = Config.fromEnv()
     // jukebox import --navidrome <navidrome.db> --social <isaipetti-social.db> [--social-data <folder>] [--old-navidrome <db>]...
+    //                [--skip-user <navidrome username>]...
     if (args.firstOrNull() == "import") {
         fun arg(name: String) = args.indexOf(name).takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
         val navidromeDb = arg("--navidrome") ?: error("--navidrome <navidrome.db> is needed")
         val socialDb = arg("--social") ?: error("--social <isaipetti-social.db> is needed")
         val dataDir = File(config.dbPath).absoluteFile.parentFile
         val report = kotlinx.coroutines.runBlocking {
-            val old = args.withIndex().filter { it.value == "--old-navidrome" }.mapNotNull { args.getOrNull(it.index + 1) }
-            Importer(Db(config.dbPath), Passwords(File(dataDir, "secret.key")))
-                .run(navidromeDb, socialDb, arg("--social-data")?.let(::File), dataDir, old, File(config.artworkDir ?: File(dataDir, "artwork").path))
+            fun all(name: String) = args.withIndex().filter { it.value == name }.mapNotNull { args.getOrNull(it.index + 1) }
+            Importer(Db(config.dbPath), Passwords(File(dataDir, "secret.key"))).run(
+                navidromeDb, socialDb, arg("--social-data")?.let(::File), dataDir, all("--old-navidrome"),
+                File(config.artworkDir ?: File(dataDir, "artwork").path), skipUsers = all("--skip-user").toSet(),
+            )
         }
         println(eventJson.encodeToString(ImportReport.serializer(), report))
         return
