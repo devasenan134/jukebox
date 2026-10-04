@@ -16,6 +16,9 @@ stations, and (optionally) lets friends chat, share songs and listen together.
 | [`android/`](android/) | The Android app (Kotlin + Jetpack Compose); APKs are on [Releases](../../releases) |
 | [`analyzer/`](analyzer/) | The audio analyzer (optional): how each song sounds, for mood mixes and radio |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | How it's designed and why |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How it works today: the catalog, the analyzer, how mixes are made |
+| [`docs/web-parity.md`](docs/web-parity.md) | What the website does compared with the app |
+| [`ROADMAP.md`](ROADMAP.md) | Milestones, and what comes next |
 
 Coming next: `deploy/` with Docker Compose files for a standalone music server and for music + social. The
 recommendation engine will live in its own repository.
