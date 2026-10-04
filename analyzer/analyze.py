@@ -174,13 +174,17 @@ def normalize(v):
     return v / np.linalg.norm(v, axis=-1, keepdims=True).clip(min=1e-9)
 
 
+def prompts_current(db):
+    known = {key for (key,) in db.execute("SELECT key FROM prompts")}
+    stored_version = db.execute("SELECT value FROM meta WHERE key = 'prompts'").fetchone()
+    return known == set(PROMPTS) and stored_version and stored_version[0] == str(sorted((k, v) for k, v in PROMPTS.items()))
+
+
 def save_prompts(db, clap):
     """Recomputes the description embeddings when the list above changed."""
-    known = {key for (key,) in db.execute("SELECT key FROM prompts")}
-    wanted_version = str(sorted((k, v) for k, v in PROMPTS.items()))
-    stored_version = db.execute("SELECT value FROM meta WHERE key = 'prompts'").fetchone()
-    if known == set(PROMPTS) and stored_version and stored_version[0] == wanted_version:
+    if prompts_current(db):
         return
+    wanted_version = str(sorted((k, v) for k, v in PROMPTS.items()))
     db.execute("DELETE FROM prompts")
     for key, phrases in PROMPTS.items():
         db.execute("INSERT INTO prompts VALUES (?, ?)", (key, clap.text(phrases).astype(np.float32).tobytes()))
@@ -273,13 +277,34 @@ def forget_removed(db, songs):
         print(f"Forgot {len(gone)} songs that left the library", flush=True)
 
 
-def sync(db, clap):
+class LazyClap:
+    """The model is big (about 2 GB in memory): it's loaded only when there's something to listen to, and let
+    go after, so the analyzer takes little memory while it waits for new songs."""
+
+    def __init__(self):
+        self.clap = None
+
+    def get(self):
+        if self.clap is None:
+            self.clap = Clap()
+        return self.clap
+
+    def release(self):
+        if self.clap is not None:
+            self.clap = None
+            import gc
+            gc.collect()
+
+
+def sync(db, lazy):
+    if not prompts_current(db):
+        save_prompts(db, lazy.get())
     songs = jukebox_songs()
     forget_removed(db, songs)
     todo = pending(db, songs)
     if todo:
         print(f"Analyzing {len(todo)} new or changed songs", flush=True)
-        run(db, clap, todo)
+        run(db, lazy.get(), todo)
         db.execute("INSERT OR REPLACE INTO meta VALUES ('updated_at', ?)", (str(int(time.time() * 1000)),))
         db.commit()
     return len(todo)
@@ -369,21 +394,23 @@ def main():
     if command == "adopt":
         adopt(db, sys.argv[2], sys.argv[3])
         return
-    clap = Clap()
-    save_prompts(db, clap)
+    lazy = LazyClap()
     if command == "sample":
+        clap = lazy.get()
+        save_prompts(db, clap)
         count = int(sys.argv[2]) if len(sys.argv) > 2 else 60
         songs = jukebox_songs()
         picked = random.Random(42).sample(sorted(songs), min(count, len(songs)))
         run(db, clap, {sid: songs[sid] for sid in picked})
         report(db)
     elif command == "once":
-        sync(db, clap)
+        sync(db, lazy)
     else:
         print(f"Watching for new songs every {CHECK_MINUTES} minutes", flush=True)
         while not stopping:
             try:
-                sync(db, clap)
+                sync(db, lazy)
+                lazy.release()
             except Exception as e:
                 print(f"Check failed, trying again later: {e}", flush=True)
             for _ in range(CHECK_MINUTES * 60):

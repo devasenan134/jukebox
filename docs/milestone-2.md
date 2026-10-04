@@ -58,6 +58,9 @@ live servers, then run a last time at the switch-over.
 
 ## 6. The switch-over
 
+0. Done 2026-10-03: Jukebox's own analyzer (`analyzer/`) keys sound features by recording id and reads Jukebox's
+   catalog; it took over the Isaipetti analyzer's results (`adopt`, matched by path), so Navidrome isn't
+   needed for mixes. It runs beside the old one until the switch-over.
 1. Stop the old server and Navidrome's writes for a few minutes, run the last import.
 2. The Android app: Jukebox answers both of its addresses (the Subsonic API and the social API) on one
    server, including Navidrome's `/auth/login`, so the app's two addresses can both point at Jukebox. If that
