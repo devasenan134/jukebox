@@ -146,15 +146,20 @@ class JukeboxLibrary(
         val rhythm = FloatArray(songs.size) { Float.NaN }
         val prompts = HashMap<String, FloatArray>()
         withContext(Dispatchers.IO) {
-            // Navidrome song id -> position, through the path both keep for a file.
-            val byNavidromeId = navidromeDb?.takeIf { File(it).isFile }?.let { readOnly(it) { c ->
+            val features = featuresDb?.takeIf { File(it).isFile }
+            // Jukebox's analyzer keys songs by recording id; the Isaipetti one by Navidrome's song id, which is
+            // matched to a recording through the path both keep for a file.
+            val byRecording = features != null && readOnly(features) { c ->
+                runCatching { c.queryOne("SELECT value FROM meta WHERE key = 'ids'") { it.getString(1) } }.getOrNull() == "recording"
+            }
+            val position: Map<String, Int> = if (byRecording) snapshotIndex(songs) else navidromeDb?.takeIf { File(it).isFile }?.let { readOnly(it) { c ->
                 c.query("SELECT id, path FROM media_file WHERE missing = 0") { rs -> byPath[rs.getString(2)]?.let { rs.getString(1) to it } }
                     .filterNotNull().toMap()
             } }.orEmpty()
-            featuresDb?.takeIf { File(it).isFile && byNavidromeId.isNotEmpty() }?.let { path ->
+            features?.takeIf { position.isNotEmpty() }?.let { path ->
                 readOnly(path) { c ->
                     c.query("SELECT id, tempo, energy, embedding, rhythm FROM songs WHERE embedding IS NOT NULL") { rs ->
-                        val i = byNavidromeId[rs.getString(1)] ?: return@query
+                        val i = position[rs.getString(1)] ?: return@query
                         if (rs.getFloat(3) > -100f && rs.getFloat(2) > 0f) {
                             tempo[i] = rs.getFloat(2)
                             energy[i] = rs.getFloat(3)
@@ -168,6 +173,8 @@ class JukeboxLibrary(
         }
         return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm)
     }
+
+    private fun snapshotIndex(songs: List<LibrarySong>): Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }
 
     private fun featuresVersion(): String = featuresDb?.takeIf { File(it).isFile }?.let { path ->
         readOnly(path) { c -> c.queryOne("SELECT count(*), max(analyzed_at) FROM songs") { "${it.getInt(1)}-${it.getLong(2)}" } }

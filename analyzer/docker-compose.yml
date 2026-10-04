@@ -1,0 +1,18 @@
+# Jukebox's audio analyzer (optional): lets Jukebox make mood mixes and sound-alike radio.
+services:
+  jukebox-analyzer:
+    build: .
+    container_name: jukebox-analyzer
+    env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - JUKEBOX_DB=/jukebox/jukebox.db
+      - MUSIC_DIR=/music
+      - FEATURES_DB=/data/features.db
+    volumes:
+      - ${JUKEBOX_DATA}:/jukebox:ro       # Jukebox's data folder, to see which songs exist
+      - ${MUSIC_FOLDER}:/music:ro         # the same music folder Jukebox reads
+      - ${ANALYZER_DATA}:/data            # features.db (Jukebox reads it) and the model
+    cpus: ${ANALYZER_CPUS:-4}             # leaves room for Jukebox and everything else
+    mem_limit: 3g
+    restart: unless-stopped
