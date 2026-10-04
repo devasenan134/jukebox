@@ -8,6 +8,16 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## 0.12.1 (2026-10-04): One server address
+
+App only.
+
+### Improved
+- **One server address.** Jukebox serves music and friends at the same address, so **Additional settings** on the login screen has just one field now (no separate friends server), and Settings shows one **Server** line.
+- **Moved to Jukebox by itself.** If you logged in before Jukebox, the app saved the old music and friends addresses (musicnote and gamertags). It now switches them to jukebox.craftingtable.cc once when it starts. You stay logged in, with everything as it was.
+
+---
+
 ## 0.12.0 (2026-10-04): Jukebox, no server address to type
 
 App only. The server is now Jukebox, at jukebox.craftingtable.cc.

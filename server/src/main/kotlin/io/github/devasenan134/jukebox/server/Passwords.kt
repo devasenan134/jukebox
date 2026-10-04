@@ -63,7 +63,8 @@ class SignIn(private val db: Db, private val passwords: Passwords, private val n
     suspend fun checkToken(username: String, salt: String, token: String): Boolean {
         val stored = storedPassword(username)
         if (stored != null) return passwords.decrypt(stored)?.let { Passwords.same(Passwords.md5(it + salt), token.lowercase()) } == true
-        return navidrome?.checkLogin(username, salt, token) == true
+        // An account still in Navidrome (not imported). If Navidrome can't be reached, the answer is no, not an error.
+        return runCatching { navidrome?.checkLogin(username, salt, token) }.getOrNull() == true
     }
 
     suspend fun checkPassword(username: String, password: String): Boolean {

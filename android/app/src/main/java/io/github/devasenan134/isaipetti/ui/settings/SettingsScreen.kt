@@ -119,13 +119,11 @@ fun SettingsScreen(nav: Nav) {
                     Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                         Text(displayName, style = MaterialTheme.typography.titleLarge)
                         Text("@$username", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // One server does both now; older logins may still have two addresses saved.
+                        val music = credentials?.server?.removePrefix("https://").orEmpty()
+                        val friends = credentials?.socialServer?.removePrefix("https://")
                         Text(
-                            "Music: " + credentials?.server?.removePrefix("https://").orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            "Friends: " + (credentials?.socialServer?.removePrefix("https://") ?: "not set"),
+                            if (friends == null || friends == music) "Server: $music" else "Music: $music\nFriends: $friends",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -48,8 +48,7 @@ const val DEFAULT_SERVER = "jukebox.craftingtable.cc"
 
 /**
  * Log in, or sign up with an invite code from a friend. The app connects to [DEFAULT_SERVER]; someone running
- * their own server types its address under "Additional settings". Jukebox serves music and friends at one
- * address; a separate friends server can still be given for the older two-server setup.
+ * their own Jukebox types its address under "Additional settings". One address serves music and friends.
  */
 @Composable
 fun LoginScreen() {
@@ -57,7 +56,6 @@ fun LoginScreen() {
     val scope = rememberCoroutineScope()
     var signingUp by rememberSaveable { mutableStateOf(false) }
     var server by rememberSaveable { mutableStateOf(DEFAULT_SERVER) }
-    var friendsServer by rememberSaveable { mutableStateOf("") }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var inviteCode by rememberSaveable { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
@@ -71,8 +69,8 @@ fun LoginScreen() {
         error = null
         scope.launch {
             try {
-                // One server does both (Jukebox), unless a separate friends server was given.
-                val social = SubsonicApi.normalizeServer(friendsServer.ifBlank { server })
+                // Jukebox serves music and friends at the same address.
+                val social = SubsonicApi.normalizeServer(server)
                 val credentials = SubsonicApi.credentialsFor(server, username, password).copy(socialServer = social)
                 if (signingUp) {
                     // The server makes the account, then we log in.
@@ -167,16 +165,8 @@ fun LoginScreen() {
                     singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 )
-                OutlinedTextField(
-                    value = friendsServer, onValueChange = { friendsServer = it.trim() },
-                    label = { Text("Friends server (optional)") },
-                    placeholder = { Text("Same as the server") },
-                    supportingText = { Text("Only if friends and chat run at a different address") },
-                    singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                )
-                if (server != DEFAULT_SERVER || friendsServer.isNotEmpty()) {
-                    TextButton(onClick = { server = DEFAULT_SERVER; friendsServer = "" }) { Text("Use $DEFAULT_SERVER") }
+                if (server != DEFAULT_SERVER) {
+                    TextButton(onClick = { server = DEFAULT_SERVER }) { Text("Use $DEFAULT_SERVER") }
                 }
             }
         }

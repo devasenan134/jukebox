@@ -58,6 +58,12 @@ live servers, then run a last time at the switch-over.
 
 ## 6. The switch-over
 
+Done 2026-10-04: final import from backups taken with both old servers stopped
+(`music-switch-backups/switch-20261004-025512` on the Mac mini); the app's two old addresses (musicnote, gamertags)
+now lead to Jukebox through the tunnel, and app 0.12.1 moves saved addresses to jukebox.craftingtable.cc. Navidrome,
+isaipetti-social and the Isaipetti analyzer are stopped and kept for a few weeks. Push notifications and
+feedback moved with them.
+
 0. Done 2026-10-03: Jukebox's own analyzer (`analyzer/`) keys sound features by recording id and reads Jukebox's
    catalog; it took over the Isaipetti analyzer's results (`adopt`, matched by path), so Navidrome isn't
    needed for mixes. It runs beside the old one until the switch-over.

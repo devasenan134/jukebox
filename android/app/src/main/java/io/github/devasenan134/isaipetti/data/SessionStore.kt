@@ -56,13 +56,32 @@ class SessionStore(private val context: Context) {
         _social.value = prefs[socialToken]?.let { t ->
             prefs[socialUser]?.let { runCatching { Json.decodeFromString<SocialUser>(it) }.getOrNull() }?.let { SocialSession(t, it) }
         }
-        _credentials.value = Credentials(
+        val saved = Credentials(
             server = prefs[server] ?: return,
             username = prefs[username] ?: return,
             salt = prefs[salt] ?: return,
             token = prefs[token] ?: return,
             socialServer = prefs[socialServer],
         )
+        // Logins from before Jukebox saved Navidrome's and the old friends server's addresses. Both moved to
+        // Jukebox (the same account, password and session), so they're switched over once, quietly.
+        val current = saved.copy(server = moved(saved.server), socialServer = saved.socialServer?.let(::moved))
+        if (current != saved) runBlocking {
+            context.sessionDataStore.edit {
+                it[server] = current.server
+                current.socialServer?.let { url -> it[socialServer] = url }
+            }
+        }
+        _credentials.value = current
+    }
+
+    private fun moved(url: String): String =
+        if (OLD_ADDRESSES.any { url.removePrefix("https://").removePrefix("http://").trimEnd('/').equals(it, ignoreCase = true) }) "https://$JUKEBOX_ADDRESS" else url
+
+    private companion object {
+        /** Where Isaipetti's music (Navidrome) and friends servers were; both are Jukebox now. */
+        val OLD_ADDRESSES = listOf("musicnote.craftingtable.cc", "gamertags.craftingtable.cc")
+        const val JUKEBOX_ADDRESS = "jukebox.craftingtable.cc"
     }
 
     suspend fun save(credentials: Credentials) {

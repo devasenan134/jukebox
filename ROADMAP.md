@@ -6,7 +6,7 @@ Milestones in the order they're built. Each one leaves the app working.
 |---|---|---|---|
 | 0 | Bootstrap | This repository: the Isaipetti companion server renamed to Jukebox, the design | Done |
 | 1 | Catalog and library ([plan](docs/milestone-1.md)) | Scanner (folders, tags, cover art), the catalog (albums, releases, tracks, recordings, versions, people and roles), stable recording ids, streaming with range requests, the Subsonic API subset the app uses. Runs beside Navidrome | Done (fingerprint merges running) |
-| 2 | Own the listening data ([plan](docs/milestone-2.md)) | Users and sign-in without Navidrome, likes, playlists, plays, lyrics, the event log; a one-time import from Navidrome | Next |
+| 2 | Own the listening data ([plan](docs/milestone-2.md)) | Users and sign-in without Navidrome, likes, playlists, plays, lyrics, the event log; a one-time import from Navidrome | Done (switched over 2026-10-04) |
 | 3 | Realtime gateway | One WebSocket per device: presence, playback state across devices, jam, notifications; the social module behind a setting | |
 | 4 | Jukebox API v2 | Albums with film details, people, lyrics search in the API; the app and web app move to it; Navidrome is switched off | |
 | 5 | Data plane | Mobile-quality copies made ahead of time, prefetch, offline downloads | |
