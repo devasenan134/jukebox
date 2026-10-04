@@ -26,6 +26,11 @@ import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonObject
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
@@ -73,7 +78,8 @@ fun main(args: Array<String>) {
         val dataDir = File(config.dbPath).absoluteFile.parentFile
         val report = kotlinx.coroutines.runBlocking {
             val old = args.withIndex().filter { it.value == "--old-navidrome" }.mapNotNull { args.getOrNull(it.index + 1) }
-            Importer(Db(config.dbPath), Passwords(File(dataDir, "secret.key"))).run(navidromeDb, socialDb, arg("--social-data")?.let(::File), dataDir, old)
+            Importer(Db(config.dbPath), Passwords(File(dataDir, "secret.key")))
+                .run(navidromeDb, socialDb, arg("--social-data")?.let(::File), dataDir, old, File(config.artworkDir ?: File(dataDir, "artwork").path))
         }
         println(eventJson.encodeToString(ImportReport.serializer(), report))
         return
@@ -116,7 +122,6 @@ fun Application.jukeboxServer(
     }
     val bugReports = BugReports(issueTracker)
     val playlistLikes = PlaylistLikes(db)
-    val pictures = Pictures(db, navidrome, config.dbPath)
     val music = music
         ?: if (config.libraries != null) JukeboxLibrary(db, config.navidromeDb, config.featuresDb)
         else config.navidromeDb?.let { NavidromeLibrary(it, config.featuresDb) }
@@ -134,6 +139,7 @@ fun Application.jukeboxServer(
         ).also { it.start(this) }
     }
     val listening = Listening(db)
+    val pictures = Pictures(db, navidrome, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
     val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.covers, lib::roots), signIn::checkToken, signIn::userId, listening) }
     val limiter = RateLimiter(maxPerMinute = 10)
     val cleanup = Cleanup(db, navidrome, hub)
@@ -209,10 +215,27 @@ fun Application.jukeboxServer(
         // route above and below wins over it.
         config.webDir?.let { dir -> singlePageApplication { filesPath = dir; defaultPage = "index.html"; useResources = false } }
 
+        // Navidrome's account record, read and saved by the app when it changes a password (see Accounts).
+        route("/api/user/{id}") {
+            get { call.respond(accounts.navidromeAccount(call.request.headers["X-ND-Authorization"], call.parameters["id"].orEmpty())) }
+            put {
+                limiter.check(call)
+                accounts.navidromeChangePassword(call.request.headers["X-ND-Authorization"], call.parameters["id"].orEmpty(), call.receive<JsonObject>())
+                call.respond(buildJsonObject { put("id", call.parameters["id"].orEmpty()) })
+            }
+        }
+
         route("/auth") {
             post("/login") {
                 limiter.check(call)
-                call.respond(accounts.login(call.receive()))
+                // Navidrome's sign-in sends the password (the app's password change); the app's own sends a token.
+                val body = call.receive<JsonObject>()
+                val password = body["password"]?.jsonPrimitive?.contentOrNull
+                if (password != null) {
+                    call.respond(accounts.navidromeLogin(body["username"]?.jsonPrimitive?.contentOrNull.orEmpty(), password))
+                } else {
+                    call.respond(accounts.login(eventJson.decodeFromJsonElement(LoginRequest.serializer(), body)))
+                }
             }
             post("/signup") {
                 limiter.check(call)

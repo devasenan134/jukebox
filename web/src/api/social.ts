@@ -74,6 +74,8 @@ export const social = {
   logout: () => post<void>('/auth/logout'),
   logoutOthers: () => post<void>('/auth/logout-others'),
   rename: (displayName: string) => send<SocialUser>('PATCH', '/me', { displayName }),
+  /** Changes your password (Jukebox keeps it); your other devices are signed out. */
+  changePassword: (current: string, next: string) => post<void>('/me/password', { current, new: next }),
 
   /** Sets your profile picture (a JPEG already cropped and shrunk). Returns you, with its new version. */
   setAvatar: (jpeg: Blob) => send<SocialUser>('PUT', '/me/avatar', undefined, { bytes: jpeg }),

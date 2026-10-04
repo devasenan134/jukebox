@@ -1,5 +1,7 @@
 package io.github.devasenan134.jukebox.server
 
+import io.github.devasenan134.jukebox.server.library.Listening
+import io.github.devasenan134.jukebox.server.library.storeArtwork
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import java.io.File
@@ -88,10 +90,17 @@ class PictureFolder(dbPath: String, name: String) {
 }
 
 /**
- * Profile pictures (kept as files next to the database, one per person) and playlist covers
- * (stored in Navidrome, which only lets a playlist's owner or an admin change them).
+ * Profile pictures (kept as files next to the database, one per person) and playlist covers (with the rest of
+ * the artwork when Jukebox keeps the playlists; in Navidrome, changed as admin after checking, when it doesn't).
  */
-class Pictures(private val db: Db, private val navidrome: Navidrome, dbPath: String) {
+class Pictures(
+    private val db: Db,
+    private val navidrome: Navidrome,
+    dbPath: String,
+    /** Jukebox's own playlists and artwork folder, when it has a music library; else covers stay in Navidrome. */
+    private val listening: Listening? = null,
+    private val artworkDir: File? = null,
+) {
     private val avatars = PictureFolder(dbPath, "avatars")
 
     suspend fun setAvatar(userId: Long, picture: Picture): UserDto {
@@ -115,6 +124,9 @@ class Pictures(private val db: Db, private val navidrome: Navidrome, dbPath: Str
 
     /** Sets (or with null, removes) the cover of a playlist [user] made. */
     suspend fun setPlaylistCover(user: UserDto, playlistId: String, picture: Picture?) {
+        if (listening != null && artworkDir != null && listening.exists(playlistId)) {
+            return listening.setCover(user.id, playlistId) { picture?.let { storeArtwork(artworkDir, it.bytes, "playlist") } }
+        }
         val owner = navidrome.playlistOwner(playlistId) ?: throw ApiError(HttpStatusCode.NotFound, "Playlist not found")
         val me = db.tx { queryOne("SELECT navidrome_id FROM users WHERE id = ?", user.id) { it.getString(1) } }
             ?: navidrome.idFor(user.username)

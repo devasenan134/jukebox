@@ -47,7 +47,7 @@ async def main():
             await shot("1-home")
 
             t = time.time()
-            await page.locator(".card").first.click()
+            await page.locator(".card .name").first.click()
             await page.wait_for_selector(".song-row, .fab-play", timeout=10000)
             check(True, f"album opened in {time.time() - t:.1f}s")
             await shot("2-album")
@@ -144,6 +144,25 @@ async def main():
             text = await visible_text()
             check("Recently played" in text and "Jump back in" in text, "Home shows Recently played and Jump back in")
             await shot("12-home-after")
+
+            # Settings; on the last run, change the password and sign in again with the new one.
+            await page.locator("[aria-label='Settings']:visible").first.click()
+            await page.wait_for_timeout(1000)
+            check("Change password" in await visible_text(), "Settings opens")
+            await shot("13-settings")
+            if name == "phone":
+                await page.fill("input[autocomplete=current-password]", "secret")
+                await page.fill("input[autocomplete=new-password]", "Brand-new-Passw0rd!")
+                await page.get_by_role("button", name="Update password").click()
+                await page.wait_for_timeout(1500)
+                await page.get_by_role("button", name="Log out").first.click()
+                await page.locator(".dialog").get_by_role("button", name="Log out").click()
+                await page.wait_for_selector("input[type=password]")
+                await page.fill("input[autocomplete=username]", "tester")
+                await page.fill("input[type=password]", "Brand-new-Passw0rd!")
+                await page.click("button[type=submit]")
+                await page.wait_for_selector(".card", timeout=15000)
+                check(True, "signed in again with the changed password")
 
             check(not errors, "no page errors: " + "; ".join(errors[:3]))
             await page.close()

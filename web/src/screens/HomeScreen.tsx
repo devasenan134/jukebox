@@ -60,6 +60,7 @@ export function HomeScreen() {
       <div style={{ padding: '20px 12px 4px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
         <h1 className="headline-medium" style={{ margin: 0, flex: 1 }}>{greeting()}</h1>
         <IconButton icon="refresh" label="Refresh" onClick={refresh} />
+        <IconButton icon="settings" label="Settings" onClick={nav.openSettings} />
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '6px 16px 16px' }}>
         <button className="chip" onClick={nav.openAlbums}>Albums</button>

@@ -13,6 +13,7 @@ import { LoginScreen } from './screens/LoginScreen'
 import { NowPlaying } from './screens/NowPlaying'
 import { SearchScreen } from './screens/SearchScreen'
 import { LibraryScreen } from './screens/LibraryScreen'
+import { SettingsScreen } from './screens/SettingsScreen'
 import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistScreens'
 import { useLikes } from './state/likes'
 import { useMixes, useMyPlaylists } from './state/library'
@@ -26,12 +27,6 @@ const TABS = [
   { label: 'Search', path: '/search', icon: 'search' },
   { label: 'Your Library', path: '/library', icon: 'library_music' },
 ]
-
-/** Signs out on this browser: stops the music and forgets the login. */
-function logOut() {
-  player.stop()
-  useSession.getState().clear()
-}
 
 export default function App() {
   const signedIn = useSession((s) => s.credentials != null)
@@ -82,12 +77,13 @@ function Main() {
           <Route path="/liked" element={<LikedSongsScreen />} />
           <Route path="/playlist/:id" element={<PlaylistScreen />} />
           <Route path="/mix/:id" element={<MixScreen />} />
+          <Route path="/settings" element={<SettingsScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
         </ErrorBoundary>
       </div>
       <ErrorBoundary>
-        <Sidebar onLogOut={logOut} />
+        <Sidebar />
       </ErrorBoundary>
       <div className="mini-slot">
         <ErrorBoundary>

@@ -51,7 +51,7 @@ class ImporterTest {
             "CREATE TABLE media_file (id TEXT, path TEXT, title TEXT, album_id TEXT, duration REAL, missing BOOL)",
             "CREATE TABLE artist (id TEXT, name TEXT)",
             "CREATE TABLE annotation (user_id TEXT, item_id TEXT, item_type TEXT, play_count INT, play_date TEXT, starred BOOL, starred_at TEXT)",
-            "CREATE TABLE playlist (id TEXT, name TEXT, comment TEXT, owner_id TEXT, public BOOL, created_at TEXT, updated_at TEXT)",
+            "CREATE TABLE playlist (id TEXT, name TEXT, comment TEXT, owner_id TEXT, public BOOL, created_at TEXT, updated_at TEXT, uploaded_image TEXT)",
             "CREATE TABLE playlist_tracks (id INT, playlist_id TEXT, media_file_id TEXT)",
             "CREATE TABLE scrobbles (user_id TEXT, media_file_id TEXT, submission_time INT)",
             "INSERT INTO user VALUES ('ndAliceAAAAAAAAAAAAAAA', 'alice', 'Alice', 'a@x', '${navidromePassword("alice-secret")}', 1, '2026-09-01 10:00:00')",
@@ -60,10 +60,13 @@ class ImporterTest {
             "INSERT INTO artist VALUES ('ndArtistSundaramXXXXXX', 'Sundaramurthy K.S.')",
             "INSERT INTO annotation VALUES ('ndBobBBBBBBBBBBBBBBBBB', 'ndSongKaarigaXXXXXXXXX', 'media_file', 3, '2026-09-20 08:00:00', 1, '2026-09-20 08:00:00')",
             "INSERT INTO annotation VALUES ('ndBobBBBBBBBBBBBBBBBBB', 'ndAlbumAiraaXXXXXXXXXX', 'album', 0, NULL, 1, '2026-09-20 08:00:00')",
-            "INSERT INTO playlist VALUES ('ndPlaylistRoadXXXXXXXX', 'Road', NULL, 'ndBobBBBBBBBBBBBBBBBBB', 1, '2026-09-20 08:00:00', '2026-09-21 08:00:00')",
+            "INSERT INTO playlist VALUES ('ndPlaylistRoadXXXXXXXX', 'Road', NULL, 'ndBobBBBBBBBBBBBBBBBBB', 1, '2026-09-20 08:00:00', '2026-09-21 08:00:00', 'ndPlaylistRoadXXXXXXXX_road.jpeg')",
             "INSERT INTO playlist_tracks VALUES (1, 'ndPlaylistRoadXXXXXXXX', 'ndSongKaarigaXXXXXXXXX')",
             "INSERT INTO scrobbles VALUES ('ndBobBBBBBBBBBBBBBBBBB', 'ndSongKaarigaXXXXXXXXX', 1790000000)",
         )
+        // Bob gave the playlist a picture; Navidrome keeps it next to its database.
+        File(data, "artwork/playlist").mkdirs()
+        TestAudio.jpeg(File(data, "artwork/playlist/ndPlaylistRoadXXXXXXXX_road.jpeg"))
         // The old social server: Bob (logged in on a phone) shared the song with Alice in a chat.
         val socialPath = File(data, "social.db").path
         Db(socialPath)
@@ -104,6 +107,7 @@ class ImporterTest {
             assertEquals(3, queryOne("SELECT count FROM play_counts WHERE user_id = 7 AND recording_id = ?", kaariga) { it.getInt(1) })
             assertEquals(1, queryOne("SELECT count(*) FROM events WHERE type = 'played'") { it.getInt(1) })
             assertEquals(listOf(kaariga), query("SELECT e.recording_id FROM playlist_entries e JOIN playlists p ON p.id = e.playlist_id WHERE p.name = 'Road'") { it.getString(1) })
+            assertEquals("playlist", queryOne("SELECT w.source FROM playlists p JOIN artwork w ON w.id = p.cover_id WHERE p.name = 'Road'") { it.getString(1) })
             // The catalog is untouched.
             assertEquals(2, queryOne("SELECT count(*) FROM files") { it.getInt(1) })
             // An old id still finds its song.

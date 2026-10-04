@@ -16,7 +16,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.io.File
-import java.security.MessageDigest
 import java.security.SecureRandom
 import java.sql.Connection
 
@@ -289,13 +288,5 @@ class Scanner(
 
     private fun Connection.embeddedCover(file: File): String? = tools.embeddedPicture(file)?.let { storeArtwork(it, "embedded") }
 
-    /** Keeps one copy of each image (by content) in the artwork folder. */
-    private fun Connection.storeArtwork(bytes: ByteArray, source: String): String {
-        val hash = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-        queryOne("SELECT id FROM artwork WHERE hash = ?", hash) { it.getString(1) }?.let { return it }
-        val png = bytes.size > 4 && bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte()
-        artworkDir.mkdirs()
-        File(artworkDir, hash + if (png) ".png" else ".jpg").writeBytes(bytes)
-        return newId().also { insert("INSERT INTO artwork (id, hash, source, mime) VALUES (?, ?, ?, ?)", it, hash, source, if (png) "image/png" else "image/jpeg") }
-    }
+    private fun Connection.storeArtwork(bytes: ByteArray, source: String): String = storeArtwork(artworkDir, bytes, source)
 }

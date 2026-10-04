@@ -1,4 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { queryClient } from '../state/queries'
+import { useLikes } from '../state/likes'
+import { useMixes } from '../state/library'
 import { credentialsFor, subsonic } from '../api/subsonic'
 import { social } from '../api/social'
 import { signInToSocial, useSession } from '../state/session'
@@ -11,6 +15,16 @@ import { PasswordStrength, checkPassword } from '../ui/password'
  */
 export function LoginScreen() {
   const logoutReason = useSession((s) => s.logoutReason)
+  const location = useLocation()
+  const navigate = useNavigate()
+  // Signed out: forget everything the last account loaded, and start the next one on Home.
+  useEffect(() => {
+    queryClient.clear()
+    useLikes.getState().clear()
+    useMixes.setState({ home: null, followed: [] })
+    if (location.pathname !== '/') navigate('/', { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [signingUp, setSigningUp] = useState(false)
   const [inviteCode, setInviteCode] = useState('')
   const [username, setUsername] = useState('')

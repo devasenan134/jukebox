@@ -33,6 +33,8 @@ class Personal(
 class PlaylistRow(
     val id: String, val ownerId: Long, val owner: String, val name: String, val comment: String?, val public: Boolean,
     val created: Long, val changed: Long, val songIds: List<String>,
+    /** Its own cover, if its owner set one (an artwork id). */
+    val coverId: String? = null,
 )
 
 /**
@@ -137,10 +139,22 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
     }
 
     private fun Connection.load(id: String): PlaylistRow? = queryOne(
-        "SELECT p.id, p.owner_id, u.username, p.name, p.comment, p.public, p.created_at, p.changed_at FROM playlists p JOIN users u ON u.id = p.owner_id WHERE p.id = ?", id,
-    ) { PlaylistRow(it.getString(1), it.getLong(2), it.getString(3), it.getString(4), it.getString(5), it.getInt(6) == 1, it.getLong(7), it.getLong(8), emptyList()) }
+        "SELECT p.id, p.owner_id, u.username, p.name, p.comment, p.public, p.created_at, p.changed_at, p.cover_id FROM playlists p JOIN users u ON u.id = p.owner_id WHERE p.id = ?", id,
+    ) { PlaylistRow(it.getString(1), it.getLong(2), it.getString(3), it.getString(4), it.getString(5), it.getInt(6) == 1, it.getLong(7), it.getLong(8), emptyList(), it.getString(9)) }
         ?.let { p -> PlaylistRow(p.id, p.ownerId, p.owner, p.name, p.comment, p.public, p.created, p.changed,
-            query("SELECT recording_id FROM playlist_entries WHERE playlist_id = ? ORDER BY position", id) { it.getString(1) }.map { recording(it) }) }
+            query("SELECT recording_id FROM playlist_entries WHERE playlist_id = ? ORDER BY position", id) { it.getString(1) }.map { recording(it) }, p.coverId) }
+
+    /** Whether [id] (or the old id it was imported from) is a playlist Jukebox keeps. */
+    suspend fun exists(id: String): Boolean = db.read { queryOne("SELECT 1 FROM playlists WHERE id = ?", mapped(id)) { 1 } != null }
+
+    /** Sets (or with null, removes) the cover of a playlist [userId] made; [store] keeps the picture and gives its artwork id. */
+    suspend fun setCover(userId: Long, requested: String, store: Connection.() -> String?) = db.tx {
+        val id = mapped(requested)
+        own(userId, id)
+        val t = clock()
+        update("UPDATE playlists SET cover_id = ?, changed_at = ? WHERE id = ?", store(), t, id)
+        event(userId, "playlist_changed", t) { put("playlist", id); put("cover", true) }
+    }
 
     private fun notFound(): Nothing = throw ApiError(HttpStatusCode.NotFound, "Playlist not found")
 

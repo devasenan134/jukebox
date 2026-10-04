@@ -1,7 +1,9 @@
 package io.github.devasenan134.jukebox.server.library
 
 import io.github.devasenan134.jukebox.server.Db
+import io.github.devasenan134.jukebox.server.insert
 import io.github.devasenan134.jukebox.server.query
+import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
@@ -9,11 +11,23 @@ import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.security.MessageDigest
+import java.sql.Connection
 import javax.imageio.IIOImage
 import javax.imageio.ImageIO
 import javax.imageio.ImageWriteParam
 
 private val log = LoggerFactory.getLogger("jukebox.covers")
+
+/** Keeps one copy of each image (by content) in the artwork folder, and returns its artwork id. */
+fun Connection.storeArtwork(artworkDir: File, bytes: ByteArray, source: String): String {
+    val hash = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    queryOne("SELECT id FROM artwork WHERE hash = ?", hash) { it.getString(1) }?.let { return it }
+    val png = bytes.size > 4 && bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte()
+    artworkDir.mkdirs()
+    File(artworkDir, hash + if (png) ".png" else ".jpg").writeBytes(bytes)
+    return newId().also { insert("INSERT INTO artwork (id, hash, source, mime) VALUES (?, ?, ?, ?)", it, hash, source, if (png) "image/png" else "image/jpeg") }
+}
 
 /**
  * Cover pictures at the sizes the apps ask for. The artwork folder keeps each picture once (named by its hash);

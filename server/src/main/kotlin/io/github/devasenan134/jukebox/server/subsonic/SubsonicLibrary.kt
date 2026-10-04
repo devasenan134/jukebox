@@ -393,7 +393,8 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
             put("duration", songs.sumOf { it.durationMs / 1000 })
             put("created", iso(p.created))
             put("changed", iso(p.changed))
-            songs.firstOrNull()?.coverId?.let { put("coverArt", it) }
+            // Its own cover (the time it changed in the id, so a new picture gets a new address), else its first song's.
+            (p.coverId?.let { "pl-${p.id}_${java.lang.Long.toHexString(p.changed / 1000)}" } ?: songs.firstOrNull()?.coverId)?.let { put("coverArt", it) }
             if (withSongs) putJsonArray("entry") { songs.forEach { add(it.json(me)) } }
         }
     }
@@ -430,9 +431,10 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
     /** A cover (by artwork, album, release or song id), resized to fit [size] when asked. */
     suspend fun cover(requested: String, size: Int?): Pair<File, String>? {
         // Mixes name an album's cover Navidrome's way ("al-<album>"); old ids from before the import still work.
-        val id = mapped(requested.removePrefix("al-").removePrefix("mf-").removePrefix("ar-").substringBefore('_'))
+        val id = mapped(requested.removePrefix("al-").removePrefix("mf-").removePrefix("ar-").removePrefix("pl-").substringBefore('_'))
         val art = db.read {
             queryOne("SELECT hash, mime FROM artwork WHERE id = ?", id) { it.getString(1) to it.getString(2) }
+                ?: playlistCover(id)
                 ?: personCover(id)
                 ?: queryOne(
                     """SELECT w.hash, w.mime FROM artwork w WHERE w.id = coalesce(
@@ -444,6 +446,18 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
                 ) { it.getString(1) to it.getString(2) }
         } ?: return null
         return covers.sized(art.first, art.second, size)
+    }
+
+    /** A playlist's own cover, else the cover of its first song. */
+    private fun Connection.playlistCover(id: String): Pair<String, String>? {
+        if (queryOne("SELECT 1 FROM playlists WHERE id = ?", id) { 1 } == null) return null
+        return queryOne("SELECT w.hash, w.mime FROM playlists p JOIN artwork w ON w.id = p.cover_id WHERE p.id = ?", id) { it.getString(1) to it.getString(2) }
+            ?: queryOne(
+                """SELECT w.hash, w.mime FROM playlist_entries e JOIN files f ON f.recording_id = e.recording_id AND f.missing_since IS NULL
+                     JOIN tracks t ON t.id = f.track_id JOIN releases rl ON rl.id = t.release_id JOIN albums a ON a.id = rl.album_id
+                     JOIN artwork w ON w.id = coalesce(f.cover_id, rl.cover_id, a.cover_id)
+                    WHERE e.playlist_id = ? ORDER BY e.position LIMIT 1""", id,
+            ) { it.getString(1) to it.getString(2) }
     }
 
     /**

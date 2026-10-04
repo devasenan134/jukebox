@@ -2,6 +2,7 @@ package io.github.devasenan134.jukebox.server
 
 import io.github.devasenan134.jukebox.server.library.Names
 import io.github.devasenan134.jukebox.server.library.newId
+import io.github.devasenan134.jukebox.server.library.storeArtwork
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -48,12 +49,17 @@ class Importer(private val db: Db, private val passwords: Passwords) {
      * their song ids became (plays and shared songs from back then still name them; matched by title,
      * album and length, since the files are gone).
      */
-    suspend fun run(navidromeDb: String, socialDb: String, socialData: File?, jukeboxData: File, oldNavidromeDbs: List<String> = emptyList()): ImportReport {
+    suspend fun run(
+        navidromeDb: String, socialDb: String, socialData: File?, jukeboxData: File, oldNavidromeDbs: List<String> = emptyList(),
+        artworkDir: File = File(jukeboxData, "artwork"),
+    ): ImportReport {
+        // Pictures people gave their playlists, which Navidrome keeps next to its database.
+        val playlistPictures = File(File(navidromeDb).absoluteFile.parentFile, "artwork/playlist")
         val nd = DriverManager.getConnection("jdbc:sqlite:file:$navidromeDb?mode=ro")
         val social = DriverManager.getConnection("jdbc:sqlite:file:$socialDb?mode=ro")
         val old = oldNavidromeDbs.map { DriverManager.getConnection("jdbc:sqlite:file:$it?mode=ro") }
         try {
-            val report = db.tx { import(nd, social, old) }
+            val report = db.tx { import(nd, social, old, playlistPictures, artworkDir) }
             val files = socialData?.let { copyFiles(it, jukeboxData) } ?: 0
             return report.copy(files = files).also { log.info("Import: {}", it) }
         } finally {
@@ -63,7 +69,7 @@ class Importer(private val db: Db, private val passwords: Passwords) {
         }
     }
 
-    private fun Connection.import(nd: Connection, social: Connection, old: List<Connection>): ImportReport {
+    private fun Connection.import(nd: Connection, social: Connection, old: List<Connection>, playlistPictures: File, artworkDir: File): ImportReport {
         // ---- what each Navidrome id became ----
         val byPath = query("SELECT path, recording_id FROM files") { it.getString(1) to it.getString(2) }.toMap()
         val byTitle = query("SELECT id, title_key, duration_ms FROM recordings WHERE merged_into IS NULL") { Triple(it.getString(1), it.getString(2), it.getLong(3)) }
@@ -184,6 +190,10 @@ class Importer(private val db: Db, private val passwords: Passwords) {
                 id, owner, p[1], p[2], if (p[4] as Boolean) 1 else 0, time(p[5] as String?) ?: 0, time(p[6] as String?) ?: 0)
             nd.query("SELECT media_file_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY id", p[0]) { songs[it.getString(1)] }
                 .filterNotNull().forEachIndexed { i, rec -> update("INSERT INTO playlist_entries VALUES (?, ?, ?, ?)", id, i, rec, time(p[6] as String?) ?: 0) }
+            // Its own picture, if one was uploaded (Navidrome versions before uploaded_image had none).
+            runCatching { nd.queryOne("SELECT uploaded_image FROM playlist WHERE id = ?", p[0]) { it.getString(1) } }.getOrNull()
+                ?.takeIf { it.isNotBlank() }?.let { File(playlistPictures, it) }?.takeIf { it.isFile }
+                ?.let { update("UPDATE playlists SET cover_id = ? WHERE id = ?", storeArtwork(artworkDir, it.readBytes(), "playlist"), id) }
             playlists++
         }
 

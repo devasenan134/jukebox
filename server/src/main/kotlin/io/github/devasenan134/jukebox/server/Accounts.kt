@@ -4,7 +4,13 @@ import io.ktor.http.HttpStatusCode
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Logins, sign-ups and invite codes.
@@ -71,6 +77,53 @@ class Accounts(
         PasswordRules.check(new, user.username).problem?.let { throw ApiError(HttpStatusCode.BadRequest, it) }
         signIn.setPassword(user.id, new)
         logoutOthers(user.id, currentToken)
+    }
+
+    // ---------- Navidrome's own sign-in and account calls ----------
+    // The Android app changes a password the way Navidrome wanted: sign in with the password (/auth/login), read
+    // the account (/api/user/{id}), save it with the new one. Jukebox answers the same calls, so the app works
+    // with both of its addresses pointing here. The token is only good for these calls, for ten minutes.
+
+    private val navidromeTokens = ConcurrentHashMap<String, Pair<Long, Long>>()
+
+    suspend fun navidromeLogin(username: String, password: String): JsonObject {
+        val name = username.trim()
+        if (!signIn.checkPassword(name, password)) throw ApiError(HttpStatusCode.Unauthorized, "Wrong username or password")
+        val userId = signIn.userId(name)
+        val user = db.tx { queryOne("SELECT * FROM users WHERE id = ?", userId) { it.toUser() } }!!
+        val token = ByteArray(32).also(random::nextBytes).let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
+        navidromeTokens.entries.removeIf { it.value.second < now() }
+        navidromeTokens[token] = user.id to now() + TimeUnit.MINUTES.toMillis(10)
+        return buildJsonObject {
+            put("id", user.id.toString()); put("token", token); put("name", user.displayName); put("username", user.username); put("isAdmin", isAdmin(user.id))
+        }
+    }
+
+    /** The account a Navidrome-style token stands for, if it's [id]'s and still good. */
+    private suspend fun navidromeUser(authorization: String?, id: String): UserDto {
+        val token = authorization?.removePrefix("Bearer ")?.trim().orEmpty()
+        val (userId, expires) = navidromeTokens[token] ?: throw ApiError(HttpStatusCode.Unauthorized, "Not logged in")
+        if (expires < now()) throw ApiError(HttpStatusCode.Unauthorized, "Not logged in")
+        if (id != userId.toString()) throw ApiError(HttpStatusCode.Forbidden, "That's someone else's account")
+        return db.tx { queryOne("SELECT * FROM users WHERE id = ?", userId) { it.toUser() } } ?: throw ApiError(HttpStatusCode.NotFound, "No such account")
+    }
+
+    suspend fun navidromeAccount(authorization: String?, id: String): JsonObject {
+        val user = navidromeUser(authorization, id)
+        val email = db.tx { queryOne("SELECT email FROM users WHERE id = ?", user.id) { it.getString(1) } }
+        return buildJsonObject {
+            put("id", user.id.toString()); put("userName", user.username); put("name", user.displayName); put("email", email.orEmpty()); put("isAdmin", isAdmin(user.id))
+        }
+    }
+
+    /** Saves a new password ([body] has currentPassword and password); like Navidrome, other devices stay signed in. */
+    suspend fun navidromeChangePassword(authorization: String?, id: String, body: JsonObject) {
+        val user = navidromeUser(authorization, id)
+        val current = body["currentPassword"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        val new = body["password"]?.jsonPrimitive?.contentOrNull ?: return
+        if (!signIn.checkPassword(user.username, current)) throw ApiError(HttpStatusCode.BadRequest, "Your current password is wrong")
+        PasswordRules.check(new, user.username).problem?.let { throw ApiError(HttpStatusCode.BadRequest, it) }
+        signIn.setPassword(user.id, new)
     }
 
     /** Admins are marked in Jukebox (imported from Navidrome's admin flag). */

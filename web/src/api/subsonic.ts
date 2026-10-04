@@ -176,42 +176,6 @@ export const subsonic = {
   /** Records a play. submission=false means "now playing"; true adds it to play counts and history. */
   scrobble: (songId: string, submission: boolean) => get('scrobble', { id: songId, submission, time: Date.now() }),
 
-  /**
-   * Changes the password through Navidrome's own API, as the user themselves (no admin involved).
-   * Navidrome checks `current` and only lets normal users change their own password, name and email.
-   */
-  changePassword: async (current: string, next: string) => {
-    const creds = session().credentials
-    if (!creds) throw new SubsonicError('Not logged in')
-    // 1. Log in to Navidrome with the current password (this is what proves it's really you).
-    const login = await fetch('/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: creds.username, password: current }),
-    })
-    if (login.status === 401) throw new SubsonicError('Your current password is wrong')
-    if (login.status === 429) throw new SubsonicError('Too many attempts. Wait a minute and try again')
-    if (!login.ok) throw new SubsonicError(`Navidrome returned ${login.status}`)
-    const { token, id } = await login.json()
-    if (!token || !id) throw new SubsonicError("Navidrome didn't accept the login")
-    const auth = { 'X-ND-Authorization': `Bearer ${token}` }
-    // 2. Read your own account record, so the unchanged fields are sent back as they are.
-    const rec = await fetch(`/api/user/${id}`, { headers: auth })
-    if (!rec.ok) throw new SubsonicError(`Couldn't read your account (${rec.status})`)
-    const record = await rec.json()
-    // 3. Save it with the new password.
-    const update = await fetch(`/api/user/${id}`, {
-      method: 'PUT',
-      headers: { ...auth, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: record.id, userName: record.userName, name: record.name, email: record.email,
-        currentPassword: current, password: next,
-      }),
-    })
-    if (update.status === 400) throw new SubsonicError('Navidrome refused the change. Check your current password')
-    if (!update.ok) throw new SubsonicError(`Couldn't change the password (${update.status})`)
-  },
-
   streamUrl: (songId: string) => url('stream', { id: songId }),
 
   coverUrl: (coverArtId: string | undefined | null, size = 300): string | undefined =>

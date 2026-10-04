@@ -4,7 +4,7 @@ import type { Playlist } from '../api/types'
 import { MIX_AUTHOR } from '../api/types'
 import { subsonic } from '../api/subsonic'
 import { social } from '../api/social'
-import { currentItem, stop, usePlayer } from '../player/player'
+import { currentItem, usePlayer } from '../player/player'
 import { useMixes, useMyPlaylists } from '../state/library'
 import { useLikes } from '../state/likes'
 import { useSession } from '../state/session'
@@ -165,6 +165,7 @@ export function LibraryScreen() {
   const { entries, empty, hint } = useLibraryEntries(filter)
   const newPlaylist = useNewPlaylist()
   const state = useEntryState()
+  const nav = useNav()
   const [grid, setGrid] = useState(() => load('library.grid', false))
   useEffect(() => {
     useLikes.getState().refresh()
@@ -183,7 +184,7 @@ export function LibraryScreen() {
           <>
             <IconButton icon={grid ? 'view_list' : 'grid_view'} label={grid ? 'Show as list' : 'Show as grid'} onClick={toggleGrid} />
             <IconButton icon="add" label="New playlist" onClick={newPlaylist.start} />
-            <IconButton icon="logout" label="Log out" onClick={() => { stop(); useSession.getState().clear() }} />
+            <IconButton icon="settings" label="Settings" onClick={nav.openSettings} />
           </>
         }
       />

@@ -5,7 +5,7 @@ import { Icon, IconButton } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
 /** Wide screens: Home and Search at the top, Your Library always in view below (like a desktop music app). */
-export function Sidebar({ onLogOut }: { onLogOut: () => void }) {
+export function Sidebar() {
   const nav = useNav()
   const { filter, chips } = useLibraryFilter('sidebar.filter')
   const { entries, empty, hint } = useLibraryEntries(filter)
@@ -39,7 +39,7 @@ export function Sidebar({ onLogOut }: { onLogOut: () => void }) {
             Your Library
           </a>
           <IconButton icon="add" label="New playlist" onClick={newPlaylist.start} />
-          <IconButton icon="logout" label="Log out" onClick={onLogOut} />
+          <IconButton icon="settings" label="Settings" onClick={nav.openSettings} />
         </div>
         <div style={{ padding: '6px 16px 8px' }}>{chips}</div>
         <div className="side-library-list">
