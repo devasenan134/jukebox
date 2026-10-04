@@ -37,6 +37,7 @@ class NamesTest {
         assertEquals(listOf("Hariharan", "Sujatha", "A. R. Rahman"), Names.people("Hariharan, Sujatha & A. R. Rahman"))
         assertEquals(listOf("M.S. Viswanathan", "T.K. Ramamoorthy"), Names.people("M.S. Viswanathan and T.K. Ramamoorthy, M. S. Viswanathan"))
         assertEquals(emptyList(), Names.people("Various Artists"))
+        assertEquals(listOf("K J Yesudas", "Aaryan Dinesh Kanagaratnam"), Names.people("K J Yesudas Chorus, Chorus, Aaryan Dinesh Kanagaratnam (ADK), N.A, Various Artiste"))
         assertEquals(Names.personKey("M.S. Viswanathan"), Names.personKey("M. S. Viswanathan"))
     }
 
@@ -123,6 +124,18 @@ class ScannerTest {
         scanner.scan(library)
         assertEquals(id, recordingOf("Airaa (2019) [new]/01 - Kaariga.m4a"))
         assertEquals("karaoke", db.tx { queryOne("SELECT version FROM recordings WHERE id = ?", id) { it.getString(1) } })
+    }
+
+    @Test
+    fun `a retagged album keeps only the composers its tags now name`() = runBlocking {
+        val tags = mapOf("title" to "Kaariga", "album" to "Airaa", "date" to "2019", "artist" to "Sathya Prakash")
+        song("Airaa (2019)/01 - Kaariga.m4a", 300, tags + ("album_artist" to "Sundaramurthy K.S., Chinmayi"))
+        scanner.scan(library)
+        assertEquals(2, count("SELECT count(*) FROM album_credits WHERE role = 'composer'"))
+        song("Airaa (2019)/01 - Kaariga.m4a", 300, tags + ("album_artist" to "Sundaramurthy K.S."))
+        scanner.scan(library)
+        val composers = db.tx { query("SELECT p.name FROM album_credits c JOIN people p ON p.id = c.person_id WHERE c.role = 'composer'") { it.getString(1) } }
+        assertEquals(listOf("Sundaramurthy K.S."), composers)
     }
 
     @Test
