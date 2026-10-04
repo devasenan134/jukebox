@@ -1,0 +1,152 @@
+package io.github.devasenan134.isaipetti
+
+import io.github.devasenan134.isaipetti.data.toRef
+import io.github.devasenan134.isaipetti.data.Song
+import android.app.Application
+import android.os.Build
+import coil3.ImageLoader
+import coil3.PlatformContext
+import coil3.SingletonImageLoader
+import coil3.gif.AnimatedImageDecoder
+import coil3.gif.GifDecoder
+import io.github.devasenan134.isaipetti.data.SessionStore
+import io.github.devasenan134.isaipetti.data.Likes
+import io.github.devasenan134.isaipetti.data.MyPlaylists
+import io.github.devasenan134.isaipetti.data.Mixes
+import io.github.devasenan134.isaipetti.data.Appearance
+import io.github.devasenan134.isaipetti.data.LockScreenSettings
+import io.github.devasenan134.isaipetti.data.QueueMemory
+import io.github.devasenan134.isaipetti.data.RecentActivity
+import io.github.devasenan134.isaipetti.data.RecentPlaylists
+import io.github.devasenan134.isaipetti.data.RecentSongs
+import io.github.devasenan134.isaipetti.data.SearchHistory
+import io.github.devasenan134.isaipetti.data.SubsonicApi
+import io.github.devasenan134.isaipetti.data.Updates
+import io.github.devasenan134.isaipetti.data.Waveforms
+import io.github.devasenan134.isaipetti.playback.PlayerConnection
+import io.github.devasenan134.isaipetti.push.Notifications
+import io.github.devasenan134.isaipetti.push.PushSetup
+import io.github.devasenan134.isaipetti.social.Social
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
+
+/**
+ * Created once when the app process starts. It holds the app-wide objects that
+ * screens and the playback service share (a very small hand-made "dependency container").
+ */
+class IsaipettiApp : Application(), SingletonImageLoader.Factory {
+    private val appScope = MainScope()
+
+    lateinit var session: SessionStore
+        private set
+    lateinit var api: SubsonicApi
+        private set
+    lateinit var player: PlayerConnection
+        private set
+    lateinit var social: Social
+        private set
+    lateinit var updates: Updates
+        private set
+    lateinit var recent: RecentSongs
+        private set
+    lateinit var recentPlaylists: RecentPlaylists
+        private set
+    lateinit var queueMemory: QueueMemory
+        private set
+    lateinit var myPlaylists: MyPlaylists
+        private set
+    lateinit var activity: RecentActivity
+        private set
+    lateinit var searches: SearchHistory
+        private set
+    lateinit var likes: Likes
+        private set
+    lateinit var mixes: Mixes
+        private set
+    lateinit var appearance: Appearance
+        private set
+    lateinit var lockScreen: LockScreenSettings
+        private set
+    lateinit var waveforms: Waveforms
+        private set
+
+    /** A screen to open, set when the app is launched from a notification. */
+    val pendingOpen = MutableStateFlow<PendingOpen?>(null)
+
+    /** Coil (pictures everywhere in the app), able to play GIFs and animated stickers in chats. */
+    override fun newImageLoader(context: PlatformContext): ImageLoader = ImageLoader.Builder(context)
+        .components { add(if (Build.VERSION.SDK_INT >= 28) AnimatedImageDecoder.Factory() else GifDecoder.Factory()) }
+        .build()
+
+    override fun onCreate() {
+        super.onCreate()
+        session = SessionStore(this).also { it.load() }
+        appearance = Appearance(this)
+        lockScreen = LockScreenSettings(this)
+        val http = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+        api = SubsonicApi(http, credentials = { session.credentials.value }, onLoginRejected = { rejected ->
+            // Only if the rejected login is still the saved one (not an old request racing a password change).
+            appScope.launch {
+                if (session.credentials.value == rejected) {
+                    player.stop()
+                    recent.clear()
+                    recentPlaylists.clear()
+                    queueMemory.clear()
+                    myPlaylists.clear()
+                    activity.clear()
+                    searches.clearAll()
+                    likes.clear()
+                    mixes.clear()
+                    social.logout() // also stops notifications to this phone
+                    session.clear("Your password was changed. Log in again with the new one.")
+                }
+            }
+        })
+        player = PlayerConnection(this, api)
+        waveforms = Waveforms(this, api)
+        // Notifications can wake the app before any screen opens: start Firebase from the saved settings first.
+        PushSetup.startSaved(this)
+        social = Social(this, session, http)
+        // Listening along in someone else's jam: controls say who's in charge, and queueing a song asks them.
+        player.jam = object : PlayerConnection.Jam {
+            override fun isListener() = social.listen.isListener()
+            override fun request(song: Song, playNow: Boolean) {
+                appScope.launch { toast(social.requestSong(song.toRef(), playNow)) }
+            }
+            override fun explain() =
+                toast("${social.jamOwnerName() ?: "The host"} controls this jam. Swipe a song right to ask for it now, left to ask for it next.")
+        }
+        updates = Updates(this, http)
+        recent = RecentSongs(this)
+        recentPlaylists = RecentPlaylists(this)
+        queueMemory = QueueMemory(this)
+        activity = RecentActivity(this)
+        searches = SearchHistory(this)
+        likes = Likes(this, api, session) { social.api }
+        myPlaylists = MyPlaylists(api, session)
+        mixes = Mixes({ social.api }, appScope)
+        if (session.credentials.value != null) {
+            likes.refresh()
+            myPlaylists.refresh()
+        }
+        appScope.launch { updates.checkNowAndThen() }
+        Notifications.createChannels(this)
+    }
+}
+
+/** Where a tapped notification should take you. */
+sealed interface PendingOpen {
+    data class Chat(val conversationId: Long) : PendingOpen
+    data object Friends : PendingOpen
+    /** A movie whose requested music is in the library now. */
+    data class Album(val albumId: String) : PendingOpen
+    data object Requests : PendingOpen
+}
+
+private fun IsaipettiApp.toast(text: String) = android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()

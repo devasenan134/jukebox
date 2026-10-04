@@ -1,0 +1,11 @@
+<!-- A vinyl record for listening together (a "jam"). The notch near the top makes its spin visible. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000" android:fillType="evenOdd"
+        android:pathData="M2,12a10,10 0,1 0,20 0a10,10 0,1 0,-20 0Z
+            M4.2,12a7.8,7.8 0,1 0,15.6 0a7.8,7.8 0,1 0,-15.6 0Z
+            M5,12a7,7 0,1 0,14 0a7,7 0,1 0,-14 0Z
+            M10.4,12a1.6,1.6 0,1 0,3.2 0a1.6,1.6 0,1 0,-3.2 0Z
+            M11,6.4a1,1 0,1 0,2 0a1,1 0,1 0,-2 0Z" />
+</vector>
