@@ -179,6 +179,8 @@ export function PersonCard({ artist, onClick, className = 'tile' }: { artist: Ar
 const TILES = [
   { label: 'Albums', color: 'hsl(330 70% 42%)', go: (n: Nav) => n.openAlbums() },
   { label: 'Music directors', color: 'hsl(205 70% 38%)', go: (n: Nav) => n.openArtists() },
+  { label: 'Singers', color: 'hsl(20 75% 42%)', go: (n: Nav) => n.openSingers() },
+  { label: 'Playlists', color: 'hsl(180 55% 30%)', go: (n: Nav) => n.openPlaylists() },
   { label: 'Liked songs', color: 'hsl(255 50% 46%)', go: (n: Nav) => n.openLikedSongs() },
   { label: 'Your Library', color: 'hsl(150 55% 30%)', go: (n: Nav) => n.openLibrary() },
 ]

@@ -10,6 +10,7 @@ import { Dialog, IconButton, NameDialog, toast } from '../ui/kit'
 import { checkPassword, PasswordStrength } from '../ui/password'
 import { useNav } from '../ui/nav'
 import { usePhotoPicker } from '../ui/PhotoPicker'
+import { useQuery } from '@tanstack/react-query'
 
 /** Settings (ui/settings/SettingsScreen.kt): your profile, password, invites for friends, and signing out. */
 export function SettingsScreen() {
@@ -78,6 +79,10 @@ export function SettingsScreen() {
 
         {me && <Invites />}
 
+        {me && <AdminCard onOpen={nav.openStats} />}
+
+        {me && <FeedbackCard />}
+
         <Card title="Signed in devices">
           <div className="body-medium muted" style={{ marginBottom: 12 }}>Sign out everywhere else, for example on a phone you no longer use.</div>
           <button
@@ -133,6 +138,94 @@ export function SettingsScreen() {
         </Dialog>
       )}
     </div>
+  )
+}
+
+/** Admins only: everyone's listening. */
+function AdminCard({ onOpen }: { onOpen: () => void }) {
+  const user = useSession((s) => s.social?.user.id)
+  const admin = useQuery({ queryKey: ['admin-access', user], queryFn: () => social.adminAccess(), enabled: user != null, staleTime: Infinity }).data?.isAdmin
+  if (!admin) return null
+  return (
+    <Card title="Listening stats">
+      <div className="body-medium muted" style={{ marginBottom: 12 }}>How much everyone listens, and what. Only admins see this.</div>
+      <button className="btn tonal" onClick={onOpen}>Open listening stats</button>
+    </Card>
+  )
+}
+
+const FEEDBACK = {
+  bug: { title: 'Report a bug', titleLabel: "What's wrong, in a few words", descriptionLabel: 'What happened, and what did you expect?', device: true },
+  feature: { title: 'Suggest a feature', titleLabel: 'Your idea, in a few words', descriptionLabel: 'What would you like Jukebox to do, and why?', device: false },
+} as const
+
+/** Feedback (UpdatesAndFeedback.kt): a bug or an idea becomes an issue on GitHub. Reports are public but don't show your name. */
+function FeedbackCard() {
+  const [open, setOpen] = useState<keyof typeof FEEDBACK | null>(null)
+  return (
+    <Card title="Feedback">
+      <div className="body-medium muted" style={{ marginBottom: 12 }}>
+        Something broken, or an idea? It becomes an issue on Jukebox's GitHub page. Issues are public but don't show your name.
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn tonal" onClick={() => setOpen('bug')}>Report a bug</button>
+        <button className="btn tonal" onClick={() => setOpen('feature')}>Suggest a feature</button>
+      </div>
+      {open && <FeedbackDialog kind={open} onClose={() => setOpen(null)} />}
+    </Card>
+  )
+}
+
+function FeedbackDialog({ kind, onClose }: { kind: keyof typeof FEEDBACK; onClose: () => void }) {
+  const t = FEEDBACK[kind]
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  const [withDevice, setWithDevice] = useState<boolean>(t.device)
+  const [busy, setBusy] = useState(false)
+  const [issue, setIssue] = useState<{ number: number; url: string } | null>(null)
+  const device = `Jukebox website${navigator.userAgent.includes('Jukebox') ? ' (Mac app)' : ''} · ${navigator.userAgent}`
+  const send = async () => {
+    setBusy(true)
+    try {
+      setIssue(await social.sendFeedback(kind, title.trim(), text.trim(), withDevice ? device : null))
+    } catch (e) {
+      toast((e as Error).message || "Couldn't send it")
+    }
+    setBusy(false)
+  }
+  if (issue) {
+    return (
+      <Dialog
+        title="Thanks!"
+        onClose={onClose}
+        actions={<><button className="btn text" onClick={onClose}>Done</button><a className="btn" href={issue.url} target="_blank" rel="noreferrer">Open it</a></>}
+      >
+        It's issue #{issue.number} on GitHub.
+      </Dialog>
+    )
+  }
+  return (
+    <Dialog
+      title={t.title}
+      onClose={onClose}
+      actions={<><button className="btn text" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim() || !text.trim()} onClick={() => void send()}>Send</button></>}
+    >
+      <div className="field" style={{ marginBottom: 12 }}>
+        <label>{t.titleLabel}</label>
+        <input autoFocus value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div className="field" style={{ marginBottom: 12 }}>
+        <label>{t.descriptionLabel}</label>
+        <textarea value={text} maxLength={5000} rows={5} onChange={(e) => setText(e.target.value)} />
+      </div>
+      <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
+        <input type="checkbox" checked={withDevice} onChange={(e) => setWithDevice(e.target.checked)} style={{ marginTop: 3 }} />
+        <span>
+          Include browser details
+          <div className="body-small muted" style={{ wordBreak: 'break-word' }}>{device}</div>
+        </span>
+      </label>
+    </Dialog>
   )
 }
 

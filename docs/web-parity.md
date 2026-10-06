@@ -50,11 +50,11 @@ website has them.
       playing and recent songs, whole or a part); the jam queue in the chat
 
 **4. Pages and smaller things**
-- [ ] **Recommended songs** under your own playlists; **Save a copy as a playlist** for mixes
-- [ ] A playlist's **picture**; **likes** on your playlists ("By you · 3 likes")
+- [x] **Recommended songs** under your own playlists; **Save a copy as a playlist** for mixes
+- [x] A playlist's **picture**; **likes** on your playlists ("By you · 3 likes")
 - [x] Framing a picture (zoom, move, rotate) for profiles and groups
-- [ ] All singers; all public playlists
-- [ ] **Listening stats** (admins); the **feedback** form (bug or feature)
+- [x] All singers; all public playlists
+- [x] **Listening stats** (admins); the **feedback** form (bug or feature)
 
 **5. The Mac app** (`desktop/`, the website in a window)
 - [ ] Microphone for voice notes (macOS asks once; the app has to say why)

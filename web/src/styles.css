@@ -1692,3 +1692,63 @@ a.nav-item:hover {
   height: 36px;
   padding: 0;
 }
+
+/* ---- Listening stats: a meter per person, single-series bar charts (screens/StatsScreen.tsx) ---- */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-container-highest);
+  overflow: hidden;
+}
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+}
+.bar-chart .chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 140px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.bar-hit {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+.bar-hit span {
+  display: block;
+  width: 100%;
+  min-height: 1px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary);
+  opacity: 0.85;
+  transition: opacity 0.12s;
+}
+.bar-hit.on span,
+.bar-hit:hover span {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--background);
+}
+.bar-chart .chart-bars:hover .bar-hit:not(:hover) span {
+  opacity: 0.55;
+}
+.bar-ticks {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+}
+.bar-ticks span {
+  flex: 1;
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: visible;
+}
