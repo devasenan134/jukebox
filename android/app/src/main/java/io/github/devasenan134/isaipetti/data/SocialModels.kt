@@ -15,7 +15,7 @@ data class SocialUser(
 )
 
 /**
- * A song as shared between friends. Navidrome ids are the same for everyone, so anyone can play it.
+ * A song as shared between friends. Song ids are the same for everyone, so anyone can play it.
  * A shared clip also has [clipStartMs] and [clipEndMs]: only that part of the song is meant to be heard.
  */
 @Serializable
@@ -275,7 +275,7 @@ data class ListenLeave(val conversationId: Long) : ClientEvent
 @Serializable @SerialName("listenUpdate")
 data class ListenUpdate(val conversationId: Long, val state: ListenState) : ClientEvent
 
-// Admin listening stats (server: Stats.kt). Only Navidrome admins get these.
+// Admin listening stats (server: Stats.kt). Only admins get these.
 
 @Serializable data class AdminAccess(val isAdmin: Boolean = false)
 
@@ -311,7 +311,7 @@ data class ListeningStats(
 
 // Search by Isai Pettai (the friends server): forgives spelling, and knows lyricists and actors.
 
-/** A composer, artist (singer), lyricist or actor. Actors' ids start with "actor-" (they aren't in Navidrome). */
+/** A composer, artist (singer), lyricist or actor. Actors' ids start with "actor-" (they aren't in the Subsonic API). */
 @Serializable
 data class PersonHit(
     val id: String,

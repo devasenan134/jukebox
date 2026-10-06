@@ -8,7 +8,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
 /**
- * Playlists you played from recently, newest first, kept on the phone. Navidrome records which
+ * Playlists you played from recently, newest first, kept on the phone. The server records which
  * songs you play but not which playlist they came from, so the app remembers it.
  */
 class RecentPlaylists(context: Context) {

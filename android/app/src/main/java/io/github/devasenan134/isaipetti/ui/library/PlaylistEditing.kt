@@ -155,7 +155,7 @@ fun AddToPlaylistSheet(song: Song, onDismiss: () -> Unit) {
             items(list.orEmpty(), key = { it.id }) { playlist ->
                 SaveRow(
                     title = playlist.name,
-                    // Navidrome won't change the songs of smart playlists or ones synced from a file.
+                    // The server won't change the songs of a read-only playlist.
                     subtitle = if (playlist.readonly) "Can't be changed here (smart or file playlist)" else songCount(playlist.songCount),
                     leading = { Cover(playlist.coverArt, Modifier.size(48.dp), size = 150, corner = 6.dp) },
                     checked = checked[playlist.id] == true,
@@ -248,7 +248,7 @@ fun PlaylistOwnerMenu(playlist: Playlist, onChanged: () -> Unit, onDeleted: () -
         }
     }
 
-    // A cover of your own: the friends server stores it in Navidrome (the phone can't, with only a music login).
+    // A cover of your own, kept with the playlist on the server.
     val coverPicker = rememberPhotoPicker(
         title = "Playlist cover",
         onRemove = { change({ app.social.api.removePlaylistCover(playlist.id) }, "Back to the automatic cover") },

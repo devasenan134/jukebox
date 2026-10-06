@@ -114,7 +114,7 @@ fun SearchScreen(nav: Nav) {
             val better = async {
                 try { app.social.api.search(query.trim()) } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    null // no friends server, or an older one: Navidrome's search is enough
+                    null // no friends server, or an older one: the Subsonic search is enough
                 }
             }
             try {
@@ -304,7 +304,7 @@ fun SearchScreen(nav: Nav) {
     }
 }
 
-/** Results from Navidrome's own search (exact spelling only). */
+/** Results from the Subsonic search (exact spelling only). */
 private fun LazyListScope.basicResults(result: SearchResult, playing: String?, nav: Nav, onPicked: () -> Unit) {
     val composers = result.artist.filter { it.isComposer }
     val singers = result.artist.filter { !it.isComposer }

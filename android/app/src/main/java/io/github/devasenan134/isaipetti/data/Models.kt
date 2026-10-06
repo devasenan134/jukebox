@@ -2,7 +2,7 @@ package io.github.devasenan134.isaipetti.data
 
 import kotlinx.serialization.Serializable
 
-// These mirror the JSON that Navidrome returns (the Subsonic / OpenSubsonic API).
+// These mirror the JSON the server returns from the Subsonic / OpenSubsonic API.
 // Every field has a default, so a missing field never crashes the app.
 // For this library: Album = movie, album artist = music director, song artist = singers.
 
@@ -19,7 +19,7 @@ data class Song(
     val year: Int? = null,
     val duration: Int = 0,
     val coverArt: String? = null,
-    /** When you liked it (Navidrome calls it "starred"); null if you haven't. */
+    /** When you liked it (the Subsonic API calls it "starred"); null if you haven't. */
     val starred: String? = null,
     /** Everyone credited as the song's artist (the singers), with their ids. */
     val artists: List<ArtistRef> = emptyList(),
@@ -61,10 +61,10 @@ data class Playlist(
     val songCount: Int = 0,
     val duration: Int = 0,
     val coverArt: String? = null,
-    /** Who made it (their Navidrome username). */
+    /** Who made it (their username). */
     val owner: String? = null,
     val public: Boolean = false,
-    /** Navidrome won't change its songs: a smart playlist, or one kept in sync with a playlist file on the server. */
+    /** The server won't change its songs (Subsonic's "readonly"; Jukebox has none of these yet). */
     val readonly: Boolean = false,
     /** When it was last changed (ISO date and time). */
     val changed: String? = null,
@@ -95,7 +95,7 @@ data class StructuredLyrics(
 @Serializable internal data class ArtistIndex(val artist: List<Artist> = emptyList())
 @Serializable internal data class Artists(val index: List<ArtistIndex> = emptyList())
 @Serializable internal data class Playlists(val playlist: List<Playlist> = emptyList())
-/** Everything Navidrome knows about one song (getSong, with OpenSubsonic's extra fields). */
+/** Everything the server knows about one song (getSong, with OpenSubsonic's extra fields). */
 @Serializable
 data class SongDetails(
     val id: String,
@@ -134,6 +134,6 @@ data class SongDetails(
 @Serializable data class Contributor(val role: String = "", val subRole: String? = null, val artist: ArtistRef = ArtistRef())
 @Serializable data class Genre(val name: String = "")
 
-/** What you've liked (starred) in Navidrome. */
+/** What you've liked (starred). */
 @Serializable data class Starred(val album: List<Album> = emptyList(), val song: List<Song> = emptyList())
 @Serializable internal data class LyricsList(val structuredLyrics: List<StructuredLyrics> = emptyList())

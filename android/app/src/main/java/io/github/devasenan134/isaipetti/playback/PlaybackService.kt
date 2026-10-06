@@ -169,7 +169,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     /**
-     * Reports plays to Navidrome: "now playing" when a song starts, then a real play
+     * Reports plays to the server (Subsonic scrobble): "now playing" when a song starts, then a real play
      * after half the song (or 4 minutes). This is the listening history the ML playlists will use.
      */
     private fun startScrobbling(player: ExoPlayer) {

@@ -11,8 +11,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Tells the friends server which songs you listened to and which you skipped. Navidrome only hears
- * about songs played to the halfway point; skips are what teach the mixes what you don't want.
+ * Tells the friends server which songs you listened to and which you skipped. The Subsonic scrobble only
+ * covers songs played to the halfway point; skips are what teach the mixes what you don't want.
  *
  * A skip is moving on to another song in the first 30 seconds. Nothing is reported while listening
  * together (someone else may be skipping) or for shared clips.

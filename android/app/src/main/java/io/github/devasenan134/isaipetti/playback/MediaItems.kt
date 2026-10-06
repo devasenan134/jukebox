@@ -10,7 +10,7 @@ import io.github.devasenan134.isaipetti.data.SongRef
 import io.github.devasenan134.isaipetti.data.SubsonicApi
 
 // Converting between our Song and Media3's MediaItem (what the player queue holds).
-// Navidrome ids ride along in "extras" so a queued song can be shared with friends.
+// Song ids ride along in "extras" so a queued song can be shared with friends.
 
 const val EXTRA_ALBUM_ID = "albumId"
 

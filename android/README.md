@@ -51,7 +51,7 @@ Then `./gradlew assembleRelease` builds `app/build/outputs/apk/release/app-relea
 
 ```
 app/src/main/java/io/github/devasenan134/isaipetti/
-  data/        Subsonic (Navidrome) and friends-server APIs, saved login, updates
+  data/        the server's Subsonic and friends APIs, saved login, updates
   playback/    background player, listen-together sync
   social/      friends, chats and listen-together state
   push/        notifications

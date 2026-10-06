@@ -117,7 +117,7 @@ fun likeCount(n: Int) = when (n) {
     else -> "%,d likes".format(n)
 }
 
-/** Album art from Navidrome, with a plain placeholder behind it while loading or if missing. */
+/** Album art from the server, with a plain placeholder behind it while loading or if missing. */
 @Composable
 fun Cover(coverArt: String?, modifier: Modifier = Modifier, size: Int = 300, corner: Dp = 8.dp) {
     val app = LocalApp.current

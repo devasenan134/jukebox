@@ -19,7 +19,7 @@ import io.github.devasenan134.isaipetti.ui.components.rememberPageTint
 import io.github.devasenan134.isaipetti.ui.components.UiSize
 
 /**
- * A lyricist or actor, found in search (the friends server knows them; Navidrome's pages don't):
+ * A lyricist or actor, found in search (the friends API knows them; the Subsonic API doesn't):
  * the movies they acted in or wrote for, then all their songs with Play and Shuffle.
  */
 @Composable

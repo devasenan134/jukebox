@@ -75,7 +75,7 @@ private fun chartColor(): Color =
 
 /**
  * Everyone's listening, for admins only (the server checks too).
- * Numbers come from Navidrome's play history: a song counts once half of it (or 4 minutes) is heard.
+ * Numbers come from the server's play history: a song counts once half of it (or 4 minutes) is heard.
  */
 @Composable
 fun StatsScreen(nav: Nav) {

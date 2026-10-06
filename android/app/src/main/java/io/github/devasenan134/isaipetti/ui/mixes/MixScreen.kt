@@ -173,7 +173,7 @@ fun MixScreen(id: String, nav: Nav) {
     }
 }
 
-/** Copies the mix's songs as they are today into a new Navidrome playlist of your own (it won't change after that). */
+/** Copies the mix's songs as they are today into a new playlist of your own (it won't change after that). */
 private suspend fun saveAsPlaylist(mix: Mix, app: io.github.devasenan134.isaipetti.IsaipettiApp, context: android.content.Context, nav: Nav) {
     runCatching {
         val playlist = app.api.createPlaylist(mix.title)

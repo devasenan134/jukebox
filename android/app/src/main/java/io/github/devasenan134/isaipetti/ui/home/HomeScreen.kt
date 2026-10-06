@@ -114,7 +114,7 @@ fun HomeScreen(nav: Nav) {
                     }
                 }
                 // 3. "Jump back in": movies, playlists, artists and mixes you played as a whole, as tiles.
-                // Until there's any listening, the movies Navidrome says you played.
+                // Until there's any listening, the movies the server says you played.
                 if (recents.collections.isNotEmpty() || playingFrom != null) {
                     recentRow(recents.collections, playingFrom, nowPlaying.isPlaying, knownMixes, nav) { app.player.play(listOf(it)) }
                 }
