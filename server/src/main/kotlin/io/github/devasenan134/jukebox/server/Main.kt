@@ -186,6 +186,8 @@ fun Application.jukeboxServer(
     install(StatusPages) {
         exception<ApiError> { call, e -> call.respond(e.status, ErrorResponse(e.message)) }
         exception<SerializationException> { call, _ -> call.respond(HttpStatusCode.BadRequest, ErrorResponse("Malformed request")) }
+        // A body that doesn't fit the request (a field missing, the wrong type) is the caller's mistake.
+        exception<io.ktor.server.plugins.BadRequestException> { call, _ -> call.respond(HttpStatusCode.BadRequest, ErrorResponse("Malformed request")) }
         exception<Throwable> { call, e ->
             log.error("Unhandled error", e)
             call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Something went wrong on the server"))

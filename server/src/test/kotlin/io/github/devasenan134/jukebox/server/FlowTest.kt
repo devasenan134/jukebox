@@ -53,6 +53,8 @@ class FlowTest {
         // Alice has an account (made with `jukebox user add`) and logs in.
         val alice = client.login("alice")
         assertEquals(HttpStatusCode.Unauthorized, client.postJson("/auth/login", LoginRequest("alice", "s", "wrong")).status)
+        // Navidrome's sign-in (a password, no token) isn't answered any more.
+        assertEquals(HttpStatusCode.BadRequest, client.post("/auth/login") { contentType(ContentType.Application.Json); setBody("""{"username":"alice","password":"x"}""") }.status)
 
         // She invites Bob, who signs up with the code (typed in lowercase, without the dash).
         val invite = client.postJson("/invites", Unit, alice.sessionToken).body<InviteDto>()
