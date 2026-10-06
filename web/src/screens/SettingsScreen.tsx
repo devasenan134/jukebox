@@ -6,7 +6,8 @@ import * as player from '../player/player'
 import { useSession } from '../state/session'
 import { Avatar } from '../social/avatars'
 import { ScreenHeader, useLoad } from '../ui/components'
-import { Dialog, IconButton, NameDialog, toast } from '../ui/kit'
+import { Dialog, IconButton, NameDialog, Switch, toast } from '../ui/kit'
+import { useNotifications } from '../social/notifications'
 import { checkPassword, PasswordStrength } from '../ui/password'
 import { useNav } from '../ui/nav'
 import { usePhotoPicker } from '../ui/PhotoPicker'
@@ -79,6 +80,8 @@ export function SettingsScreen() {
 
         {me && <Invites />}
 
+        {me && <NotificationsCard />}
+
         {me && <AdminCard onOpen={nav.openStats} />}
 
         {me && <FeedbackCard />}
@@ -138,6 +141,23 @@ export function SettingsScreen() {
         </Dialog>
       )}
     </div>
+  )
+}
+
+/** Notifications while Jukebox is in the background: messages, friend requests, jams. */
+function NotificationsCard() {
+  const { on, permission, setOn } = useNotifications()
+  const note =
+    permission === 'unsupported' ? "This browser doesn't show notifications from websites."
+      : permission === 'denied' ? 'Notifications are blocked for this site: allow them in the browser\'s site settings, then switch this on.'
+        : 'New messages, friend requests, and friends starting to listen together, while Jukebox is open in the background.'
+  return (
+    <Card title="Notifications">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="body-medium muted" style={{ flex: 1 }}>{note}</div>
+        <Switch checked={on && permission === 'granted'} disabled={permission === 'unsupported'} onChange={(v) => void setOn(v)} />
+      </div>
+    </Card>
   )
 }
 
