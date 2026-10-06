@@ -17,6 +17,7 @@ import { LibraryScreen } from './screens/LibraryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { FriendsScreen } from './screens/FriendsScreen'
 import { ChatScreen } from './screens/ChatScreen'
+import { RequestsScreen } from './screens/RequestsScreen'
 import { startSocial, useFriendsBadge } from './social/social'
 import { startJamSync } from './social/jamSync'
 import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistScreens'
@@ -91,6 +92,7 @@ function Main() {
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="/friends" element={<FriendsScreen />} />
           <Route path="/chat/:id" element={<ChatScreen />} />
+          <Route path="/requests" element={<RequestsScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
         </ErrorBoundary>

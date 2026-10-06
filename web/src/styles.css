@@ -1559,3 +1559,22 @@ a.nav-item:hover {
   padding: 6px 0;
   font-size: 14px;
 }
+
+/* ---- Rows of chips; small buttons (requests, filters) ---- */
+.chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips .chip {
+  gap: 6px;
+  flex-shrink: 0;
+}
+.btn.small {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+  gap: 4px;
+  flex-shrink: 0;
+}

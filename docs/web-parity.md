@@ -32,9 +32,9 @@ website has them.
 - [x] The **lyric being sung** under the cover; save, share and radio buttons in the full player
 
 **2. Music requests**
-- [ ] **Not in the library** results in Search (the iTunes catalog) with **Request** / **Requested ✓**
-- [ ] **Your requests** (waiting, added, can't find) and, for admins, **Everyone's** with Added / Can't find
-- [ ] **Search history**: past searches to tap again, ✕ to remove, Clear (the store is there unused)
+- [x] **Not in the library** results in Search (the iTunes catalog) with **Request** / **Requested ✓**
+- [x] **Your requests** (waiting, added, can't find) and, for admins, **Everyone's** with Added / Can't find
+- [x] **Search history**: past searches to tap again, ✕ to remove, Clear (the store is there unused)
 
 **3. Chat**
 - [ ] Group settings: members (in the jam, online, offline), add and remove people, rename, group photo, leave,
