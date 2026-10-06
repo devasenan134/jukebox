@@ -3,6 +3,7 @@ import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigationType }
 import { setLoginRejectedHandler } from './api/subsonic'
 import { MiniPlayer } from './player/MiniPlayer'
 import { PlayerBar } from './player/PlayerBar'
+import { QueuePanel, useQueuePanel } from './player/QueuePanel'
 import { Sidebar } from './shell/Sidebar'
 import * as player from './player/player'
 import { AlbumScreen } from './screens/AlbumScreen'
@@ -46,6 +47,7 @@ export default function App() {
 
 function Main() {
   const open = usePlayerOpen((s) => s.open)
+  const queueOpen = useQueuePanel((s) => s.open)
   const friendsBadge = useFriendsBadge()
   const location = useLocation()
   const navigationType = useNavigationType()
@@ -70,7 +72,7 @@ function Main() {
     })
   }, [])
   return (
-    <div className="app">
+    <div className={`app${queueOpen ? ' with-queue' : ''}`}>
       <div className="content" ref={scroller} onScroll={(e) => positions.current.set(location.key, e.currentTarget.scrollTop)}>
         <ErrorBoundary resetKey={location.pathname + location.search}>
         <Routes>
@@ -96,6 +98,11 @@ function Main() {
       <ErrorBoundary>
         <Sidebar />
       </ErrorBoundary>
+      {queueOpen && (
+        <ErrorBoundary>
+          <QueuePanel />
+        </ErrorBoundary>
+      )}
       <div className="mini-slot">
         <ErrorBoundary>
           <MiniPlayer onOpen={() => usePlayerOpen.getState().setOpen(true)} />

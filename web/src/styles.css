@@ -1474,3 +1474,44 @@ a.nav-item:hover {
     display: none !important;
   }
 }
+
+/* ---- The queue: a panel on the right of wide screens (player/QueuePanel.tsx) ---- */
+.queue-panel {
+  display: none;
+}
+@media (min-width: 900px) {
+  .app.with-queue {
+    grid-template-columns: var(--sidebar-width) 1fr var(--queue-width, 340px);
+  }
+  .app.with-queue .player-bar {
+    grid-column: 1 / 4;
+  }
+  .queue-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    grid-column: 3;
+    grid-row: 1;
+    overflow: hidden;
+  }
+}
+.queue-row .drag-handle {
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--on-surface-variant);
+  cursor: grab;
+  touch-action: none;
+}
+.queue-row .drag-handle:active {
+  cursor: grabbing;
+}
+@media (hover: hover) {
+  .queue-row .row-remove {
+    opacity: 0;
+  }
+  .queue-row:hover .row-remove,
+  .queue-row .row-remove:focus-visible {
+    opacity: 1;
+  }
+}

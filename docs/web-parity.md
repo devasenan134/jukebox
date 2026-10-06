@@ -26,7 +26,7 @@ Checked again against `android/CHANGELOG.md` on 2026-10-06. In the order they're
 website has them.
 
 **1. Player**
-- [ ] The **queue**: see what's next, reorder, take out; in a jam, the host edits it and the others see it
+- [x] The **queue**: see what's next, reorder, take out; in a jam, the host edits it and the others see it
 - [ ] **Resume** a playlist, album or Liked songs where you left off (the store, `queueMemory`, is there unused)
 - [ ] **About this song** in the full player: artists, composer, lyricist, album, year, genre, track, length, quality
 - [ ] The **lyric being sung** under the cover; save, share and radio buttons in the full player

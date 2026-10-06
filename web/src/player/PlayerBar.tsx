@@ -6,6 +6,7 @@ import { likes, useLikes } from '../state/likes'
 import { Cover, formatDuration, LikeButton } from '../ui/components'
 import { Icon, IconButton } from '../ui/kit'
 import { useNav, usePlayerOpen } from '../ui/nav'
+import { useQueuePanel } from './QueuePanel'
 
 /** A slider (seek or volume) that fills up to its value. */
 export function Slider({ value, max, onChange, label, style }: { value: number; max: number; onChange: (v: number) => void; label: string; style?: CSSProperties }) {
@@ -39,6 +40,7 @@ export function PlayerBar() {
   const song = item?.song
   const liked = useLikes((s) => !!song && s.songs.some((x) => x.id === song.id))
   const open = () => usePlayerOpen.getState().setOpen(true)
+  const queueOpen = useQueuePanel((s) => s.open)
 
   return (
     <footer className="player-bar" aria-label="Player">
@@ -85,6 +87,7 @@ export function PlayerBar() {
       </div>
       <div className="extra">
         <IconButton icon="lyrics" label="Lyrics" onClick={open} disabled={!song} size={20} />
+        <IconButton icon="queue_music" label="Queue" onClick={useQueuePanel.getState().toggle} size={20} color={queueOpen ? 'var(--primary)' : undefined} />
         <IconButton
           icon={volume === 0 ? 'volume_off' : volume < 0.5 ? 'volume_down' : 'volume_up'}
           label={volume === 0 ? 'Unmute' : 'Mute'}

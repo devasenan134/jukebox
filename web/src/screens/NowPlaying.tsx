@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { currentItem, usePlayer } from '../player/player'
@@ -6,6 +6,7 @@ import { usePosition } from '../player/MiniPlayer'
 import { Cover, formatDuration, LikeButton, useLoad } from '../ui/components'
 import { useCoverColor } from '../ui/coverColor'
 import { Slider } from '../player/PlayerBar'
+import { QueueSheet } from '../player/QueuePanel'
 import { likes, useLikes } from '../state/likes'
 import { Icon, IconButton } from '../ui/kit'
 import { useNav, usePlayerOpen } from '../ui/nav'
@@ -24,9 +25,11 @@ export function NowPlaying() {
   const lyrics = useLoad(['lyrics', song?.id], async () => (song ? subsonic.lyrics(song.id) : []))
   const tint = useCoverColor(song?.coverArt)
   const liked = useLikes((s) => !!song && s.songs.some((x) => x.id === song.id))
+  const [queue, setQueue] = useState(false)
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    // Escape closes the queue sheet first (it listens itself), then the player.
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.sheet') && close()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
@@ -47,8 +50,9 @@ export function NowPlaying() {
           <div className="label-medium" style={{ opacity: 0.75, letterSpacing: '0.08em' }}>PLAYING FROM</div>
           <div className="body-medium ellipsis" style={{ fontWeight: 700 }}>{song.album ?? 'Your queue'}</div>
         </div>
-        <div style={{ width: 48 }} />
+        <IconButton icon="queue_music" label="Queue" onClick={() => setQueue(true)} style={{ color: '#fff' }} />
       </div>
+      {queue && <QueueSheet onClose={() => setQueue(false)} />}
       <div className="now-playing" style={{ flex: 1, minHeight: 0, display: 'grid', gap: 32, padding: '16px 24px 24px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', overflowY: 'auto', alignItems: 'center', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
           <Cover coverArt={song.coverArt} size={800} corner={8} style={{ width: 'min(460px, 84vw, 52vh)', aspectRatio: '1', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }} />

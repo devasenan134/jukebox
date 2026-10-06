@@ -20,13 +20,14 @@ let applying = false
 let started = false
 
 function snapshot(includeQueue: boolean): ListenState {
-  const s = usePlayer.getState()
+  // In play order: songs added with "play next" or moved in the queue play where the host put them.
+  const { entries, currentPos } = player.queueInOrder()
   return {
-    queue: includeQueue ? s.items.map((i) => songToRef(i.song)) : undefined,
+    queue: includeQueue ? entries.map((i) => songToRef(i.song)) : undefined,
     queueId,
-    index: Math.max(0, s.current),
+    index: Math.max(0, currentPos),
     positionMs: positionMs(),
-    playing: s.isPlaying,
+    playing: usePlayer.getState().isPlaying,
   }
 }
 
@@ -62,7 +63,7 @@ export function startJamSync() {
   setListenSnapshot(() => snapshot(true))
   usePlayer.subscribe((s, prev) => {
     if (applying) return
-    const queueChanged = s.items !== prev.items
+    const queueChanged = s.items !== prev.items || s.order !== prev.order
     if (queueChanged) queueId = newQueueId()
     if (queueChanged || s.current !== prev.current || s.isPlaying !== prev.isPlaying) sendIfOwner(queueChanged)
     // Shuffle stays off while listening together.
