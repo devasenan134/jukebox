@@ -40,9 +40,9 @@ website has them.
 - [x] Group settings: members (in the jam, online, offline), add and remove people, rename, group photo, leave,
       delete for everyone; deleting a chat with someone who left
 - [x] **Seen** / **Seen by …** under your newest message (the read marks already arrive)
-- [ ] **@mentions** in groups (picker while typing, highlighted, "@" in the chat list)
-- [ ] **Pins** (24 hours, 7 days, 30 days; the pinned bar)
-- [ ] **Forward** to up to 10 chats; **search in a chat**
+- [x] **@mentions** in groups (picker while typing, highlighted, "@" in the chat list)
+- [x] **Pins** (24 hours, 7 days, 30 days; the pinned bar)
+- [x] **Forward** to up to 10 chats; **search in a chat**
 - [ ] **Recording voice notes** (the server takes MP4/AAC: Chrome, Edge and Safari can record that, Firefox can't)
       and a voice player with a seek bar
 - [ ] **Who reacted** (a tab per emoji), any emoji, your own quick reactions

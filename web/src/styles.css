@@ -1582,3 +1582,48 @@ a.nav-item:hover {
   background: var(--error);
   color: #fff;
 }
+
+/* ---- Chat tools: pinned bar, @mentions, search, a message being jumped to ---- */
+.pinned-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 6px 16px;
+  background: var(--surface-container);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.mention-list {
+  background: var(--surface-container);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.mention {
+  color: var(--primary);
+}
+.mention.me {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.chat-search {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bubble-row.flash > div,
+[data-mid].flash {
+  animation: flash 1.6s ease-out;
+}
+@keyframes flash {
+  0%,
+  40% {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
+    border-radius: 12px;
+  }
+  100% {
+    background: transparent;
+  }
+}

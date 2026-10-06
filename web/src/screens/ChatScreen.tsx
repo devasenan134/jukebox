@@ -7,7 +7,9 @@ import { social } from '../api/social'
 import * as player from '../player/player'
 import { Avatar, GroupAvatar, useFriendsServerPicture } from '../social/avatars'
 import { useListen } from '../social/listen'
-import { deleteConversation, markRead, me, onMessage, onRemoved, refresh, sendTyping, setOpenConversation, useSocial } from '../social/social'
+import { deleteConversation, markRead, me, onMessage, onRemoved, refresh, refreshConversationsSoon, sendTyping, setOpenConversation, useSocial } from '../social/social'
+import { ChatSearch, ForwardDialog, MentionList, mentionSuggestions, PinDialog, PinnedBar, quoteText, WithMentions } from '../social/ChatTools'
+import type { SocialUser } from '../api/types'
 import { GroupInfoSheet, GroupMenu } from '../social/GroupInfo'
 import { Cover, formatDuration } from '../ui/components'
 import { Dialog, Icon, IconButton, Menu, toast, type MenuItem } from '../ui/kit'
@@ -30,6 +32,11 @@ export function ChatScreen() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [editing, setEditing] = useState<ChatMessage | null>(null)
   const [members, setMembers] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [forwarding, setForwarding] = useState<ChatMessage | null>(null)
+  const [pinning, setPinning] = useState<ChatMessage | null>(null)
+  const latest = useRef(messages)
+  latest.current = messages
   const [deleting, setDeleting] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -85,6 +92,36 @@ export function ChatScreen() {
     requestAnimationFrame(() => el && (el.scrollTop = el.scrollHeight - before))
   }
 
+  /** Goes to a message (a pin, a reply's quote, a search result), loading earlier pages until it's there. */
+  const jumpTo = async (target: number) => {
+    setSearching(false)
+    stick.current = false
+    for (let guard = 0; guard < 40 && !latest.current.some((m) => m.id === target); guard++) {
+      const first = latest.current[0]
+      if (!first || first.id < target) break
+      const page = await social.messages(id, first.id).catch(() => [] as ChatMessage[])
+      if (!page.length) break
+      setMore(page.length >= PAGE)
+      merge(page)
+      latest.current = [...page, ...latest.current]
+    }
+    setTimeout(() => {
+      const el = list.current?.querySelector<HTMLElement>(`[data-mid="${target}"]`)
+      if (!el) return toast("That message isn't in the chat anymore")
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.classList.add('flash')
+      setTimeout(() => el.classList.remove('flash'), 1600)
+    }, 60)
+  }
+  const pin = (m: ChatMessage, hours: number) =>
+    social.pin(id, m.id, hours).then(refreshConversationsSoon).catch((e) => toast((e as Error).message || "Couldn't pin it"))
+  const unpin = (messageId: number) =>
+    social.unpin(id, messageId).then(refreshConversationsSoon).catch((e) => toast((e as Error).message || "Couldn't unpin it"))
+  const forward = (m: ChatMessage, to: number[]) =>
+    social.forward(id, m.id, to)
+      .then(() => { refreshConversationsSoon(); toast(to.length > 1 ? `Forwarded to ${to.length} chats` : 'Forwarded') })
+      .catch((e) => toast((e as Error).message || "Couldn't forward it"))
+
   if (!conversation) {
     return (
       <div className="page">
@@ -116,17 +153,20 @@ export function ChatScreen() {
           <div className="title-medium ellipsis" data-testid="chat-title">{chatTitle(conversation)}</div>
           <div className={`body-small ellipsis ${typers.length ? 'primary-text' : 'muted'}`}>{subtitle}</div>
         </div>
+        <IconButton icon="search" label="Search this chat" onClick={() => setSearching(true)} />
         <JamButton conversation={conversation} />
         {!partner && <GroupMenu conversation={conversation} onShowMembers={() => setMembers(true)} onGone={nav.back} />}
       </div>
       {members && <GroupInfoSheet conversation={conversation} onClose={() => setMembers(false)} />}
+      <PinnedBar pins={(conversation.pins ?? []).filter((p) => p.expiresAt > Date.now())} onJump={(m) => void jumpTo(m)} onUnpin={(m) => void unpin(m)} />
+      {searching && <ChatSearch conversationId={id} onPick={(m) => void jumpTo(m)} onClose={() => setSearching(false)} />}
       <div
         ref={list}
         onScroll={(e) => {
           const el = e.currentTarget
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
         }}
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px 12px' }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 12px 12px', display: searching ? 'none' : undefined }}
       >
         {loaded && more && messages.length > 0 && (
           <div style={{ textAlign: 'center', padding: 8 }}><button className="btn text" onClick={() => void older()}>Earlier messages</button></div>
@@ -141,6 +181,10 @@ export function ChatScreen() {
             onReply={() => setReplyTo(m)}
             onEdit={() => setEditing(m)}
             onChanged={(x) => merge([x])}
+            onJump={(x) => void jumpTo(x)}
+            onPin={() => setPinning(m)}
+            onUnpin={() => void unpin(m.id)}
+            onForward={() => setForwarding(m)}
           />
         ))}
         <Seen conversation={conversation} messages={messages} />
@@ -152,7 +196,7 @@ export function ChatScreen() {
         </div>
       ) : (
         <Composer
-          conversationId={id}
+          conversation={conversation}
           replyTo={replyTo}
           onCancelReply={() => setReplyTo(null)}
           onSent={(m) => {
@@ -162,7 +206,9 @@ export function ChatScreen() {
           }}
         />
       )}
-      {editing && <EditMessage m={editing} onClose={() => setEditing(null)} onSaved={(m) => merge([m])} />}
+      {editing && <EditMessage m={editing} conversation={conversation} onClose={() => setEditing(null)} onSaved={(m) => merge([m])} />}
+      {pinning && <PinDialog onClose={() => setPinning(null)} onPin={(hours) => void pin(pinning, hours)} />}
+      {forwarding && <ForwardDialog onClose={() => setForwarding(null)} onForward={(to) => { const m = forwarding; setForwarding(null); void forward(m, to) }} />}
       {deleting && (
         <Dialog
           title="Delete this chat?"
@@ -219,18 +265,33 @@ function JamButton({ conversation }: { conversation: Conversation }) {
   )
 }
 
-function Bubble({ m, conversation, first, onReply, onEdit, onChanged }: {
+function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, onPin, onUnpin, onForward }: {
   m: ChatMessage
   conversation: Conversation
   first: boolean
   onReply: () => void
   onEdit: () => void
   onChanged: (m: ChatMessage) => void
+  /** Goes to another message (a quote, or the one a "pinned a message" line is about). */
+  onJump: (id: number) => void
+  onPin: () => void
+  onUnpin: () => void
+  onForward: () => void
 }) {
   const mine = m.sender.id === me()?.id
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const isGroup = conversation.kind === 'group'
-  if (m.system) return <div className="body-small muted" style={{ textAlign: 'center', padding: '10px 0' }}>{m.body}</div>
+  const pinned = (conversation.pins ?? []).some((p) => p.message.id === m.id && p.expiresAt > Date.now())
+  const canMessage = conversation.canMessage !== false
+  if (m.system) {
+    // "… pinned a message" goes to that message.
+    const target = m.replyTo && !m.replyTo.hidden ? m.replyTo.id : null
+    return (
+      <div data-mid={m.id} className="body-small muted" onClick={() => target != null && onJump(target)} style={{ textAlign: 'center', padding: '10px 0', cursor: target != null ? 'pointer' : undefined }}>
+        {m.body}
+      </div>
+    )
+  }
 
   const react = (emoji: string) => {
     const mineNow = m.reactions?.find((r) => r.userIds.includes(me()?.id ?? -1))?.emoji
@@ -240,12 +301,15 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged }: {
     { label: 'Reply', onClick: onReply, hidden: m.deleted },
     { label: 'Play song', onClick: () => m.song && playShared(m.song), hidden: !m.song || m.deleted },
     { label: 'Copy text', onClick: () => void navigator.clipboard?.writeText(m.body), hidden: !m.body || m.deleted },
+    { label: 'Pin', onClick: onPin, hidden: pinned || m.deleted || !canMessage },
+    { label: 'Unpin', onClick: onUnpin, hidden: !pinned },
+    { label: 'Forward', onClick: onForward, hidden: m.deleted },
     { label: 'Edit', onClick: onEdit, hidden: !mine || m.deleted || !!m.song || !!m.image || !!m.voiceMs },
     { label: 'Delete', onClick: () => social.deleteMessage(m.conversationId, m.id).then(onChanged).catch(() => toast("Couldn't delete it")), hidden: !mine || m.deleted },
   ]
   const bg = mine ? 'var(--primary-container)' : 'var(--surface-container-high)'
   return (
-    <div className="bubble-row" style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8, marginTop: first ? 12 : 3 }}>
+    <div className="bubble-row" data-mid={m.id} style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8, marginTop: first ? 12 : 3 }}>
       {!mine && isGroup && <div style={{ width: 28, flexShrink: 0 }}>{first && <Avatar name={m.sender.displayName} userKey={m.sender.username} user={m.sender} size={28} />}</div>}
       <div style={{ maxWidth: 'min(520px, 78%)', display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
         {first && !mine && isGroup && <div className="body-small muted" style={{ margin: '0 10px 2px' }}>{m.sender.displayName}</div>}
@@ -256,9 +320,13 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged }: {
         >
           {m.forwarded && <div className="body-small muted" style={{ marginBottom: 2 }}>↪ Forwarded</div>}
           {m.replyTo && (
-            <div className="body-small" style={{ borderLeft: '3px solid var(--primary)', padding: '2px 8px', marginBottom: 6, opacity: 0.8 }}>
+            <div
+              className="body-small"
+              onClick={() => !m.replyTo!.hidden && onJump(m.replyTo!.id)}
+              style={{ borderLeft: '3px solid var(--primary)', padding: '2px 8px', marginBottom: 6, opacity: 0.8, cursor: m.replyTo.hidden ? undefined : 'pointer' }}
+            >
               <b>{m.replyTo.sender.displayName}</b>
-              <div className="ellipsis">{m.replyTo.hidden ? 'An earlier message' : m.replyTo.deleted ? 'Message deleted' : m.replyTo.song ? `🎵 ${m.replyTo.song.title}` : m.replyTo.imageKind ? '📷 Picture' : m.replyTo.voiceMs ? '🎤 Voice message' : m.replyTo.body}</div>
+              <div className="ellipsis">{quoteText(m.replyTo)}</div>
             </div>
           )}
           {m.deleted ? (
@@ -269,7 +337,7 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged }: {
               {m.image && <ChatPicture m={m} />}
               {m.voiceMs != null && m.voiceMs > 0 && <Voice m={m} />}
               {m.request && <RequestLine m={m} conversation={conversation} onChanged={onChanged} />}
-              {m.body && <div style={{ padding: m.image ? '6px 8px 4px' : 0, marginTop: m.song ? 6 : 0 }}>{m.body}</div>}
+              {m.body && <div style={{ padding: m.image ? '6px 8px 4px' : 0, marginTop: m.song ? 6 : 0 }}><WithMentions body={m.body} m={m} conversation={conversation} /></div>}
             </>
           )}
         </div>
@@ -283,6 +351,7 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged }: {
           </div>
         )}
         <div className="body-small muted" style={{ fontSize: 11, margin: '2px 8px 0' }}>
+          {pinned && <Icon name="push_pin" size={11} style={{ verticalAlign: '-1px', marginRight: 3 }} />}
           {shortTime(m.createdAt)}{m.editedAt ? ' · edited' : ''}
         </div>
       </div>
@@ -379,13 +448,28 @@ function RequestLine({ m, conversation, onChanged }: { m: ChatMessage; conversat
   )
 }
 
-function Composer({ conversationId, replyTo, onCancelReply, onSent }: {
-  conversationId: number
+function Composer({ conversation, replyTo, onCancelReply, onSent }: {
+  conversation: Conversation
   replyTo: ChatMessage | null
   onCancelReply: () => void
   onSent: (m: ChatMessage) => void
 }) {
+  const conversationId = conversation.id
   const [text, setText] = useState('')
+  // @mentions put in the text: who, and the name typed for them. A name deleted from the text isn't mentioned.
+  const [mentioned, setMentioned] = useState<Record<number, string>>({})
+  const [cursor, setCursor] = useState(0)
+  const suggest = mentionSuggestions(conversation, text, cursor)
+  const mentionsIn = (body: string) => Object.entries(mentioned).filter(([, name]) => body.includes('@' + name)).map(([uid]) => Number(uid))
+  const pickMention = (u: SocialUser) => {
+    const inserted = `@${u.displayName} `
+    const next = text.slice(0, suggest.at) + inserted + text.slice(cursor)
+    const at = suggest.at + inserted.length
+    setText(next)
+    setMentioned({ ...mentioned, [u.id]: u.displayName })
+    setCursor(at)
+    requestAnimationFrame(() => box.current?.setSelectionRange(at, at))
+  }
   const [busy, setBusy] = useState(false)
   const box = useRef<HTMLTextAreaElement>(null)
   const file = useRef<HTMLInputElement>(null)
@@ -395,8 +479,9 @@ function Composer({ conversationId, replyTo, onCancelReply, onSent }: {
     if (!body || busy) return
     setBusy(true)
     try {
-      onSent(await social.sendMessage(conversationId, body, null, replyTo?.id ?? null))
+      onSent(await social.sendMessage(conversationId, body, null, replyTo?.id ?? null, mentionsIn(body)))
       setText('')
+      setMentioned({})
     } catch (e) {
       toast((e as Error).message || "Couldn't send it")
     }
@@ -421,6 +506,7 @@ function Composer({ conversationId, replyTo, onCancelReply, onSent }: {
           <IconButton icon="close" label="Cancel reply" size={18} onClick={onCancelReply} />
         </div>
       )}
+ {suggest.members.length > 0 && <MentionList members={suggest.members} onPick={pickMention} />}
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
         <IconButton icon="image" label="Send a picture" onClick={() => file.current?.click()} />
         <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { void sendPicture(e.target.files?.[0]); e.target.value = '' }} />
@@ -432,10 +518,15 @@ function Composer({ conversationId, replyTo, onCancelReply, onSent }: {
           aria-label="Message"
           onChange={(e) => {
             setText(e.target.value)
+            setCursor(e.target.selectionStart)
             sendTyping(conversationId)
           }}
+          onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && suggest.members.length) {
+              e.preventDefault()
+              pickMention(suggest.members[0])
+            } else if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               void send()
             }
@@ -453,10 +544,15 @@ function Composer({ conversationId, replyTo, onCancelReply, onSent }: {
   )
 }
 
-function EditMessage({ m, onClose, onSaved }: { m: ChatMessage; onClose: () => void; onSaved: (m: ChatMessage) => void }) {
+function EditMessage({ m, conversation, onClose, onSaved }: { m: ChatMessage; conversation: Conversation; onClose: () => void; onSaved: (m: ChatMessage) => void }) {
   const [text, setText] = useState(m.body)
+  // Mentions stay while their "@Name" is still in the text.
+  const kept = (m.mentions ?? []).filter((uid) => {
+    const name = conversation.members.find((x) => x.id === uid)?.displayName
+    return name != null && text.includes('@' + name)
+  })
   const save = () =>
-    social.editMessage(m.conversationId, m.id, text.trim(), m.mentions ?? [])
+    social.editMessage(m.conversationId, m.id, text.trim(), kept)
       .then((x) => { onSaved(x); onClose() })
       .catch((e) => toast((e as Error).message || "Couldn't edit it"))
   return (
