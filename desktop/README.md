@@ -11,9 +11,11 @@ always matches the website and has no features of its own except these:
 
 ## Getting the DMG
 
-GitHub Actions builds it on a Mac (`.github/workflows/desktop-macos.yml`): every push that changes `desktop/`
-leaves `Jukebox-<version>-macos.dmg` under the run's **Artifacts**, and a `desktop-v<version>` tag also puts it on
-a release (not marked "latest", because the Android app reads the latest release for its updates).
+It's on each app release next to the APK (`jukebox-<version>-macos.dmg`), built by GitHub Actions on a Mac
+(`.github/workflows/desktop-macos.yml`): publishing a release `vX.Y.Z` builds the DMG with that version and attaches
+it. To add one to an older release, run the workflow by hand with its tag
+(`gh workflow run desktop-macos.yml -f tag=v0.12.1`). Pushes that change `desktop/` also build one, kept under the
+run's **Artifacts**, for trying changes before a release.
 
 The DMG is one universal app for Apple silicon and Intel Macs, macOS 12 or newer. It isn't signed with an Apple
 Developer ID, so the first time macOS says it can't check it: open **System Settings › Privacy & Security** and
