@@ -145,7 +145,7 @@ const visible = () => document.visibilityState === 'visible'
 let playing = false
 let nowPlaying: SongRef | null = null
 
-/** Logs in to the friends server with the saved Navidrome login, if not done yet. */
+/** Logs in to the friends server with the saved login, if not done yet. */
 async function ensureLoggedIn() {
   const s = session()
   if (s.social) return

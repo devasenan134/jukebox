@@ -11,7 +11,7 @@ import { load, save, remove } from '../state/storage'
 // The web app's player: one <audio> element plus a queue that works like the Android app's
 // Media3 player (PlaybackService.kt, PlayerConnection.kt, MixPlayback.kt): shuffle keeps a play
 // order, repeat is off -> all -> one, "previous" restarts a song past 3 seconds, plays are
-// scrobbled to Navidrome, skips are reported to the friends server, stations keep adding songs,
+// scrobbled (Subsonic), skips are reported to the friends API, stations keep adding songs,
 // and queues started from a playlist remember where you left off.
 
 export type RepeatMode = 'off' | 'all' | 'one'
@@ -430,7 +430,7 @@ function onTransition(item: QueueItem) {
 }
 
 /**
- * Reports plays to Navidrome: a real play after half the song (or 4 minutes). This is the
+ * Reports plays (Subsonic scrobble): a real play after half the song (or 4 minutes). This is the
  * listening history the mixes use.
  */
 function scrobbleCheck() {

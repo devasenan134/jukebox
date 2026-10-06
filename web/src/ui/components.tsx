@@ -41,7 +41,7 @@ export const songCount = (n: number) => (n === 1 ? '1 song' : `${n.toLocaleStrin
 /** "1 like", "12 likes", or "No likes yet". */
 export const likeCount = (n: number) => (n === 0 ? 'No likes yet' : n === 1 ? '1 like' : `${n.toLocaleString('en')} likes`)
 
-/** Album art from Navidrome, with a plain placeholder behind it while loading or if missing. */
+/** Album art from the server, with a plain placeholder behind it while loading or if missing. */
 export function Cover({ coverArt, size = 300, corner = 8, className, style, round, fallbacks }: {
   coverArt?: string | null
   size?: number
@@ -497,7 +497,7 @@ export function AddToPlaylistSheet({ song, onClose }: { song: Song; onClose: () 
           row(
             p.id,
             p.name,
-            // Navidrome won't change the songs of smart playlists or ones synced from a file.
+            // The server won't change the songs of a read-only playlist.
             p.readonly ? "Can't be changed here (smart or file playlist)" : songCount(p.songCount),
             <Cover coverArt={p.coverArt} size={150} corner={6} style={{ width: 48, height: 48, flexShrink: 0 }} />,
             !!checked[p.id],

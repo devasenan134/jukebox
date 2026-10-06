@@ -17,9 +17,6 @@ Commands:
     python analyze.py once             analyze new and changed songs, then stop
     python analyze.py sample 60        analyze 60 random songs (for trying it out)
     python analyze.py report           show which songs fit each description best
-    python analyze.py adopt OLD_FEATURES NAVIDROME_DB
-                                       take over what the Isaipetti analyzer already worked out (it keyed songs
-                                       by Navidrome's ids), matching files by path, instead of listening again
 """
 
 import os
@@ -108,7 +105,7 @@ def open_features():
         db.execute("DELETE FROM songs")
         db.execute("DELETE FROM prompts")
     db.execute("INSERT OR REPLACE INTO meta VALUES ('model', ?)", (MODEL,))
-    # Tells Jukebox the ids are its recordings' (the Isaipetti analyzer's were Navidrome's).
+    # Tells Jukebox the ids are its recordings' (the analyzer this one replaced used Navidrome's).
     db.execute("INSERT OR REPLACE INTO meta VALUES ('ids', 'recording')")
     db.commit()
     return db
@@ -341,48 +338,6 @@ def report(db):
     print(f"\ntempo: median {np.median(tempos):.0f} BPM, range {tempos.min():.0f}–{tempos.max():.0f}")
 
 
-def adopt(db, old_features, navidrome_db):
-    """Copies the Isaipetti analyzer's results (keyed by Navidrome song ids) over to Jukebox's recordings,
-    matching each song by its file's path (Navidrome and Jukebox read the same music folder). Songs found
-    this way aren't listened to again; anything not matched is analyzed by the next check as usual."""
-    old = sqlite3.connect(f"file:{old_features}?mode=ro", uri=True)
-    model = old.execute("SELECT value FROM meta WHERE key = 'model'").fetchone()
-    if not model or model[0] != MODEL:
-        sys.exit(f"{old_features} was made with {model[0] if model else 'an unknown model'}, not {MODEL}: nothing to adopt")
-    nd = sqlite3.connect(f"file:{navidrome_db}?mode=ro", uri=True, timeout=30)
-    nd_paths = {}
-    for song_id, library_path, path in nd.execute("SELECT m.id, l.path, m.path FROM media_file m JOIN library l ON l.id = m.library_id"):
-        nd_paths[song_id] = os.path.relpath(path, library_path) if os.path.isabs(path) else path
-    nd.close()
-    # Every file of every recording, so a Navidrome song finds its recording whichever copy it was.
-    jb = catalog()
-    by_path = {path: rec for path, rec in jb.execute(
-        "SELECT f.path, coalesce(r.merged_into, r.id) FROM files f JOIN recordings r ON r.id = f.recording_id WHERE f.missing_since IS NULL")}
-    jb.close()
-    songs = jukebox_songs()
-    adopted = 0
-    for song_id, analyzed_at, tempo, energy, brightness, rhythm, embedding, error in old.execute(
-            "SELECT id, analyzed_at, tempo, energy, brightness, rhythm, embedding, error FROM songs"):
-        rec = by_path.get(nd_paths.get(song_id, ""))
-        if rec not in songs or (embedding is None and error is None):
-            continue
-        path, version, _ = songs[rec]
-        db.execute("INSERT OR IGNORE INTO songs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                   (rec, path, version, analyzed_at, tempo, energy, brightness, rhythm, embedding, error))
-        adopted += 1
-    for key, embedding in old.execute("SELECT key, embedding FROM prompts"):
-        db.execute("INSERT OR REPLACE INTO prompts VALUES (?, ?)", (key, embedding))
-    for key in ("prompts",):
-        row = old.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
-        if row:
-            db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, row[0]))
-    db.execute("INSERT OR REPLACE INTO meta VALUES ('updated_at', ?)", (str(int(time.time() * 1000)),))
-    db.commit()
-    old.close()
-    left = len(songs) - db.execute("SELECT count(*) FROM songs").fetchone()[0]
-    print(f"Adopted {adopted} songs; {left} of Jukebox's {len(songs)} are left to analyze", flush=True)
-
-
 def main():
     signal.signal(signal.SIGTERM, on_stop)
     signal.signal(signal.SIGINT, on_stop)
@@ -390,9 +345,6 @@ def main():
     db = open_features()
     if command == "report":
         report(db)
-        return
-    if command == "adopt":
-        adopt(db, sys.argv[2], sys.argv[3])
         return
     lazy = LazyClap()
     if command == "sample":

@@ -10,16 +10,15 @@ local.properties
 # Secrets and private data: never commit these (anywhere in the repo)
 .env
 /server/secrets/
-/navidrome/secrets/
 /server/data/
-/navidrome/data/
 *.keystore
 *.jks
 google-services.json
 *firebase-adminsdk*.json
 firebase-key.json
-/server/no-navidrome-data/
 /server/no-features/
+/server/no-music/
+/server/no-signals/
 /analyzer/data/
 .DS_Store
 *.log

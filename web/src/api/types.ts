@@ -1,4 +1,4 @@
-// These mirror the JSON Navidrome (Subsonic / OpenSubsonic API) and the friends server return,
+// These mirror the JSON the server returns (the Subsonic / OpenSubsonic API and the friends API),
 // the same shapes as the Android app's data/Models.kt, data/Mixes.kt and data/SocialModels.kt.
 // For this library: Album = movie, album artist = music director, song artist = singers.
 
@@ -19,7 +19,7 @@ export interface Song {
   year?: number
   duration: number
   coverArt?: string
-  /** When you liked it (Navidrome calls it "starred"); undefined if you haven't. */
+  /** When you liked it (the Subsonic API calls it "starred"); undefined if you haven't. */
   starred?: string
   /** Everyone credited as the song's artist (the singers), with their ids. */
   artists?: ArtistRef[]
@@ -58,10 +58,10 @@ export interface Playlist {
   songCount: number
   duration?: number
   coverArt?: string
-  /** Who made it (their Navidrome username). */
+  /** Who made it (their username). */
   owner?: string
   public?: boolean
-  /** Navidrome won't change its songs (a smart playlist, or one synced with a file). */
+  /** The server won't change its songs (Subsonic's "readonly"; Jukebox has none of these yet). */
   readonly?: boolean
   /** When it was last changed (ISO date and time). */
   changed?: string
@@ -93,7 +93,7 @@ export interface Contributor {
   artist: ArtistRef
 }
 
-/** Everything Navidrome knows about one song (getSong, with OpenSubsonic's extra fields). */
+/** Everything the server knows about one song (getSong, with OpenSubsonic's extra fields). */
 export interface SongDetails extends Song {
   displayAlbumArtist?: string
   albumArtists?: ArtistRef[]
