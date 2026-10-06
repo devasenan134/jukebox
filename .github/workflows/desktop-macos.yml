@@ -1,6 +1,9 @@
 # Builds Jukebox.app and Jukebox.dmg for macOS (one universal file for Apple silicon and Intel Macs).
 # - Publishing an app release (vX.Y.Z, the one with the APK) builds the DMG with that version and attaches it,
 #   so each release has both. The Android updater only looks at the .apk, so the DMG doesn't get in its way.
+# - Next to the DMG go the app's signed update (jukebox-X.Y.Z-macos.app.tar.gz) and latest-macos.json, which
+#   installed apps read from the latest release to update themselves. The signing key is the
+#   TAURI_SIGNING_PRIVATE_KEY secret (kept by the maintainer; the public half is in tauri.conf.json).
 # - Run it by hand with a tag to add the DMG to a release made earlier.
 # - Every change to desktop/ also builds one, kept under the run's Artifacts, to try before releasing.
 name: Desktop (macOS)
@@ -28,6 +31,8 @@ jobs:
         working-directory: desktop
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
     steps:
       - uses: actions/checkout@v4
 
@@ -53,9 +58,21 @@ jobs:
           # A release builds with its own version (v0.12.1 → 0.12.1); otherwise tauri.conf.json's.
           if [ -n "$TAG" ]; then version="${TAG#v}"; else version=$(node -p "require('./src-tauri/tauri.conf.json').version"); fi
           npm run build:mac -- --config "{\"version\":\"$version\"}"
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
           out="jukebox-$version-macos.dmg"
-          mv src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg "$out"
+          update="jukebox-$version-macos.app.tar.gz"
+          mv $bundle/dmg/*.dmg "$out"
+          mv $bundle/macos/*.app.tar.gz "$update"
+          # The updater's manifest: one universal build serves both kinds of Mac.
+          url="https://github.com/${{ github.repository }}/releases/download/$TAG/$update"
+          VERSION="$version" URL="$url" SIG="$(cat $bundle/macos/*.app.tar.gz.sig)" node -e '
+            const { VERSION, URL, SIG } = process.env
+            const build = { signature: SIG, url: URL }
+            const manifest = { version: VERSION, pub_date: new Date().toISOString(),
+              platforms: { "darwin-aarch64": build, "darwin-x86_64": build } }
+            require("fs").writeFileSync("latest-macos.json", JSON.stringify(manifest, null, 2))'
           echo "file=$out" >> "$GITHUB_OUTPUT"
+          echo "update=$update" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -66,4 +83,4 @@ jobs:
         if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" "${{ steps.build.outputs.file }}" --clobber
+        run: gh release upload "$TAG" "${{ steps.build.outputs.file }}" "${{ steps.build.outputs.update }}" latest-macos.json --clobber
