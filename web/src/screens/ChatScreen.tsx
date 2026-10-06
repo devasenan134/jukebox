@@ -8,6 +8,8 @@ import * as player from '../player/player'
 import { Avatar, GroupAvatar, useFriendsServerPicture } from '../social/avatars'
 import { useListen } from '../social/listen'
 import { deleteConversation, markRead, me, onMessage, onRemoved, refresh, refreshConversationsSoon, sendTyping, setOpenConversation, useSocial } from '../social/social'
+import { PicturePreview, sendPicture, ShareMusicSheet } from '../social/ChatMedia'
+import { QueueSheet } from '../player/QueuePanel'
 import { RecordingBar, useVoiceRecorder, VoicePlayer } from '../social/Voice'
 import { EditQuickReactions, EmojiPicker, myReaction, ReactionRow, WhoReacted } from '../social/Reactions'
 import { ChatSearch, ForwardDialog, MentionList, mentionSuggestions, PinDialog, PinnedBar, quoteText, WithMentions } from '../social/ChatTools'
@@ -155,6 +157,7 @@ export function ChatScreen() {
           <div className={`body-small ellipsis ${typers.length ? 'primary-text' : 'muted'}`}>{subtitle}</div>
         </div>
         <IconButton icon="search" label="Search this chat" onClick={() => setSearching(true)} />
+        <JamQueueButton conversationId={id} />
         <JamButton conversation={conversation} />
         {!partner && <GroupMenu conversation={conversation} onShowMembers={() => setMembers(true)} onGone={nav.back} />}
       </div>
@@ -241,6 +244,19 @@ function Seen({ conversation, messages }: { conversation: Conversation; messages
   return <div className="body-small muted" style={{ textAlign: 'right', fontSize: 11, margin: '2px 8px 0' }}>{text}</div>
 }
 
+/** While you're in this chat's jam: what's coming up (the host can change it, others see it). */
+function JamQueueButton({ conversationId }: { conversationId: number }) {
+  const joined = useListen((s) => s.joined)
+  const [open, setOpen] = useState(false)
+  if (joined !== conversationId) return null
+  return (
+    <>
+      <IconButton icon="queue_music" label="Jam queue" onClick={() => setOpen(true)} />
+      {open && <QueueSheet onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 /** Listen together: start a jam with this chat, join one that's on, or leave. */
 function JamButton({ conversation }: { conversation: Conversation }) {
   const joined = useListen((s) => s.joined)
@@ -309,7 +325,8 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, on
     { label: 'Edit', onClick: onEdit, hidden: !mine || m.deleted || !!m.song || !!m.image || !!m.voiceMs },
     { label: 'Delete', onClick: () => social.deleteMessage(m.conversationId, m.id).then(onChanged).catch(() => toast("Couldn't delete it")), hidden: !mine || m.deleted },
   ]
-  const bg = mine ? 'var(--primary-container)' : 'var(--surface-container-high)'
+  // Stickers show on their own, without a bubble.
+  const bg = m.image?.kind === 'sticker' && !m.body ? 'transparent' : mine ? 'var(--primary-container)' : 'var(--surface-container-high)'
   return (
     <div className="bubble-row" data-mid={m.id} style={{ display: 'flex', flexDirection: mine ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: 8, marginTop: first ? 12 : 3 }}>
       {!mine && isGroup && <div style={{ width: 28, flexShrink: 0 }}>{first && <Avatar name={m.sender.displayName} userKey={m.sender.username} user={m.sender} size={28} />}</div>}
@@ -421,8 +438,11 @@ function ChatPicture({ m }: { m: ChatMessage }) {
         <div className="skel" style={{ width: w, maxWidth: '100%', aspectRatio: `${w} / ${h}`, borderRadius: 14 }} />
       )}
       {big && url && (
-        <div className="scrim center" onClick={() => setBig(false)}>
-          <img src={url} alt="" style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 8 }} />
+        <div className="scrim center" onClick={() => setBig(false)} style={{ flexDirection: 'column', gap: 12 }}>
+          <img src={url} alt="" style={{ maxWidth: '92vw', maxHeight: '80vh', borderRadius: 8 }} />
+          <a className="btn tonal" href={url} download={`jukebox-${m.id}.${m.image!.kind === 'gif' ? 'gif' : 'jpg'}`} onClick={(e) => e.stopPropagation()}>
+            <Icon name="download" size={18} />Save
+          </a>
         </div>
       )}
     </>
@@ -489,17 +509,30 @@ function Composer({ conversation, replyTo, onCancelReply, onSent }: {
     setBusy(false)
     box.current?.focus()
   }
-  const sendPicture = async (f: File | undefined) => {
-    if (!f) return
+  // A picture (chosen, pasted or dropped) is shown first, with a caption box.
+  const [picture, setPicture] = useState<File | null>(null)
+  const [sharingMusic, setSharingMusic] = useState(false)
+  const sendPicked = async (f: File, caption: string) => {
+    setPicture(null)
     try {
-      const { blob, width, height } = await shrink(f, 1600)
-      onSent(await social.sendImage(conversationId, blob, 'image/jpeg', 'photo', width, height, '', replyTo?.id))
+      onSent(await sendPicture(conversationId, f, caption, replyTo?.id))
     } catch (e) {
       toast((e as Error).message || "Couldn't send the picture")
     }
   }
+  const pickImage = (files: FileList | null | undefined) => {
+    const f = [...(files ?? [])].find((x) => x.type.startsWith('image/'))
+    if (f) setPicture(f)
+    return !!f
+  }
   return (
-    <div style={{ flexShrink: 0, padding: '8px 12px 12px', borderTop: '1px solid var(--outline-variant)' }}>
+    <div
+      style={{ flexShrink: 0, padding: '8px 12px 12px', borderTop: '1px solid var(--outline-variant)' }}
+      onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+      onDrop={(e) => { if (pickImage(e.dataTransfer.files)) e.preventDefault() }}
+    >
+      {picture && <PicturePreview file={picture} onClose={() => setPicture(null)} onSend={(caption) => void sendPicked(picture, caption)} />}
+      {sharingMusic && <ShareMusicSheet conversationId={conversationId} replyTo={replyTo?.id} onClose={() => setSharingMusic(false)} onSent={(m) => { onCancelReply(); onSent(m) }} />}
       {replyTo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 8px' }}>
           <Icon name="reply" size={18} />
@@ -513,7 +546,8 @@ function Composer({ conversation, replyTo, onCancelReply, onSent }: {
       ) : (
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
         <IconButton icon="image" label="Send a picture" onClick={() => file.current?.click()} />
-        <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { void sendPicture(e.target.files?.[0]); e.target.value = '' }} />
+        <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { pickImage(e.target.files); e.target.value = '' }} />
+        <IconButton icon="music_note" label="Share music" onClick={() => setSharingMusic(true)} />
         <textarea
           ref={box}
           value={text}
@@ -526,6 +560,7 @@ function Composer({ conversation, replyTo, onCancelReply, onSent }: {
             sendTyping(conversationId)
           }}
           onSelect={(e) => setCursor(e.currentTarget.selectionStart)}
+          onPaste={(e) => { if (pickImage(e.clipboardData.files)) e.preventDefault() }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && suggest.members.length) {
               e.preventDefault()
@@ -576,18 +611,4 @@ function EditMessage({ m, conversation, onClose, onSaved }: { m: ChatMessage; co
       <div className="field"><textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} /></div>
     </Dialog>
   )
-}
-
-/** A picture made at most [max] pixels on its long side, as JPEG. */
-async function shrink(file: File, max: number): Promise<{ blob: Blob; width: number; height: number }> {
-  const bitmap = await createImageBitmap(file)
-  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height))
-  const width = Math.round(bitmap.width * scale)
-  const height = Math.round(bitmap.height * scale)
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, width, height)
-  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't read that picture"))), 'image/jpeg', 0.85))
-  return { blob, width, height }
 }
