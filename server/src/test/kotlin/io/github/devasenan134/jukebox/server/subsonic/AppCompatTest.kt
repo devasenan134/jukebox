@@ -1,7 +1,7 @@
 package io.github.devasenan134.jukebox.server.subsonic
 
 import io.github.devasenan134.jukebox.server.Config
-import io.github.devasenan134.jukebox.server.Navidrome
+import io.github.devasenan134.jukebox.server.addAccount
 import io.github.devasenan134.jukebox.server.jukeboxServer
 import io.github.devasenan134.jukebox.server.library.TestAudio
 import io.ktor.client.request.delete
@@ -33,27 +33,25 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
-private class CompatFakeNavidrome : Navidrome(Config(0, "", "http://unused", "", "")) {
-    override suspend fun users() = null
-    override suspend fun checkLogin(username: String, salt: String, token: String) =
-        username in setOf("alice", "bob") && token == SubsonicApi.md5("secret$salt")
-}
-
 /**
- * The Android app as it is today, with both of its addresses (music and friends) pointing at Jukebox: its
- * password change goes through Navidrome's own calls, and playlist covers are kept by Jukebox.
+ * The Android app up to 0.12.1, made for Navidrome: its password change goes through Navidrome's own calls
+ * (newer apps use POST /me/password), and playlist covers are kept by Jukebox.
  */
 class AppCompatTest {
     private val root = Files.createTempDirectory("jukebox-music").toFile()
     private val data = Files.createTempDirectory("jukebox-data").toFile()
+
+    init {
+        listOf("alice", "bob").forEach { addAccount(File(data, "jukebox.db").path, it, password = "secret") }
+    }
 
     private fun ApplicationTestBuilder.start() {
         TestAudio.airaa(root, 1, "Kaariga", 300)
         TestAudio.jpeg(File(root, "Airaa (2019)/cover.jpg"))
         application {
             jukeboxServer(
-                Config(0, File(data, "jukebox.db").path, "http://unused", "", "", libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
-                navidrome = CompatFakeNavidrome(), music = null,
+                Config(0, File(data, "jukebox.db").path, libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
+                music = null,
             )
         }
     }
@@ -66,7 +64,7 @@ class AppCompatTest {
     private suspend fun ApplicationTestBuilder.json(text: String) = Json.parseToJsonElement(text).jsonObject
 
     @Test
-    fun `the app's password change works the way it did with Navidrome`() = testApplication {
+    fun `older apps' password change works the way it did with Navidrome`() = testApplication {
         start()
         // 1. Sign in with the password, as Navidrome's /auth/login wanted.
         val login = client.post("/auth/login") { contentType(ContentType.Application.Json); setBody("""{"username":"alice","password":"secret"}""") }

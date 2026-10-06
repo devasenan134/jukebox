@@ -47,15 +47,14 @@ class CatalogParseTest {
     }
 }
 
-/** A library that can grow during a test, the way new files show up in Navidrome. */
+/** A library that can grow during a test, the way new files show up at a scan. */
 private class GrowingMusic : MusicSource {
     var songs = listOf(
         LibrarySong("s1", "Kanave Kanave", "David", "m1", "Singer", emptyList(), Person("p-a", "Anirudh"), 2013, 240, "Tamil", 0, false),
     )
     override suspend fun snapshot() = LibrarySnapshot(songs, arrayOfNulls(songs.size), emptyMap(), emptyMap(), FloatArray(songs.size), FloatArray(songs.size), "v${songs.size}")
-    override suspend fun history(navidromeUserId: String, snapshot: LibrarySnapshot) = History.EMPTY
+    override suspend fun history(userId: Long, snapshot: LibrarySnapshot) = History.EMPTY
     override suspend fun popularity(snapshot: LibrarySnapshot) = emptyMap<Int, Int>()
-    override suspend fun navidromeUserId(username: String) = null
 }
 
 private class FakeCatalog(val items: List<CatalogItem>) : Catalog {

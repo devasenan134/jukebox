@@ -4,13 +4,13 @@ import io.ktor.http.HttpStatusCode
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** A Navidrome playlist someone liked, with what the app needs to show it in Your Library. */
+/** A playlist someone liked, with what the app needs to show it in Your Library. */
 @Serializable
 data class PlaylistRef(val id: String, val name: String = "", val coverArt: String? = null, val songCount: Int = 0)
 
 /**
- * Liked playlists, saved per person. Navidrome can like ("star") songs and albums but not
- * playlists, so this server keeps them, and they follow you to every phone.
+ * Liked playlists, saved per person. The Subsonic API can like ("star") songs, albums and people but not
+ * playlists, so they're kept here, and they follow you to every phone.
  */
 class PlaylistLikes(private val db: Db) {
     private val json = Json { ignoreUnknownKeys = true }

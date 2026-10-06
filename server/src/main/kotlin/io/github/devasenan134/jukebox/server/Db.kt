@@ -148,10 +148,10 @@ class Db(private val path: String) {
             )
         """.trimIndent()
 
-        // Users removed from Navidrome are kept (renamed) so old chat messages still have a sender.
+        // Removed users are kept (renamed) so old chat messages still have a sender.
         val SCHEMA_V2 = "ALTER TABLE users ADD COLUMN deleted_at INTEGER"
 
-        // Navidrome's permanent user id, so a renamed account is recognised instead of treated as deleted.
+        // Navidrome's permanent user id, from when accounts lived in Navidrome. Unused since the switch-over.
         val SCHEMA_V3 = """
             ALTER TABLE users ADD COLUMN navidrome_id TEXT;
             CREATE UNIQUE INDEX users_by_navidrome_id ON users(navidrome_id)
@@ -428,7 +428,7 @@ class Db(private val path: String) {
         """.trimIndent()
 
         // Jukebox signs people in itself (docs/milestone-2.md). password_enc: the password encrypted with the
-        // server's key (Passwords), which Subsonic sign-in needs; NULL while the account still lives in Navidrome.
+        // server's key (Passwords), which Subsonic sign-in needs; NULL for an account that can't sign in.
         val SCHEMA_V21 = """
             ALTER TABLE users ADD COLUMN password_enc TEXT;
             ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0;

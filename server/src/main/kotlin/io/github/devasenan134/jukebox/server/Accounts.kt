@@ -15,12 +15,11 @@ import kotlinx.serialization.json.put
 /**
  * Logins, sign-ups and invite codes.
  *
- * Passwords are checked by [SignIn]: Jukebox's own, or Navidrome's for an account not imported yet. The app
- * then gets a session token for this server. New accounts are Jukebox accounts.
+ * Passwords are checked by [SignIn]; the app then gets a session token for this server. Accounts are made
+ * with an invite code, or by whoever runs the server (`jukebox user add`, see [UserCommand]).
  */
 class Accounts(
     private val db: Db,
-    private val navidrome: Navidrome,
     private val signIn: SignIn,
     private val onFriendsAdded: suspend (Long, Long) -> Unit,
 ) {
@@ -31,10 +30,9 @@ class Accounts(
         if (!signIn.checkToken(username, request.salt, request.token)) {
             throw ApiError(HttpStatusCode.Unauthorized, "Wrong username or password")
         }
-        // An account still in Navidrome is linked to it by Navidrome's permanent id (it survives renames).
-        val navidromeId = if (signIn.hasPassword(username)) null else navidrome.idFor(username)
         return db.tx {
-            val user = upsertUser(username, displayName = username, navidromeId = navidromeId)
+            val user = queryOne("SELECT * FROM users WHERE username = ? AND deleted_at IS NULL", username) { it.toUser() }
+                ?: throw ApiError(HttpStatusCode.Unauthorized, "Wrong username or password")
             SessionResponse(newSession(user.id), user)
         }
     }
@@ -57,7 +55,7 @@ class Accounts(
                 throw ApiError(HttpStatusCode.Conflict, "That username is taken")
             }
             // Someone may have used the same code in the meantime; the code is still consumed only once.
-            val user = upsertUser(username, displayName, navidromeId = null)
+            val user = createUser(username, displayName)
             val claimed = update("UPDATE invites SET used_by = ?, used_at = ? WHERE code = ? AND used_by IS NULL", user.id, now(), code)
             if (claimed == 0) throw ApiError(HttpStatusCode.BadRequest, "That invite code was just used by someone else")
             // You become friends with whoever invited you.
@@ -80,9 +78,10 @@ class Accounts(
     }
 
     // ---------- Navidrome's own sign-in and account calls ----------
-    // The Android app changes a password the way Navidrome wanted: sign in with the password (/auth/login), read
-    // the account (/api/user/{id}), save it with the new one. Jukebox answers the same calls, so the app works
-    // with both of its addresses pointing here. The token is only good for these calls, for ten minutes.
+    // App versions up to 0.12.1 change a password the way Navidrome wanted: sign in with the password
+    // (/auth/login), read the account (/api/user/{id}), save it with the new one. Jukebox answers the same calls
+    // so those apps keep working; newer ones use POST /me/password. Remove these once every phone has 0.12.2 or later.
+    // The token is only good for these calls, for ten minutes.
 
     private val navidromeTokens = ConcurrentHashMap<String, Pair<Long, Long>>()
 
@@ -126,7 +125,7 @@ class Accounts(
         signIn.setPassword(user.id, new)
     }
 
-    /** Admins are marked in Jukebox (imported from Navidrome's admin flag). */
+    /** Admins are marked on the account (`jukebox user admin`). */
     suspend fun isAdmin(userId: Long): Boolean = db.tx { queryOne("SELECT is_admin FROM users WHERE id = ?", userId) { it.getInt(1) == 1 } } == true
 
     suspend fun rename(userId: Long, displayName: String): UserDto {
@@ -184,26 +183,9 @@ class Accounts(
         }
     }
 
-    /**
-     * Finds or creates the user. With Navidrome's permanent [navidromeId] a renamed account keeps
-     * its friends and chats, and a new account that reuses an old username starts fresh.
-     */
-    private fun java.sql.Connection.upsertUser(username: String, displayName: String, navidromeId: String?): UserDto {
-        if (navidromeId != null) {
-            val known = queryOne("SELECT id FROM users WHERE navidrome_id = ?", navidromeId) { it.getLong(1) }
-            if (known != null) {
-                update("UPDATE users SET username = ? WHERE id = ?", username, known) // follows a rename
-                return queryOne("SELECT * FROM users WHERE id = ?", known) { it.toUser() }!!
-            }
-            // Same username but a different Navidrome account: the old one was deleted and recreated.
-            queryOne("SELECT id, navidrome_id FROM users WHERE username = ?", username) { it.getLong(1) to it.getString(2) }
-                ?.takeIf { (_, oldId) -> oldId != null && oldId != navidromeId }
-                ?.let { (oldUserId, _) -> retireUser(oldUserId) }
-        }
-        update("INSERT OR IGNORE INTO users (username, display_name, created_at) VALUES (?, ?, ?)", username, displayName, now())
-        val user = queryOne("SELECT * FROM users WHERE username = ?", username) { it.toUser() }!!
-        if (navidromeId != null) update("UPDATE users SET navidrome_id = ? WHERE id = ? AND navidrome_id IS NULL", navidromeId, user.id)
-        return user
+    private fun java.sql.Connection.createUser(username: String, displayName: String): UserDto {
+        update("INSERT INTO users (username, display_name, created_at) VALUES (?, ?, ?)", username, displayName, now())
+        return queryOne("SELECT * FROM users WHERE username = ?", username) { it.toUser() }!!
     }
 
     private fun java.sql.Connection.newSession(userId: Long): String {
@@ -219,7 +201,7 @@ class Accounts(
         MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).joinToString("") { "%02x".format(it) }
 
     companion object {
-        private val USERNAME = Regex("^[A-Za-z0-9._-]{3,24}$")
+        val USERNAME = Regex("^[A-Za-z0-9._-]{3,24}$")
         // No 0/O, 1/I/L: codes are read aloud and typed on phones.
         private const val CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
         private const val MAX_ACTIVE_INVITES = 5
@@ -228,4 +210,26 @@ class Accounts(
         fun normalizeCode(code: String) = code.uppercase().filter { it.isLetterOrDigit() }
         fun formatCode(code: String) = code.chunked(4).joinToString("-")
     }
+}
+
+/** Removes a user from everything social but keeps their row for chat history. Returns their former friends. */
+fun java.sql.Connection.retireUser(userId: Long): List<Long> {
+    val friends = query("SELECT friend_id FROM friendships WHERE user_id = ?", userId) { it.getLong(1) }
+    update("DELETE FROM sessions WHERE user_id = ?", userId)
+    update("DELETE FROM devices WHERE user_id = ?", userId)
+    update("DELETE FROM liked_playlists WHERE user_id = ?", userId)
+    update("DELETE FROM friendships WHERE user_id = ? OR friend_id = ?", userId, userId)
+    update("DELETE FROM friend_requests WHERE from_id = ? OR to_id = ?", userId, userId)
+    update("DELETE FROM invites WHERE created_by = ? AND used_by IS NULL", userId)
+    // Leave group chats; DMs keep them as a member so the chat still has a name.
+    update(
+        "DELETE FROM conversation_members WHERE user_id = ? AND conversation_id IN (SELECT id FROM conversations WHERE kind = 'group')",
+        userId,
+    )
+    update(
+        """UPDATE users SET username = 'deleted:' || id, display_name = display_name || ' (left)',
+           navidrome_id = NULL, deleted_at = ? WHERE id = ?""",
+        now(), userId,
+    )
+    return friends
 }

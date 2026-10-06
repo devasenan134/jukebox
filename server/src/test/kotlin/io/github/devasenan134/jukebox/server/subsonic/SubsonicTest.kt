@@ -1,7 +1,7 @@
 package io.github.devasenan134.jukebox.server.subsonic
 
 import io.github.devasenan134.jukebox.server.Config
-import io.github.devasenan134.jukebox.server.Navidrome
+import io.github.devasenan134.jukebox.server.addAccount
 import io.github.devasenan134.jukebox.server.jukeboxServer
 import io.github.devasenan134.jukebox.server.library.TestAudio
 import io.github.devasenan134.jukebox.server.eventJson
@@ -36,15 +36,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-private class SubsonicFakeNavidrome : Navidrome(Config(0, "", "http://unused", "", "")) {
-    override suspend fun users() = null
-    override suspend fun checkLogin(username: String, salt: String, token: String) =
-        username in setOf("alice", "bob") && token == SubsonicApi.md5("secret$salt")
-}
-
 class SubsonicTest {
     private val root = Files.createTempDirectory("jukebox-music").toFile()
     private val data = Files.createTempDirectory("jukebox-data").toFile()
+
+    init {
+        listOf("alice", "bob").forEach { addAccount(File(data, "jukebox.db").path, it, password = "secret") }
+    }
 
     private fun auth(user: String = "alice", password: String = "secret") = "u=$user&s=abc&t=${SubsonicApi.md5(password + "abc")}&v=1.16.1&c=test&f=json"
 
@@ -65,12 +63,12 @@ class SubsonicTest {
         File(root, "Airaa (2019)/01 - Kaariga.lrc").writeText("[ar:Sathya Prakash]\n[00:01.50] Kaariga kaariga\n[00:05.00][00:09.25] La la")
         application {
             jukeboxServer(
-                Config(0, File(data, "jukebox.db").path, "http://unused", "", "", libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
-                navidrome = SubsonicFakeNavidrome(), music = null,
+                Config(0, File(data, "jukebox.db").path, libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
+                music = null,
             )
         }
 
-        // Sign-in goes through Navidrome; a wrong password gets error 40.
+        // Sign-in with the account's password; a wrong one gets error 40.
         assertEquals("ok", rest("ping")["status"]!!.jsonPrimitive.content)
         val wrong = rest("ping", password = "nope")
         assertEquals("failed", wrong["status"]!!.jsonPrimitive.content)
@@ -150,8 +148,8 @@ class SubsonicTest {
         TestAudio.airaa(root, 1, "She Hates You", 700, score = true)
         application {
             jukeboxServer(
-                Config(0, File(data, "jukebox.db").path, "http://unused", "", "", libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
-                navidrome = SubsonicFakeNavidrome(), music = null,
+                Config(0, File(data, "jukebox.db").path, libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
+                music = null,
             )
         }
         var albums = emptyList<JsonObject>()
@@ -215,8 +213,7 @@ class SubsonicTest {
             "artist" to "Minmini", "album_artist" to "A.R. Rahman", "composer" to "A.R. Rahman", "date" to "1992", "track" to "1"))
         application {
             jukeboxServer(
-                Config(0, File(data, "jukebox.db").path, "http://unused", "", "", libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
-                navidrome = SubsonicFakeNavidrome(),
+                Config(0, File(data, "jukebox.db").path, libraries = "tamil=${root.path}:film:tamil", fingerprints = false),
             )
         }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }

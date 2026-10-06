@@ -52,34 +52,33 @@ tasks.test {
 tasks.register<JavaExec>("runDev") {
     classpath = sourceSets["test"].runtimeClasspath
     mainClass.set("io.github.devasenan134.jukebox.server.DevServerKt")
-    // Your Navidrome server: -PnavidromeUrl=https://... or JUKEBOX_SERVER_URL in ~/.gradle/gradle.properties.
-    environment("NAVIDROME_URL", (project.findProperty("navidromeUrl") ?: project.findProperty("JUKEBOX_SERVER_URL") ?: "http://localhost:4533") as String)
     environment("DB_PATH", layout.buildDirectory.file("dev/jukebox.db").get().asFile.path)
+    // Optional: music to scan (-Plibraries="tamil=/path/to/music:film:tamil") and the analyzer's features.db.
+    (project.findProperty("libraries") as String?)?.let { environment("LIBRARIES", it) }
+    (project.findProperty("featuresDb") as String?)?.let { environment("FEATURES_DB", it) }
     // Optional: real push notifications while testing (-PfirebaseKey=/path/to/key.json).
     (project.findProperty("firebaseKey") as String?)?.let { environment("FIREBASE_KEY_FILE", it) }
-    // Optional: a (copy of a) Navidrome database, for mixes and admin stats (-PnavidromeDb=/path/to/navidrome.db).
-    (project.findProperty("navidromeDb") as String?)?.let { environment("NAVIDROME_DB", it) }
 }
 
-// Prints the mixes a person would get, from a copy of Navidrome's database and the analyzer's features.db:
-// ./gradlew previewMixes -PnavidromeDb=navidrome.db -PfeaturesDb=features.db -Puser=<navidrome username>
+// Prints the mixes a person would get, from a copy of jukebox.db and the analyzer's features.db:
+// ./gradlew previewMixes -Pdb=jukebox.db -PfeaturesDb=features.db -Puser=<username>
 tasks.register<JavaExec>("previewMixes") {
     classpath = sourceSets["test"].runtimeClasspath
     mainClass.set("io.github.devasenan134.jukebox.server.MixPreviewKt")
     args(
-        project.findProperty("navidromeDb") ?: "navidrome.db",
+        project.findProperty("db") ?: "jukebox.db",
         project.findProperty("featuresDb") ?: "",
         project.findProperty("user") ?: "",
     )
 }
 
 // Try search on a copy of the real library:
-// ./gradlew previewSearch -PnavidromeDb=navidrome.db -PcastFile=movie-cast.jsonl -Pqueries="kanave|vairamuthu|vijay"
+// ./gradlew previewSearch -Pdb=jukebox.db -PcastFile=movie-cast.jsonl -Pqueries="kanave|vairamuthu|vijay"
 tasks.register<JavaExec>("previewSearch") {
     classpath = sourceSets["test"].runtimeClasspath
     mainClass.set("io.github.devasenan134.jukebox.server.SearchPreviewKt")
     args(
-        listOf(project.findProperty("navidromeDb") ?: "navidrome.db", project.findProperty("castFile") ?: "movie-cast.jsonl") +
+        listOf(project.findProperty("db") ?: "jukebox.db", project.findProperty("castFile") ?: "movie-cast.jsonl") +
             (project.findProperty("queries") as String? ?: "").split("|").filter { it.isNotBlank() },
     )
 }

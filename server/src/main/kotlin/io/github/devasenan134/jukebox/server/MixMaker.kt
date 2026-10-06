@@ -41,7 +41,7 @@ data class MixDto(
     /** A sentence or two for the mix's page. */
     val description: String,
     val author: String = AUTHOR,
-    /** Up to 4 cover art ids (Navidrome's getCoverArt) for the tile. */
+    /** Up to 4 cover art ids (the Subsonic getCoverArt) for the tile. */
     val covers: List<String> = emptyList(),
     /** Round picture for composer and singer mixes, and their stations. */
     val round: Boolean = false,

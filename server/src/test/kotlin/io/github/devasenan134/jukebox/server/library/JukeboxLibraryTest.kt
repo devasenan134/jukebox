@@ -11,7 +11,7 @@ import java.sql.DriverManager
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/** The sound features for mixes, from Jukebox's own analyzer (recording ids) or the Isaipetti one (Navidrome ids). */
+/** The sound features for mixes, from Jukebox's own analyzer (keyed by recording id). */
 class JukeboxLibraryTest {
     private val root = Files.createTempDirectory("jukebox-music").toFile()
     private val data = Files.createTempDirectory("jukebox-data").toFile()
@@ -37,18 +37,16 @@ class JukeboxLibraryTest {
     }
 
     @Test
-    fun `features keyed by recording are read directly, and Navidrome-keyed ones through the file path`() = runBlocking {
+    fun `features keyed by recording are read, and ones keyed some other way are left out`() = runBlocking {
         TestAudio.airaa(root, 1, "Kaariga", 300)
         TestAudio.airaa(root, 2, "Megathoodham", 500)
         Scanner(db, AudioTools(), File(data, "artwork"), threads = 2).scan(LibraryDef("tamil", root.path, "film"))
-        val (recording, path) = db.tx { query("SELECT recording_id, path FROM files WHERE path LIKE '%Kaariga%'") { it.getString(1) to it.getString(2) }.first() }
+        val recording = db.tx { query("SELECT recording_id FROM files WHERE path LIKE '%Kaariga%'") { it.getString(1) }.first() }
 
-        val own = JukeboxLibrary(db, navidromeDb = null, featuresDb = features("recording", recording)).snapshot()!!
+        val own = JukeboxLibrary(db, featuresDb = features("recording", recording)).snapshot()!!
         assertEquals(1, own.analyzed)
-
-        val nd = File(data, "navidrome.db").path
-        sql(nd, "CREATE TABLE media_file (id TEXT, path TEXT, missing BOOL)", "INSERT INTO media_file VALUES ('ndKaariga', '$path', 0)")
-        val old = JukeboxLibrary(db, navidromeDb = nd, featuresDb = features("navidrome", "ndKaariga")).snapshot()!!
-        assertEquals(1, old.analyzed)
+        // The Isaipetti analyzer keyed songs by Navidrome's ids, which mean nothing here now.
+        val old = JukeboxLibrary(db, featuresDb = features("navidrome", "ndKaariga")).snapshot()!!
+        assertEquals(0, old.analyzed)
     }
 }

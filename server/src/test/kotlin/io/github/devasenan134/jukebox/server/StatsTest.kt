@@ -3,8 +3,6 @@ package io.github.devasenan134.jukebox.server
 import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.runBlocking
 import java.io.File
-import java.sql.DriverManager
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.test.Test
@@ -16,49 +14,43 @@ import kotlin.test.assertTrue
 class StatsTest {
     private val zone = ZoneId.of("Asia/Kolkata")
 
-    /** A tiny stand-in for Navidrome's database: two people, three songs, some plays. */
-    private fun fakeNavidrome(): String {
-        val path = File.createTempFile("navidrome", ".db").apply { deleteOnExit() }.path
-        DriverManager.getConnection("jdbc:sqlite:$path").use { c ->
-            c.createStatement().use { st ->
-                st.execute("CREATE TABLE user (id TEXT, user_name TEXT, name TEXT, is_admin BOOL)")
-                st.execute("CREATE TABLE media_file (id TEXT, title TEXT, artist TEXT, album TEXT, album_id TEXT, album_artist TEXT, duration REAL)")
-                st.execute("CREATE TABLE scrobbles (id INTEGER PRIMARY KEY, media_file_id TEXT, user_id TEXT, submission_time INTEGER)")
-                st.execute("CREATE TABLE annotation (user_id TEXT, item_id TEXT, item_type TEXT, play_count INTEGER)")
-                st.execute("INSERT INTO user VALUES ('nd-devs', 'devs', 'Devs', 1), ('nd-sathya', 'sathya', 'Sathya', 0), ('nd-bot', 'jukebox-bot', '', 1)")
-                st.execute(
-                    """INSERT INTO media_file VALUES
-                       ('s1', 'Mounamey', 'SPB', 'Anbe Sivam', 'a1', 'Vidyasagar', 1800),
-                       ('s2', 'Kaara Aattakkaara', 'ARR', 'O Kadhal Kanmani', 'a2', 'A.R. Rahman', 360),
-                       ('s3', 'Hare Rama', 'Yuvan', 'Arrambam', 'a3', 'Yuvanshankar Raja', 720)""",
-                )
-            }
-            val now = Instant.now().epochSecond
-            val todayStart = LocalDate.now(zone).atStartOfDay(zone).toEpochSecond()
-            val plays = listOf(
-                Triple("s1", "nd-devs", maxOf(todayStart + 60, now - 60)), // today: 30 min
-                Triple("s1", "nd-devs", now - 3 * 86_400), // this week: 30 min
-                Triple("s2", "nd-devs", now - 3 * 86_400), // this week: 6 min
-                Triple("s3", "nd-devs", now - 20 * 86_400), // this month: 12 min
-                Triple("s3", "nd-sathya", now - 2 * 86_400), // Sathya, this week: 12 min
-            )
-            c.prepareStatement("INSERT INTO scrobbles (media_file_id, user_id, submission_time) VALUES (?, ?, ?)").use { st ->
-                plays.forEach { (song, user, at) -> st.setString(1, song); st.setString(2, user); st.setLong(3, at); st.executeUpdate() }
-            }
-            // All-time counts include plays from before Navidrome kept a time for each one.
-            c.createStatement().use {
-                it.execute("INSERT INTO annotation VALUES ('nd-devs', 's1', 'media_file', 10), ('nd-devs', 's2', 'media_file', 1), ('nd-devs', 's3', 'media_file', 1), ('nd-sathya', 's3', 'media_file', 1)")
-            }
-        }
-        return path
+    /** Three songs to have played. */
+    private class StatsMusic : MusicSource {
+        private fun song(id: String, title: String, singer: String, album: String, albumId: String, composer: String, seconds: Int) =
+            LibrarySong(id, title, album, albumId, singer, listOf(Person("p-$singer", singer)), Person("p-$composer", composer), 2000, seconds, "Tamil", 0, false)
+        private val songs = listOf(
+            song("s1", "Mounamey", "SPB", "Anbe Sivam", "a1", "Vidyasagar", 1800),
+            song("s2", "Kaara Aattakkaara", "ARR", "O Kadhal Kanmani", "a2", "A.R. Rahman", 360),
+            song("s3", "Hare Rama", "Yuvan", "Arrambam", "a3", "Yuvanshankar Raja", 720),
+        )
+        override suspend fun snapshot() = LibrarySnapshot(songs, arrayOfNulls(3), emptyMap(), emptyMap(), FloatArray(3), FloatArray(3), "v1")
+        override suspend fun history(userId: Long, snapshot: LibrarySnapshot) = History.EMPTY
+        override suspend fun popularity(snapshot: LibrarySnapshot) = emptyMap<Int, Int>()
     }
 
-    private fun ourDb(): Db {
+    /** Two people and their plays: each counted play is a "played" event, with totals in play_counts. */
+    private fun db(): Db {
         val db = Db(File.createTempFile("jukebox", ".db").apply { delete(); deleteOnExit() }.path)
+        val now = System.currentTimeMillis()
+        val todayStart = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+        val day = 86_400_000L
         runBlocking {
             db.tx {
-                update("INSERT INTO users (id, username, display_name, created_at, navidrome_id) VALUES (1, 'devs', 'Devs', 0, 'nd-devs')")
-                update("INSERT INTO users (id, username, display_name, created_at, navidrome_id) VALUES (2, 'sathya', 'Sathya', 0, 'nd-sathya')")
+                update("INSERT INTO users (id, username, display_name, created_at, is_admin) VALUES (1, 'devs', 'Devs', 0, 1)")
+                update("INSERT INTO users (id, username, display_name, created_at) VALUES (2, 'sathya', 'Sathya', 0)")
+                listOf(
+                    Triple("s1", 1, maxOf(todayStart + 60_000, now - 60_000)), // today: 30 min
+                    Triple("s1", 1, now - 3 * day), // this week: 30 min
+                    Triple("s2", 1, now - 3 * day), // this week: 6 min
+                    Triple("s3", 1, now - 20 * day), // this month: 12 min
+                    Triple("s3", 2, now - 2 * day), // Sathya, this week: 12 min
+                ).forEach { (song, user, at) ->
+                    update("INSERT INTO events (user_id, type, at, payload) VALUES (?, 'played', ?, ?)", user, at, """{"recording":"$song"}""")
+                }
+                // All-time counts include plays imported from before each play had a time.
+                listOf(Triple(1, "s1", 10), Triple(1, "s2", 1), Triple(1, "s3", 1), Triple(2, "s3", 1)).forEach { (user, song, count) ->
+                    update("INSERT INTO play_counts VALUES (?, ?, ?, ?)", user, song, count, now)
+                }
             }
         }
         return db
@@ -66,7 +58,7 @@ class StatsTest {
 
     @Test
     fun `hours, ranges and top lists for admins only`() = runBlocking {
-        val stats = Stats(fakeNavidrome(), ourDb(), hiddenUser = "jukebox-bot", defaultZone = "Asia/Kolkata")
+        val stats = Stats(db(), StatsMusic(), defaultZone = "Asia/Kolkata")
         val devs = UserDto(1, "devs", "Devs")
         val sathya = UserDto(2, "sathya", "Sathya")
 
@@ -76,7 +68,6 @@ class StatsTest {
         assertEquals(HttpStatusCode.Forbidden, error.status)
 
         val report = stats.report(devs, "Asia/Kolkata")
-        // The server's own admin account isn't a listener, so it's left out.
         assertEquals(listOf("devs", "sathya"), report.users.map { it.username })
 
         val me = report.users.first().ranges

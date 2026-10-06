@@ -91,7 +91,7 @@ class ImporterTest {
             assertEquals(1, report.admins)
         }
 
-        val signIn = SignIn(db, passwords, navidrome = null)
+        val signIn = SignIn(db, passwords)
         assertTrue(signIn.checkPassword("bob", "bob-secret"), "Bob's Navidrome password works on Jukebox")
         assertTrue(signIn.checkPassword("alice", "alice-secret"))
         // The old server's admin helper isn't a person: it isn't brought over.

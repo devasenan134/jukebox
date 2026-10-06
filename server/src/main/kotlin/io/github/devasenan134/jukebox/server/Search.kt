@@ -49,7 +49,7 @@ data class PersonPage(val person: PersonHit, val movies: List<MovieHit>, val son
 
 /**
  * Search that forgives spelling: "kanave", "kanavae" and "kanaavey" all find "Kanave". Looks at song
- * titles, movies, singers, composers, lyricists (from Navidrome's tags) and actors (from the movie
+ * titles, movies, singers, composers, lyricists (from the songs' tags) and actors (from the movie
  * cast file, made by the library tools from Wikipedia).
  */
 class LibrarySearch(private val music: MusicSource, private val castFile: File?) {
@@ -122,7 +122,7 @@ class LibrarySearch(private val music: MusicSource, private val castFile: File?)
             movies = snapshot.byAlbum.mapValues { (id, list) ->
                 val first = songs[list.first()]
                 val year = list.maxOf { songs[it].year }
-                // An actor who also sings or writes here is one person (their Navidrome artist).
+                // An actor who also sings or writes here is one person (their person in the catalog).
                 val actors = (cast[first.album.lowercase() to year] ?: emptyList()).let(::withoutRepeats).map { name ->
                     val key = Fuzzy.key(name)
                     byKey[key]?.let { Person(it.id, it.name) } ?: Person(ACTOR + key, name)
