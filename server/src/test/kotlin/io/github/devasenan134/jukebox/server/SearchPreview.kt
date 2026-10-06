@@ -1,12 +1,13 @@
 package io.github.devasenan134.jukebox.server
 
+import io.github.devasenan134.jukebox.server.library.JukeboxLibrary
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /** See build.gradle.kts, task previewSearch: prints what search finds for each query. */
 fun main(args: Array<String>) = runBlocking {
-    val (navidromeDb, castFile) = args.toList()
-    val search = LibrarySearch(NavidromeLibrary(navidromeDb, null), File(castFile))
+    val (dbPath, castFile) = args.toList()
+    val search = LibrarySearch(JukeboxLibrary(Db(dbPath)), File(castFile))
     for (query in args.drop(2)) {
         val started = System.currentTimeMillis()
         val r = search.search(query)

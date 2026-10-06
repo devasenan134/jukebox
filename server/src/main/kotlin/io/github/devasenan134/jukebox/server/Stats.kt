@@ -1,14 +1,9 @@
 package io.github.devasenan134.jukebox.server
 
 import io.ktor.http.HttpStatusCode
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import java.io.File
-import java.sql.DriverManager
-import java.sql.ResultSet
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -49,73 +44,58 @@ data class StatsDto(
 )
 
 /**
- * Listening statistics for admins, read from Navidrome's own database (read-only).
- *
- * Navidrome keeps one row per counted play (a song listened to at least halfway, or 4 minutes)
- * in `scrobbles`, and per-song totals in `annotation`. A counted play adds the song's full length,
- * so the hours are a close estimate. Only people who are admins in Navidrome can see this.
+ * Listening statistics for admins, from Jukebox's own listening: a "played" event for each counted play (a
+ * song listened to at least halfway, or 4 minutes: the players' scrobble) and per-song totals in play_counts.
+ * Plays imported from Navidrome are in both. A counted play adds the song's full length, so the hours are a
+ * close estimate.
  */
-class Stats(private val navidromeDb: String?, private val db: Db, private val hiddenUser: String, private val defaultZone: String) {
-    private data class NdUser(val id: String, val userName: String, val name: String, val isAdmin: Boolean)
-    private data class Song(val title: String, val artist: String, val album: String, val albumId: String, val composer: String, val seconds: Double)
-    private data class Play(val userId: String, val at: Long, val song: Song)
-    private data class Total(val userId: String, val count: Int, val song: Song)
-    private data class Snapshot(val takenAt: Long, val users: List<NdUser>, val plays: List<Play>, val totals: List<Total>)
+class Stats(private val db: Db, private val music: MusicSource?, private val defaultZone: String) {
+    private data class Account(val id: Long, val username: String, val name: String)
+    private data class Play(val userId: Long, val at: Long, val song: LibrarySong)
+    private data class Total(val userId: Long, val count: Int, val song: LibrarySong)
+    private data class Snapshot(val takenAt: Long, val users: List<Account>, val plays: List<Play>, val totals: List<Total>)
 
     private val lock = Mutex()
     @Volatile private var cached: Snapshot? = null
 
-    /** Admin means admin in Navidrome, checked against Navidrome's own user table. */
-    suspend fun isAdmin(user: UserDto): Boolean {
-        // Jukebox's own flag first; Navidrome's, for accounts that still live there.
-        if (db.tx { queryOne("SELECT is_admin FROM users WHERE id = ?", user.id) { it.getInt(1) == 1 } } == true) return true
-        val users = snapshot()?.users ?: return false
-        val navidromeId = db.tx { queryOne("SELECT navidrome_id FROM users WHERE id = ?", user.id) { it.getString(1) } }
-        return users.any { it.isAdmin && (it.id == navidromeId || (navidromeId == null && it.userName.equals(user.username, true))) }
-    }
+    suspend fun isAdmin(user: UserDto): Boolean =
+        db.tx { queryOne("SELECT is_admin FROM users WHERE id = ?", user.id) { it.getInt(1) == 1 } } == true
 
-    /** Everyone here who is a Navidrome admin (they hear about new music requests). */
-    suspend fun adminIds(): List<Long> {
-        val local = db.tx { query("SELECT id FROM users WHERE is_admin = 1 AND deleted_at IS NULL") { it.getLong(1) } }
-        val admins = snapshot()?.users?.filter { it.isAdmin } ?: return local
-        val users = db.tx { query("SELECT id, navidrome_id, username FROM users WHERE deleted_at IS NULL") { Triple(it.getLong(1), it.getString(2), it.getString(3)) } }
-        return (users.filter { (_, navidromeId, username) ->
-            admins.any { it.id == navidromeId || (navidromeId == null && it.userName.equals(username, true)) }
-        }.map { it.first } + local).distinct()
-    }
+    /** Everyone who is an admin (they hear about new music requests). */
+    suspend fun adminIds(): List<Long> = db.tx { query("SELECT id FROM users WHERE is_admin = 1 AND deleted_at IS NULL") { it.getLong(1) } }
 
     suspend fun report(user: UserDto, timeZone: String?): StatsDto {
         if (!isAdmin(user)) throw ApiError(HttpStatusCode.Forbidden, "Only admins can see listening stats")
-        val snapshot = snapshot() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "The server can't read Navidrome's database")
+        val snapshot = snapshot() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "Stats need the music library, which isn't ready")
         val zone = timeZone?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.of(defaultZone)
         val now = Instant.now()
         val today = LocalDate.now(zone)
         val since = mapOf(
-            "today" to today.atStartOfDay(zone).toEpochSecond(),
-            "7d" to now.minusSeconds(7 * DAY).epochSecond,
-            "30d" to now.minusSeconds(30 * DAY).epochSecond,
+            "today" to today.atStartOfDay(zone).toInstant().toEpochMilli(),
+            "7d" to now.minusSeconds(7 * DAY).toEpochMilli(),
+            "30d" to now.minusSeconds(30 * DAY).toEpochMilli(),
         )
 
-        val users = snapshot.users.filter { !it.userName.equals(hiddenUser, true) }.map { u ->
+        val users = snapshot.users.map { u ->
             val plays = snapshot.plays.filter { it.userId == u.id }
             val ranges = since.mapValues { (_, from) -> summarize(plays.filter { it.at >= from }.map { it.song to 1 }) } +
                 ("all" to summarize(snapshot.totals.filter { it.userId == u.id }.map { it.song to it.count }))
-            UserStatsDto(u.userName, u.name.ifBlank { u.userName }, plays.maxOfOrNull { it.at }?.times(1000), ranges)
+            UserStatsDto(u.username, u.name.ifBlank { u.username }, plays.maxOfOrNull { it.at }, ranges)
         }.sortedByDescending { it.ranges["all"]?.hours ?: 0.0 }
 
         val last30 = snapshot.plays.filter { it.at >= since.getValue("30d") }
-        val byDay = last30.groupBy { Instant.ofEpochSecond(it.at).atZone(zone).toLocalDate() }
+        val byDay = last30.groupBy { Instant.ofEpochMilli(it.at).atZone(zone).toLocalDate() }
         val daily = (29 downTo 0).map { back ->
             val day = today.minusDays(back.toLong())
-            DayHoursDto(day.toString(), hours(byDay[day].orEmpty().sumOf { it.song.seconds }))
+            DayHoursDto(day.toString(), hours(byDay[day].orEmpty().sumOf { it.song.duration.toDouble() }))
         }
-        val byHour = last30.groupBy { Instant.ofEpochSecond(it.at).atZone(zone).hour }
-        val hourOfDay = (0..23).map { h -> hours(byHour[h].orEmpty().sumOf { it.song.seconds }) }
+        val byHour = last30.groupBy { Instant.ofEpochMilli(it.at).atZone(zone).hour }
+        val hourOfDay = (0..23).map { h -> hours(byHour[h].orEmpty().sumOf { it.song.duration.toDouble() }) }
         return StatsDto(snapshot.takenAt, users, daily, hourOfDay)
     }
 
-    private fun summarize(plays: List<Pair<Song, Int>>): RangeStatsDto {
-        fun top(key: (Song) -> String, name: (Song) -> String, detail: (Song) -> String?, cover: (Song) -> String?) =
+    private fun summarize(plays: List<Pair<LibrarySong, Int>>): RangeStatsDto {
+        fun top(key: (LibrarySong) -> String, name: (LibrarySong) -> String, detail: (LibrarySong) -> String?, cover: (LibrarySong) -> String?) =
             plays.filter { name(it.first).isNotBlank() }
                 .groupBy { key(it.first) }
                 .map { (_, group) -> group.first().first to group.sumOf { it.second } }
@@ -123,61 +103,44 @@ class Stats(private val navidromeDb: String?, private val db: Db, private val hi
                 .take(TOP)
                 .map { (song, count) -> TopItemDto(name(song), detail(song)?.takeIf { it.isNotBlank() }, count, cover(song)) }
         return RangeStatsDto(
-            hours = hours(plays.sumOf { (song, count) -> song.seconds * count }),
+            hours = hours(plays.sumOf { (song, count) -> song.duration.toDouble() * count }),
             plays = plays.sumOf { it.second },
-            topSongs = top({ it.title + "|" + it.albumId }, { it.title }, { it.artist }, { cover(it) }),
-            topMovies = top({ it.albumId }, { it.album }, { it.composer }, { cover(it) }),
-            topComposers = top({ it.composer.lowercase() }, { it.composer }, { null }, { null }),
+            topSongs = top({ it.id }, { it.title }, { it.artist }, { it.coverArt }),
+            topMovies = top({ it.albumId }, { it.album }, { it.composer?.name }, { it.coverArt }),
+            topComposers = top({ it.composer?.id.orEmpty() }, { it.composer?.name.orEmpty() }, { null }, { null }),
         )
     }
 
-    private fun cover(song: Song) = song.albumId.takeIf { it.isNotBlank() }?.let { "al-$it" }
-
     private fun hours(seconds: Double) = Math.round(seconds / 36.0) / 100.0 // to two decimals
 
-    /** Navidrome's plays, reread at most once a minute. */
+    /** Everyone's plays, reread at most once a minute. */
     private suspend fun snapshot(): Snapshot? = lock.withLock {
         val current = cached
         if (current != null && now() - current.takenAt < REFRESH_MS) return current
-        withContext(Dispatchers.IO) { runCatching { load() }.getOrNull() }?.also { cached = it } ?: current
-    }
-
-    private fun load(): Snapshot? {
-        val path = navidromeDb?.takeIf { File(it).isFile } ?: return null
-        return DriverManager.getConnection("jdbc:sqlite:file:$path?mode=ro").use { c ->
-            c.createStatement().use { it.execute("PRAGMA busy_timeout = 10000") }
+        val lib = music?.snapshot() ?: return current
+        // A song merged into another since it was played counts as the one it became.
+        fun song(id: String, mergedInto: String?) = lib.index[mergedInto ?: id]?.let { lib.songs[it] }
+        db.read {
             Snapshot(
                 takenAt = now(),
-                users = c.query("SELECT id, user_name, name, is_admin FROM user") {
-                    NdUser(it.getString(1), it.getString(2), it.getString(3).orEmpty(), it.getBoolean(4))
+                users = query("SELECT id, username, display_name FROM users WHERE deleted_at IS NULL") {
+                    Account(it.getLong(1), it.getString(2), it.getString(3).orEmpty())
                 },
-                // Navidrome has kept every play with its time since 0.58; older versions only have totals.
-                plays = runCatching {
-                    c.query("SELECT s.user_id, s.submission_time, $SONG_COLUMNS FROM scrobbles s JOIN media_file m ON m.id = s.media_file_id") {
-                        Play(it.getString("user_id"), it.getLong("submission_time"), song(it))
-                    }
-                }.getOrDefault(emptyList()),
-                totals = c.query(
-                    """SELECT a.user_id, a.play_count, $SONG_COLUMNS FROM annotation a JOIN media_file m ON m.id = a.item_id
-                       WHERE a.item_type = 'media_file' AND a.play_count > 0""",
-                ) { Total(it.getString("user_id"), it.getInt("play_count"), song(it)) },
+                plays = query(
+                    """SELECT e.user_id, e.at, json_extract(e.payload, '$.recording') AS rec, r.merged_into
+                         FROM events e LEFT JOIN recordings r ON r.id = json_extract(e.payload, '$.recording')
+                        WHERE e.type = 'played' AND e.user_id IS NOT NULL""",
+                ) { rs -> song(rs.getString(3).orEmpty(), rs.getString(4))?.let { Play(rs.getLong(1), rs.getLong(2), it) } }.filterNotNull(),
+                totals = query(
+                    "SELECT p.user_id, p.count, p.recording_id, r.merged_into FROM play_counts p LEFT JOIN recordings r ON r.id = p.recording_id",
+                ) { rs -> song(rs.getString(3), rs.getString(4))?.let { Total(rs.getLong(1), rs.getInt(2), it) } }.filterNotNull(),
             )
-        }
+        }.also { cached = it }
     }
-
-    private fun song(rs: ResultSet) = Song(
-        title = rs.getString("title").orEmpty(),
-        artist = rs.getString("artist").orEmpty(),
-        album = rs.getString("album").orEmpty(),
-        albumId = rs.getString("album_id").orEmpty(),
-        composer = rs.getString("album_artist").orEmpty(),
-        seconds = rs.getDouble("duration"),
-    )
 
     private companion object {
         const val DAY = 86_400L
         const val TOP = 5
         const val REFRESH_MS = 60_000L
-        const val SONG_COLUMNS = "m.title, m.artist, m.album, m.album_id, m.album_artist, m.duration"
     }
 }

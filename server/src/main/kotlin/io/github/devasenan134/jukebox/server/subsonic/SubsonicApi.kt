@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
  * The Subsonic API (the part the Jukebox app and web app use, docs/milestone-1.md), at /rest/<call> and
  * /rest/<call>.view, answered in JSON.
  *
- * Sign-in is checked by SignIn (Jukebox's own passwords, or Navidrome's for an account not imported yet).
+ * Sign-in is checked by SignIn.
  * A good check is remembered for a few minutes, so streaming and covers don't decrypt it every time.
  */
 class SubsonicApi(

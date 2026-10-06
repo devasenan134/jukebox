@@ -220,14 +220,13 @@ class MixMakerTest {
     }
 }
 
-/** A pretend Navidrome library and play history for the API test. */
+/** A pretend library and play history for the API test. */
 private class FakeMusic : MusicSource {
     var lib = Pretend.library()
-    val histories = mutableMapOf<String, History>()
+    val histories = mutableMapOf<Long, History>()
     override suspend fun snapshot() = lib
-    override suspend fun history(navidromeUserId: String, snapshot: LibrarySnapshot) = histories[navidromeUserId] ?: History.EMPTY
+    override suspend fun history(userId: Long, snapshot: LibrarySnapshot) = histories[userId] ?: History.EMPTY
     override suspend fun popularity(snapshot: LibrarySnapshot) = mapOf(1 to 3, 2 to 2)
-    override suspend fun navidromeUserId(username: String) = "nd-$username"
 }
 
 class MixApiTest {
@@ -235,15 +234,15 @@ class MixApiTest {
     fun `home, a mix, radio, saving and plays`() = testApplication {
         val music = FakeMusic()
         val now = System.currentTimeMillis()
-        music.histories["nd-alice"] = History(
+        val db = File.createTempFile("jukebox-mixes", ".db").apply { delete(); deleteOnExit() }.path
+        music.histories[addAccount(db, "alice")] = History(
             playCount = (0 until 30).associateWith { 4 }, lastPlayed = (0 until 30).associateWith { now }, plays = (0 until 30).map { it to now },
             starred = emptySet(), starredAlbums = emptySet(), starredArtists = emptySet(), rating = emptyMap(),
         )
-        val db = File.createTempFile("jukebox-mixes", ".db").apply { delete(); deleteOnExit() }.path
-        application { jukeboxServer(Config(0, db, "http://unused", "", ""), ApiFakeNavidrome(), music = music) }
+        application { jukeboxServer(Config(0, db), music = music) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val token = client.post("/auth/login") {
-            contentType(ContentType.Application.Json); setBody(LoginRequest("alice", "s", "ok-alice"))
+            contentType(ContentType.Application.Json); setBody(loginRequest("alice"))
         }.body<SessionResponse>().sessionToken
 
         val home = client.get("/mixes") { bearerAuth(token) }.body<HomeMixes>()
@@ -310,7 +309,3 @@ class MixApiTest {
     }
 }
 
-private class ApiFakeNavidrome : Navidrome(Config(0, "", "http://unused", "", "")) {
-    override suspend fun users() = null
-    override suspend fun checkLogin(username: String, salt: String, token: String) = token == "ok-$username"
-}

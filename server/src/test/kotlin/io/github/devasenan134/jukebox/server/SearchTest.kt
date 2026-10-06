@@ -60,14 +60,8 @@ private class SearchMusic : MusicSource {
         LibrarySong("s2", "Unnai Kaanadhu", "Vishwaroopam", "m2", "Kamal Haasan", listOf(kamal), Person("p-sel", "Shankar-Ehsaan-Loy"), 2013, 300, "Tamil", 0, false),
     )
     override suspend fun snapshot() = LibrarySnapshot(songs, arrayOfNulls(songs.size), emptyMap(), emptyMap(), FloatArray(2), FloatArray(2), "v1")
-    override suspend fun history(navidromeUserId: String, snapshot: LibrarySnapshot) = History.EMPTY
+    override suspend fun history(userId: Long, snapshot: LibrarySnapshot) = History.EMPTY
     override suspend fun popularity(snapshot: LibrarySnapshot) = emptyMap<Int, Int>()
-    override suspend fun navidromeUserId(username: String) = "nd-$username"
-}
-
-private class SearchNavidrome : Navidrome(Config(0, "", "http://unused", "", "")) {
-    override suspend fun users() = null
-    override suspend fun checkLogin(username: String, salt: String, token: String) = token == "ok-$username"
 }
 
 class SearchApiTest {
@@ -77,10 +71,12 @@ class SearchApiTest {
         File(dir, "movie-cast.jsonl").writeText(
             """{"album": "Vishwaroopam", "year": 2013, "starring": ["Kamal Haasan", "Pooja Kumar"]}""" + "\n",
         )
-        application { jukeboxServer(Config(0, File(dir, "social.db").path, "http://unused", "", ""), SearchNavidrome(), music = SearchMusic()) }
+        val db = File(dir, "social.db").path
+        addAccount(db, "alice")
+        application { jukeboxServer(Config(0, db), music = SearchMusic()) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val token = client.post("/auth/login") {
-            contentType(ContentType.Application.Json); setBody(LoginRequest("alice", "s", "ok-alice"))
+            contentType(ContentType.Application.Json); setBody(loginRequest("alice"))
         }.body<SessionResponse>().sessionToken
 
         val byLyricist = client.get("/search?q=vaalee") { bearerAuth(token) }.body<SearchResults>()

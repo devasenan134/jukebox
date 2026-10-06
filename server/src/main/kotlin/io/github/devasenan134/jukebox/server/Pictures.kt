@@ -91,13 +91,12 @@ class PictureFolder(dbPath: String, name: String) {
 
 /**
  * Profile pictures (kept as files next to the database, one per person) and playlist covers (with the rest of
- * the artwork when Jukebox keeps the playlists; in Navidrome, changed as admin after checking, when it doesn't).
+ * the artwork).
  */
 class Pictures(
     private val db: Db,
-    private val navidrome: Navidrome,
     dbPath: String,
-    /** Jukebox's own playlists and artwork folder, when it has a music library; else covers stay in Navidrome. */
+    /** The playlists and the artwork folder; without a music library there are no playlists to give covers. */
     private val listening: Listening? = null,
     private val artworkDir: File? = null,
 ) {
@@ -124,13 +123,7 @@ class Pictures(
 
     /** Sets (or with null, removes) the cover of a playlist [user] made. */
     suspend fun setPlaylistCover(user: UserDto, playlistId: String, picture: Picture?) {
-        if (listening != null && artworkDir != null && listening.exists(playlistId)) {
-            return listening.setCover(user.id, playlistId) { picture?.let { storeArtwork(artworkDir, it.bytes, "playlist") } }
-        }
-        val owner = navidrome.playlistOwner(playlistId) ?: throw ApiError(HttpStatusCode.NotFound, "Playlist not found")
-        val me = db.tx { queryOne("SELECT navidrome_id FROM users WHERE id = ?", user.id) { it.getString(1) } }
-            ?: navidrome.idFor(user.username)
-        if (owner != me) throw ApiError(HttpStatusCode.Forbidden, "Only whoever made a playlist can change its cover")
-        if (picture == null) navidrome.removePlaylistImage(playlistId) else navidrome.setPlaylistImage(playlistId, picture)
+        if (listening == null || artworkDir == null || !listening.exists(playlistId)) throw ApiError(HttpStatusCode.NotFound, "Playlist not found")
+        listening.setCover(user.id, playlistId) { picture?.let { storeArtwork(artworkDir, it.bytes, "playlist") } }
     }
 }

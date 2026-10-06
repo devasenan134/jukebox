@@ -25,7 +25,7 @@ fun ResultSet.toUser(prefix: String = "") = UserDto(
 )
 
 /**
- * A song as shared between friends. Ids are the same for every Navidrome user, so anyone can play it.
+ * A song as shared between friends. Ids are the same for everyone, so anyone can play it.
  * A shared clip also has [clipStartMs] and [clipEndMs]: only that part of the song is meant to be heard.
  */
 @Serializable

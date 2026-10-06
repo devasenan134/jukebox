@@ -70,6 +70,11 @@ private const val MAX_BODY_BYTES = 1024 * 1024L
 
 fun main(args: Array<String>) {
     val config = Config.fromEnv()
+    // Accounts from the command line: jukebox user add|password|admin|remove|list (see UserCommand).
+    if (args.firstOrNull() == "user") {
+        kotlin.system.exitProcess(UserCommand.forConfig(config).run(args.drop(1)))
+    }
+    // Moving over from Navidrome and the Isaipetti companion server, once (docs/milestone-2.md):
     // jukebox import --navidrome <navidrome.db> --social <isaipetti-social.db> [--social-data <folder>] [--old-navidrome <db>]...
     //                [--skip-user <navidrome username>]...
     if (args.firstOrNull() == "import") {
@@ -93,11 +98,10 @@ fun main(args: Array<String>) {
 /** Everything the server does, as one Ktor module (tests start it the same way). */
 fun Application.jukeboxServer(
     config: Config,
-    navidrome: Navidrome = Navidrome(config),
     pushSender: PushSender = config.firebaseKeyFile?.let { FcmSender(it) } ?: NoPush,
     issueTracker: IssueTracker? = config.githubToken?.let { token -> config.githubRepo?.let { GitHubIssues(it, token) } },
     pushConfig: PushConfig? = config.firebaseAppConfigFile?.let { PushConfig.fromGoogleServices(it) },
-    /** Where mixes, search and requests get their music; by default Jukebox's own library (or Navidrome's without one). */
+    /** Where mixes, search, requests and stats get their music; by default the library in [Config.libraries]. */
     music: MusicSource? = null,
     catalog: Catalog = ITunesCatalog(),
 ) {
@@ -106,8 +110,8 @@ fun Application.jukeboxServer(
     val hub = Hub(friends::friendIds)
     friends.hub = hub
     // Passwords are kept encrypted with a key that lives next to the database (docs/milestone-2.md).
-    val signIn = SignIn(db, Passwords(File(File(config.dbPath).absoluteFile.parentFile, "secret.key")), navidrome.takeIf { config.navidromeUrl.isNotBlank() })
-    val accounts = Accounts(db, navidrome, signIn, onFriendsAdded = friends::announceFriendship)
+    val signIn = SignIn(db, Passwords(File(File(config.dbPath).absoluteFile.parentFile, "secret.key")))
+    val accounts = Accounts(db, signIn, onFriendsAdded = friends::announceFriendship)
     val chat = Chat(db, friends, hub, PictureFolder(config.dbPath, "group-pictures"), config.dbPath)
     val listen = ListenTogether(hub, chat::members, this, config.listenOwnerGraceMs, config.songRequestCooldownMs)
     chat.listenersOf = listen::listeners
@@ -117,7 +121,6 @@ fun Application.jukeboxServer(
     chat.onRemoved = listen::ended
     val push = Push(db, pushSender)
     friends.push = push
-    val stats = Stats(config.navidromeDb, db, hiddenUser = config.navidromeAdminUser, defaultZone = config.timeZone)
     chat.onUnseen = push::newMessage
     listen.onStarted = { userId, conversationId ->
         val recipients = chat.members(conversationId).filter { it != userId && !hub.isVisible(it) }
@@ -125,9 +128,8 @@ fun Application.jukeboxServer(
     }
     val bugReports = BugReports(issueTracker)
     val playlistLikes = PlaylistLikes(db)
-    val music = music
-        ?: if (config.libraries != null) JukeboxLibrary(db, config.navidromeDb, config.featuresDb)
-        else config.navidromeDb?.let { NavidromeLibrary(it, config.featuresDb) }
+    val music = music ?: config.libraries?.let { JukeboxLibrary(db, config.featuresDb) }
+    val stats = Stats(db, music, defaultZone = config.timeZone)
     val mixes = music?.let { MixService(db, it, java.time.ZoneId.of(config.timeZone)) }?.also { it.warm() }
     // Without a cast file next to the database, search just has no actors.
     val search = music?.let { LibrarySearch(it, File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)) }
@@ -142,15 +144,13 @@ fun Application.jukeboxServer(
         ).also { it.start(this) }
     }
     val listening = Listening(db)
-    val pictures = Pictures(db, navidrome, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
+    val pictures = Pictures(db, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
     val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.covers, lib::roots), signIn::checkToken, signIn::userId, listening) }
     val limiter = RateLimiter(maxPerMinute = 10)
-    val cleanup = Cleanup(db, navidrome, hub)
-    // Every 10 minutes, remove people whose Navidrome account is gone.
+    // Every 10 minutes, forget chat pictures nobody can see any more.
     launch {
         delay(30.seconds)
         while (isActive) {
-            runCatching { cleanup.run() }.onFailure { log.warn("Cleanup failed", it) }
             runCatching { chat.sweepImages() }.onFailure { log.warn("Sweeping chat pictures failed", it) }
             delay(10.minutes)
         }
@@ -222,7 +222,7 @@ fun Application.jukeboxServer(
         // route above and below wins over it.
         config.webDir?.let { dir -> singlePageApplication { filesPath = dir; defaultPage = "index.html"; useResources = false } }
 
-        // Navidrome's account record, read and saved by the app when it changes a password (see Accounts).
+        // Navidrome's account record, read and saved by apps up to 0.12.1 when they change a password (see Accounts).
         route("/api/user/{id}") {
             get { call.respond(accounts.navidromeAccount(call.request.headers["X-ND-Authorization"], call.parameters["id"].orEmpty())) }
             put {
@@ -235,7 +235,7 @@ fun Application.jukeboxServer(
         route("/auth") {
             post("/login") {
                 limiter.check(call)
-                // Navidrome's sign-in sends the password (the app's password change); the app's own sends a token.
+                // Navidrome's sign-in sends the password (older apps' password change); the app's own sends a token.
                 val body = call.receive<JsonObject>()
                 val password = body["password"]?.jsonPrimitive?.contentOrNull
                 if (password != null) {
@@ -563,7 +563,12 @@ fun Application.jukeboxServer(
             }
         }
     }
-    log.info("jukebox ready on port ${config.port}, Navidrome at ${config.navidromeUrl}, push ${if (pushSender is NoPush || pushConfig == null) "off" else "on"}, feedback ${if (issueTracker == null) "off" else "on"}, mixes ${if (mixes == null) "off" else "on"}")
+    log.info("jukebox ready on port ${config.port}, library ${if (musicLibrary == null) "off" else "on"}, push ${if (pushSender is NoPush || pushConfig == null) "off" else "on"}, feedback ${if (issueTracker == null) "off" else "on"}, mixes ${if (mixes == null) "off" else "on"}")
+    launch {
+        if (db.read { queryOne("SELECT 1 FROM users WHERE deleted_at IS NULL LIMIT 1") { 1 } } == null) {
+            log.warn("No accounts yet. Make the first one with: jukebox user add <username> --admin")
+        }
+    }
 }
 
 private fun ApplicationCall.me(): UserDto = principal<UserDto>() ?: throw ApiError(HttpStatusCode.Unauthorized, "Not logged in")

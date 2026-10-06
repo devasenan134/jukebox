@@ -43,7 +43,7 @@ private val log = LoggerFactory.getLogger("jukebox.mixes")
  *
  * Nothing is stored as a finished list: every mix is worked out from the library and your listening
  * whenever one of them changed. That's what keeps them up to date: a new song that fits a mix appears
- * in it as soon as Navidrome has scanned it (and the analyzer has listened to it).
+ * in it as soon as Jukebox has scanned it (and the analyzer has listened to it).
  */
 class MixService(
     private val db: Db,
@@ -216,8 +216,7 @@ class MixService(
         val cached = built[user.id]
         if (cached != null && clock() - cached.checkedAt < RECHECK_MS) return cached
         val lib = source.snapshot() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "Mixes aren't available: the server can't read the library")
-        val navidromeId = navidromeId(user)
-        val history = navidromeId?.let { source.history(it, lib) } ?: History.EMPTY
+        val history = source.history(user.id, lib)
         val skips = skips(user.id, lib)
         val friends = friendsPlays(user.id, lib)
         val today = LocalDate.ofInstant(java.time.Instant.ofEpochMilli(clock()), zone)
@@ -274,10 +273,6 @@ class MixService(
         return sections.map { s -> s.copy(mixes = s.mixes.map { m -> if (m.endless) m else m.copy(updatedAt = times[m.id] ?: t) }) }
     }
 
-    private suspend fun navidromeId(user: UserDto): String? =
-        db.tx { queryOne("SELECT navidrome_id FROM users WHERE id = ?", user.id) { it.getString(1) } }
-            ?: source.navidromeUserId(user.username)
-
     private suspend fun skips(userId: Long, lib: LibrarySnapshot): Map<Int, SkipStats> = db.tx {
         query(
             "SELECT song_id, sum(skipped), sum(1 - skipped) FROM plays WHERE user_id = ? AND at > ? GROUP BY song_id",
@@ -285,18 +280,17 @@ class MixService(
         ) { rs -> lib.index[rs.getString(1)]?.let { it to SkipStats(rs.getInt(2), rs.getInt(3)) } }.filterNotNull().toMap()
     }
 
-    /** What this person's friends played in the last 30 days (from Navidrome's play log). */
+    /** What this person's friends played in the last 30 days. */
     private suspend fun friendsPlays(userId: Long, lib: LibrarySnapshot): Map<Int, Int> {
         val friendIds = db.tx {
             query(
-                "SELECT u.navidrome_id, u.username FROM friendships f JOIN users u ON u.id = f.friend_id WHERE f.user_id = ? AND u.deleted_at IS NULL",
+                "SELECT u.id FROM friendships f JOIN users u ON u.id = f.friend_id WHERE f.user_id = ? AND u.deleted_at IS NULL",
                 userId,
-            ) { it.getString(1) to it.getString(2) }
+            ) { it.getLong(1) }
         }
         val since = clock() - 30 * MixMaker.DAY
         val counts = mutableMapOf<Int, Int>()
-        for ((navidromeId, username) in friendIds) {
-            val id = navidromeId ?: source.navidromeUserId(username) ?: continue
+        for (id in friendIds) {
             source.history(id, lib).plays.filter { it.second > since }.forEach { counts.merge(it.first, 1, Int::plus) }
         }
         return counts

@@ -1,5 +1,6 @@
 package io.github.devasenan134.jukebox.server
 
+import io.ktor.http.HttpStatusCode
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermissions
@@ -55,16 +56,13 @@ class Passwords(private val keyFile: File) {
  * The one place that decides whether someone is who they say they are: the app's login, the Subsonic API
  * and password changes all ask here.
  *
- * An account with a Jukebox password is checked here. One without (it still lives in Navidrome, before the
- * import) is checked with Navidrome, so Jukebox works beside the old servers until the switch-over.
+ * Passwords are kept encrypted (not hashed), because the Subsonic sign-in sends md5(password + salt).
  */
-class SignIn(private val db: Db, private val passwords: Passwords, private val navidrome: Navidrome?) {
+class SignIn(private val db: Db, private val passwords: Passwords) {
     /** Whether token = md5(password + salt) for [username]'s password. */
     suspend fun checkToken(username: String, salt: String, token: String): Boolean {
-        val stored = storedPassword(username)
-        if (stored != null) return passwords.decrypt(stored)?.let { Passwords.same(Passwords.md5(it + salt), token.lowercase()) } == true
-        // An account still in Navidrome (not imported). If Navidrome can't be reached, the answer is no, not an error.
-        return runCatching { navidrome?.checkLogin(username, salt, token) }.getOrNull() == true
+        val stored = storedPassword(username) ?: return false
+        return passwords.decrypt(stored)?.let { Passwords.same(Passwords.md5(it + salt), token.lowercase()) } == true
     }
 
     suspend fun checkPassword(username: String, password: String): Boolean {
@@ -76,14 +74,10 @@ class SignIn(private val db: Db, private val passwords: Passwords, private val n
         update("UPDATE users SET password_enc = ? WHERE id = ?", passwords.encrypt(password), userId)
     }
 
-    /** The account [username] signed in with (made on first sign-in for an account that still lives in Navidrome). */
+    /** The account [username] signed in with (after [checkToken] said yes, so it exists). */
     suspend fun userId(username: String): Long = db.tx {
         queryOne("SELECT id FROM users WHERE username = ? AND deleted_at IS NULL", username.trim()) { it.getLong(1) }
-            ?: insert("INSERT INTO users (username, display_name, created_at) VALUES (?, ?, ?)", username.trim(), username.trim(), System.currentTimeMillis())
-    }
-
-    /** Whether [username] signs in with Jukebox (true) or still with Navidrome. */
-    suspend fun hasPassword(username: String) = storedPassword(username) != null
+    } ?: throw ApiError(HttpStatusCode.Unauthorized, "Wrong username or password")
 
     private suspend fun storedPassword(username: String): String? = db.tx {
         queryOne("SELECT password_enc FROM users WHERE username = ? AND deleted_at IS NULL", username.trim()) { it.getString(1) }

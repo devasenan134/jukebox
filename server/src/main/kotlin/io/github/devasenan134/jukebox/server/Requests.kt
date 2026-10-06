@@ -212,7 +212,7 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
 
 /**
  * Asking for music that isn't in the library. Search shows catalog songs and movies the library
- * doesn't have; anyone can request one, and admins (Navidrome admins) are told. Once the music is
+ * doesn't have; anyone can request one, and admins are told. Once the music is
  * added, an admin marks it done and everyone who asked gets a notification, or marks it declined
  * if it can't be found.
  */
@@ -317,7 +317,7 @@ class MusicRequests(
         requireAdmin(me)
         val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
         val place = shelf()?.find(request.item)
-            ?: throw ApiError(HttpStatusCode.Conflict, "It isn't in the library yet. Navidrome picks up new files after a few minutes; try again then")
+            ?: throw ApiError(HttpStatusCode.Conflict, "It isn't in the library yet. New files are picked up at the next scan; try again then")
         val askers = db.tx {
             update(
                 "UPDATE music_requests SET status = 'done', album_id = ?, song_id = ?, note = NULL, closed_at = ? WHERE id = ?",

@@ -28,20 +28,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/** Pretends to be Navidrome: a login works when the token is "ok-<username>". */
-private class FakeNavidrome : Navidrome(Config(0, "", "http://unused", "", "")) {
-    val created = mutableListOf<String>()
-    /** Navidrome's user list as id -> username; null means "Navidrome unreachable". */
-    var accounts: MutableMap<String, String>? = null
-    override suspend fun users() = accounts?.map { (id, name) -> NavidromeUser(id, name) }
-    override suspend fun checkLogin(username: String, salt: String, token: String) = token == "ok-$username"
-    override suspend fun createUser(username: String, displayName: String, password: String): String? {
-        if (username in created) throw ApiError(HttpStatusCode.Conflict, "That username is taken")
-        created += username
-        return null
-    }
-}
-
 /** Records notifications instead of sending them. */
 private class FakePush : PushSender {
     val sent = mutableListOf<Pair<String, Map<String, String>>>()
@@ -53,17 +39,18 @@ private class FakePush : PushSender {
 
 class FlowTest {
     private fun dbFile() = File.createTempFile("jukebox", ".db").apply { delete(); deleteOnExit() }.path
+    /** Each test's database (JUnit makes a new FlowTest for every test). */
+    private val dbPath = dbFile()
 
     @Test
     fun `invite, sign up, friends, presence and chat`() = testApplication {
-        val navidrome = FakeNavidrome()
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), navidrome) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
         }
 
-        // Alice already has a Navidrome account and logs in.
+        // Alice has an account (made with `jukebox user add`) and logs in.
         val alice = client.login("alice")
         assertEquals(HttpStatusCode.Unauthorized, client.postJson("/auth/login", LoginRequest("alice", "s", "wrong")).status)
 
@@ -73,8 +60,6 @@ class FlowTest {
         val bob = client.postJson(
             "/auth/signup", SignupRequest(invite.code.lowercase().replace("-", ""), "bob", "quiet-river-song", "Bob"),
         ).body<SessionResponse>()
-        // Bob's is a Jukebox account, not Navidrome's (see the password test below).
-        assertEquals(emptyList(), navidrome.created)
         // The same code can't be used twice.
         val reused = client.postJson("/auth/signup", SignupRequest(invite.code, "eve", "quiet-river-song"))
         assertEquals(HttpStatusCode.BadRequest, reused.status)
@@ -146,15 +131,13 @@ class FlowTest {
 
     @Test
     fun `a Jukebox account signs in with its own password and can change it`() = testApplication {
-        val navidrome = FakeNavidrome()
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), navidrome) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val alice = client.login("alice")
         val code = client.postJson("/invites", Unit, alice.sessionToken).body<InviteDto>().code
         val bob = client.postJson("/auth/signup", SignupRequest(code, "bob", "quiet-river-song", "Bob")).body<SessionResponse>()
-        assertEquals(emptyList(), navidrome.created)
 
-        // Signing in the way Subsonic players do: token = md5(password + salt), Navidrome isn't asked.
+        // Signing in the way Subsonic players do: token = md5(password + salt).
         val salt = "c0ffee"
         fun login(password: String) = LoginRequest("bob", salt, Passwords.md5(password + salt))
         assertEquals(HttpStatusCode.OK, client.postJson("/auth/login", login("quiet-river-song")).status)
@@ -171,21 +154,25 @@ class FlowTest {
     }
 
     @Test
-    fun `people deleted from Navidrome are cleaned up`() = testApplication {
-        val navidrome = FakeNavidrome()
-        val path = dbFile()
-        application { jukeboxServer(Config(0, path, "http://unused", "", ""), navidrome) }
+    fun `accounts are made, changed and removed from the command line`() = testApplication {
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
+        val command = UserCommand.forConfig(Config(0, dbPath))
+        // (The password comes from JUKEBOX_PASSWORD or the terminal, neither of which a test has.)
+        assertEquals(1, command.run(listOf("add", "dave")))
+        assertEquals(1, command.run(listOf("add", "x")))
+        assertEquals(1, command.run(listOf("remove", "nobody")))
+        assertEquals(1, command.run(listOf("frobnicate", "dave")))
 
         val alice = client.login("alice")
         val carol = client.login("carol")
-        // Bob's account lives in Navidrome; Eve signed up with an invite, so hers is Jukebox's.
         val bob = client.login("bob")
+        assertEquals(0, command.run(listOf("admin", "carol", "on")))
+        assertEquals(true, client.getJson<AdminAccessDto>("/admin/access", carol).isAdmin)
+        assertEquals(false, client.getJson<AdminAccessDto>("/admin/access", alice).isAdmin)
         client.patch("/me") { bearerAuth(bob.sessionToken); contentType(ContentType.Application.Json); setBody(RenameRequest("Bob")) }
         client.postJson("/friends/requests", AddFriendRequest("alice"), bob.sessionToken)
         client.postJson("/friends/requests/${bob.user.id}/accept", Unit, alice.sessionToken)
-        val code = client.postJson("/invites", Unit, alice.sessionToken).body<InviteDto>().code
-        client.postJson("/auth/signup", SignupRequest(code, "eve", "quiet-river-song", "Eve"))
         client.postJson("/friends/requests", AddFriendRequest("carol"), alice.sessionToken)
         client.postJson("/friends/requests/${alice.user.id}/accept", Unit, carol.sessionToken)
         val dm = client.postJson("/conversations/dm", NewDmRequest(bob.user.id), alice.sessionToken).body<ConversationDto>()
@@ -193,20 +180,11 @@ class FlowTest {
         val group = client.postJson("/conversations/group", NewGroupRequest("gang", listOf(bob.user.id, carol.user.id)), alice.sessionToken)
             .body<ConversationDto>()
 
-        // The cleanup job runs against the same database file (the app's own copy runs on a timer).
-        val cleanup = Cleanup(Db(path), navidrome, Hub { emptyList() })
-
-        // Navidrome unreachable, or a list that would remove most people: do nothing.
-        navidrome.accounts = null
-        assertEquals(emptyList(), cleanup.run().removed)
-        navidrome.accounts = mutableMapOf("nd-alice" to "alice")
-        assertEquals(emptyList(), cleanup.run().removed)
-
-        // Bob's account is deleted in Navidrome. Eve isn't in Navidrome at all, and stays: her account is Jukebox's.
-        navidrome.accounts = mutableMapOf("nd-alice" to "alice", "nd-carol" to "carol")
-        assertEquals(listOf("bob"), cleanup.run().removed)
-        assertEquals(setOf("carol", "eve"), client.friends(alice).map { it.user.username }.toSet())
+        // Bob's account is removed.
+        assertEquals(0, command.run(listOf("remove", "bob")))
+        assertEquals(setOf("carol"), client.friends(alice).map { it.user.username }.toSet())
         assertEquals(HttpStatusCode.Unauthorized, client.get("/me") { bearerAuth(bob.sessionToken) }.status)
+        assertEquals(HttpStatusCode.Unauthorized, client.postJson("/auth/login", loginRequest("bob")).status)
         // His old message is still there, marked as left, but the DM is closed.
         val history = client.getJson<List<MessageDto>>("/conversations/${dm.id}/messages", alice)
         assertEquals("Bob (left)" to "hi alice", history.single().sender.displayName to history.single().body)
@@ -225,31 +203,15 @@ class FlowTest {
         // Nobody who's still around has it, so it's gone for good.
         assertEquals(HttpStatusCode.NotFound, client.get("/conversations/${dm.id}/messages") { bearerAuth(alice.sessionToken) }.status)
 
-        // If "bob" is created again later, it's a brand-new person with no friends.
+        // If "bob" is made again later, it's a brand-new person with no friends.
         val newBob = client.login("bob")
         assertTrue(newBob.user.id != bob.user.id)
         assertEquals(emptyList(), client.friends(newBob))
-
-        // An admin renames carol to caroline in Navidrome (same account id): she keeps her friends,
-        // and logging in with the new name is still her.
-        navidrome.accounts!!["nd-carol"] = "caroline"
-        assertEquals(listOf("carol" to "caroline"), cleanup.run().renamed)
-        assertEquals(setOf("caroline", "eve"), client.friends(alice).map { it.user.username }.toSet())
-        assertEquals(carol.user.id, client.login("caroline").user.id)
-
-        // Alice's account is deleted and a *different* "alice" is created before the cleanup runs:
-        // logging in as the new alice must not inherit the old one's friends.
-        navidrome.accounts!!.remove("nd-alice")
-        navidrome.accounts!!["nd-alice-2"] = "alice"
-        val otherAlice = client.login("alice")
-        assertTrue(otherAlice.user.id != alice.user.id)
-        assertEquals(emptyList(), client.friends(otherAlice))
-        assertEquals(emptyList(), client.friends(client.login("caroline")))
     }
 
     @Test
     fun `chats with ex-friends can be deleted, and song clips can be shared`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val alice = client.login("alice")
         val bob = client.login("bob")
@@ -289,7 +251,7 @@ class FlowTest {
     fun `listen together`() = testApplication {
         val push = FakePush()
         // A short wait for an owner who drops offline, so the test doesn't take a minute.
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", "", listenOwnerGraceMs = 500, songRequestCooldownMs = 700), FakeNavidrome(), push) }
+        application { jukeboxServer(Config(0, dbPath, listenOwnerGraceMs = 500, songRequestCooldownMs = 700), pushSender = push) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -398,7 +360,7 @@ class FlowTest {
             override suspend fun open(title: String, body: String, labels: List<String>) =
                 BugReportResponse(opened.size + 1L, "https://github.com/x/y/issues/${opened.size + 1}").also { opened += Triple(title, body, labels) }
         }
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome(), issueTracker = tracker) }
+        application { jukeboxServer(Config(0, dbPath), issueTracker = tracker) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val alice = client.login("alice")
 
@@ -432,7 +394,7 @@ class FlowTest {
             {"client_info":{"mobilesdk_app_id":"1:123:android:other","android_client_info":{"package_name":"some.other.app"}},"api_key":[{"current_key":"k-other"}]},
             {"client_info":{"mobilesdk_app_id":"1:123:android:abc","android_client_info":{"package_name":"io.github.devasenan134.jukebox"}},"api_key":[{"current_key":"k-app"}]}]}""")
         application {
-            jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome(), FakePush(), pushConfig = PushConfig.fromGoogleServices(file.path))
+            jukeboxServer(Config(0, dbPath), pushSender = FakePush(), pushConfig = PushConfig.fromGoogleServices(file.path))
         }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val alice = client.login("alice")
@@ -442,7 +404,7 @@ class FlowTest {
 
     @Test
     fun `leaving a group and deleting it for everyone`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -490,7 +452,7 @@ class FlowTest {
 
     @Test
     fun `a group's owner adds and removes members`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -548,7 +510,7 @@ class FlowTest {
 
     @Test
     fun `replying to a message`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -594,8 +556,8 @@ class FlowTest {
 
     @Test
     fun `photos, GIFs and stickers in a chat`() = testApplication {
-        val db = dbFile()
-        application { jukeboxServer(Config(0, db, "http://unused", "", ""), FakeNavidrome()) }
+        val db = dbPath
+        application { jukeboxServer(Config(0, db)) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val (alice, bob, carol) = listOf("alice", "bob", "carol").map { client.login(it) }
         for (friend in listOf(bob, carol)) {
@@ -640,7 +602,7 @@ class FlowTest {
 
     @Test
     fun `pinning messages`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -684,7 +646,7 @@ class FlowTest {
 
     @Test
     fun `reactions, editing, deleting, typing and seen`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -760,8 +722,8 @@ class FlowTest {
 
     @Test
     fun `voice messages, forwarding and searching a chat`() = testApplication {
-        val db = dbFile()
-        application { jukeboxServer(Config(0, db, "http://unused", "", ""), FakeNavidrome()) }
+        val db = dbPath
+        application { jukeboxServer(Config(0, db)) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val (alice, bob, carol) = listOf("alice", "bob", "carol").map { client.login(it) }
         for (friend in listOf(bob, carol)) {
@@ -827,7 +789,7 @@ class FlowTest {
     @Test
     fun `mentions in a group`() = testApplication {
         val push = FakePush()
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome(), push) }
+        application { jukeboxServer(Config(0, dbPath), pushSender = push) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val (alice, bob, carol, erin) = listOf("alice", "bob", "carol", "erin").map { client.login(it) }
         for (friend in listOf(bob, carol)) {
@@ -866,7 +828,7 @@ class FlowTest {
 
     @Test
     fun `liked playlists are saved per person`() = testApplication {
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), FakeNavidrome()) }
+        application { jukeboxServer(Config(0, dbPath)) }
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val alice = client.login("alice")
         val bob = client.login("bob")
@@ -911,9 +873,8 @@ class FlowTest {
 
     @Test
     fun `push notifications go to people without the app on screen`() = testApplication {
-        val navidrome = FakeNavidrome()
         val push = FakePush()
-        application { jukeboxServer(Config(0, dbFile(), "http://unused", "", ""), navidrome, push) }
+        application { jukeboxServer(Config(0, dbPath), pushSender = push) }
         val client = createClient {
             install(ContentNegotiation) { json(eventJson) }
             install(WebSockets)
@@ -968,8 +929,11 @@ class FlowTest {
         while (!condition()) kotlinx.coroutines.delay(20)
     }
 
-    private suspend fun HttpClient.login(username: String) =
-        postJson("/auth/login", LoginRequest(username, "salt", "ok-$username")).body<SessionResponse>()
+    /** Signs in as [username], making the account first if there isn't one. */
+    private suspend fun HttpClient.login(username: String): SessionResponse {
+        addAccount(dbPath, username)
+        return postJson("/auth/login", loginRequest(username)).body<SessionResponse>()
+    }
 
     private suspend fun HttpClient.friends(session: SessionResponse) = getJson<List<FriendDto>>("/friends", session)
 

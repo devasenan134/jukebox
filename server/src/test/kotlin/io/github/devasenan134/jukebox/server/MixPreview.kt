@@ -1,5 +1,6 @@
 package io.github.devasenan134.jukebox.server
 
+import io.github.devasenan134.jukebox.server.library.JukeboxLibrary
 import kotlinx.coroutines.runBlocking
 import java.time.LocalDate
 
@@ -8,10 +9,12 @@ import java.time.LocalDate
  * every mix one person would get today with the languages in it.
  */
 fun main(args: Array<String>) = runBlocking {
-    val (navidromeDb, featuresDb, username) = args.toList() + List(3) { "" }
-    val source = NavidromeLibrary(navidromeDb, featuresDb.ifBlank { null })
-    val lib = source.snapshot() ?: error("Couldn't read $navidromeDb")
-    val history = source.navidromeUserId(username)?.let { source.history(it, lib) } ?: History.EMPTY
+    val (dbPath, featuresDb, username) = args.toList() + List(3) { "" }
+    val db = Db(dbPath)
+    val source = JukeboxLibrary(db, featuresDb.ifBlank { null })
+    val lib = source.snapshot() ?: error("Couldn't read $dbPath")
+    val userId = db.tx { queryOne("SELECT id FROM users WHERE username = ?", username) { it.getLong(1) } }
+    val history = userId?.let { source.history(it, lib) } ?: History.EMPTY
     println("${lib.songs.size} songs, ${lib.analyzed} analyzed; $username has ${history.playCount.size} played and ${history.starred.size} liked songs")
 
     // Languages: how many of each, how many were tagged, and a few examples of each to check by eye.
