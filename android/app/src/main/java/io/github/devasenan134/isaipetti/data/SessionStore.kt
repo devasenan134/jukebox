@@ -13,7 +13,7 @@ import kotlinx.serialization.json.Json
 private val Context.sessionDataStore by preferencesDataStore(name = "session")
 
 /**
- * Login details for the Navidrome server.
+ * Login details for the server.
  *
  * The password itself is never stored. Subsonic accepts `token = md5(password + salt)`,
  * so we keep only the salt and token.
@@ -46,8 +46,8 @@ class SessionStore(private val context: Context) {
 
     private val _social = MutableStateFlow<SocialSession?>(null)
 
-    /** The login for the friends server, or null if not connected (yet). Separate from Navidrome on purpose:
-     *  music keeps working even when the friends server is down. */
+    /** The login for the friends API, or null if not connected (yet). Separate from the music login on purpose:
+     *  music keeps working even when the friends side is off or failing. */
     val social: StateFlow<SocialSession?> = _social
 
     /** Reads the saved login once at app start. It's a tiny file, so blocking briefly is fine. */

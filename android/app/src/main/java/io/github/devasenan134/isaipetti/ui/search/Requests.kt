@@ -143,7 +143,7 @@ private fun RequestButton(request: MusicRequest?, onRequest: () -> Unit, onCance
     }
 }
 
-/** A catalog cover (from the internet, not Navidrome). */
+/** A catalog cover (from the internet, not the server). */
 @Composable
 private fun Artwork(item: CatalogItem, modifier: Modifier = Modifier, corner: Dp = 8.dp) {
     AsyncImage(

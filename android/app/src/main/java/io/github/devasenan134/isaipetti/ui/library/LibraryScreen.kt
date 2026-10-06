@@ -89,7 +89,7 @@ fun LibraryScreen(nav: Nav) {
     val savedMixes by app.mixes.followed.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { app.likes.refresh(); app.mixes.refresh() }
     val credentials by app.session.credentials.collectAsStateWithLifecycle()
-    // Playlists you created in Navidrome, next to the ones you liked.
+    // Playlists you created, next to the ones you liked.
     var reloadOwn by remember { mutableIntStateOf(0) }
     var creating by remember { mutableStateOf(false) }
     val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username, reloadOwn) {

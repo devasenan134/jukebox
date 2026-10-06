@@ -36,6 +36,8 @@ class SocialApi(
 
     suspend fun logout() = post<Unit, Unit>("/auth/logout", Unit)
     suspend fun logoutOthers() = post<Unit, Unit>("/auth/logout-others", Unit)
+    /** Changes your password after the server checks [current]; your other devices are signed out. */
+    suspend fun changePassword(current: String, new: String) = post<PasswordBody, Unit>("/me/password", PasswordBody(current, new))
     suspend fun rename(displayName: String): SocialUser = send("PATCH", "/me", json.encodeToString(RenameBody.serializer(), RenameBody(displayName)), SocialUser.serializer())
 
     /** Sets your profile picture (a JPEG the app already cropped and shrank). Returns you, with its new version. */
@@ -52,14 +54,14 @@ class SocialApi(
     suspend fun removeGroupPicture(conversationId: Long): Conversation = send("DELETE", "/conversations/$conversationId/picture", null, Conversation.serializer())
     fun groupPictureUrl(c: Conversation): String? = c.picture?.let { v -> baseUrl()?.let { "$it/conversations/${c.id}/picture?v=$v" } }
 
-    /** A cover for a playlist you made; the friends server stores it in Navidrome. */
+    /** A cover for a playlist you made. */
     suspend fun setPlaylistCover(playlistId: String, jpeg: ByteArray) = sendImage<Unit>("PUT", "/playlists/${enc(playlistId)}/cover", jpeg, null)
     suspend fun removePlaylistCover(playlistId: String) = send<Unit>("DELETE", "/playlists/${enc(playlistId)}/cover", null)
 
     suspend fun registerDevice(pushToken: String) = post<DeviceBody, Unit>("/devices", DeviceBody(pushToken))
     suspend fun unregisterDevice(pushToken: String) = post<DeviceBody, Unit>("/devices/remove", DeviceBody(pushToken))
 
-    /** Your liked playlists, saved with your account on the friends server (Navidrome can't like playlists). */
+    /** Your liked playlists, saved with your account on the friends server (the Subsonic API can't like playlists). */
     suspend fun likedPlaylists(): List<Playlist> = get<List<PlaylistBody>>("/likes/playlists").map { Playlist(it.id, it.name, coverArt = it.coverArt, songCount = it.songCount) }
     suspend fun likePlaylist(playlist: Playlist) =
         send<Unit>("PUT", "/likes/playlists", json.encodeToString(PlaylistBody.serializer(), PlaylistBody(playlist.id, playlist.name, playlist.coverArt, playlist.songCount)))
@@ -110,7 +112,7 @@ class SocialApi(
     /** The session's owner accepts or declines a song request. */
     suspend fun answerRequest(conversationId: Long, messageId: Long, accept: Boolean): ChatMessage =
         post("/conversations/$conversationId/listen/requests/$messageId", SongRequestAnswer(accept))
-    /** Whether you're a Navidrome admin (who can see everyone's listening stats). */
+    /** Whether you're an admin (who can see everyone's listening stats). */
     suspend fun adminAccess(): AdminAccess = get("/admin/access")
     suspend fun listeningStats(timeZone: String): ListeningStats =
         get("/admin/stats?tz=" + java.net.URLEncoder.encode(timeZone, "UTF-8"))
@@ -262,6 +264,7 @@ class SocialApi(
     }
 
     @Serializable private data class LoginBody(val username: String, val salt: String, val token: String)
+    @Serializable private data class PasswordBody(val current: String, val new: String)
     @Serializable private data class SignupBody(val inviteCode: String, val username: String, val password: String, val displayName: String)
     @Serializable private data class UsernameBody(val username: String)
     @Serializable private data class UserIdBody(val userId: Long)

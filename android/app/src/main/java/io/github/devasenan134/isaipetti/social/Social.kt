@@ -247,7 +247,13 @@ class Social(private val context: Context, private val session: SessionStore, pr
         }
     }
 
-    /** Logs in to the friends server with the saved Navidrome login, if not done yet. */
+    /** Changes your password (see [SocialApi.changePassword]). */
+    suspend fun changePassword(current: String, new: String) {
+        ensureLoggedIn()
+        api.changePassword(current, new)
+    }
+
+    /** Logs in to the friends side of the server with the saved login, if not done yet. */
     private suspend fun ensureLoggedIn() {
         if (session.social.value != null) return
         val credentials = session.credentials.value ?: throw SocialException("Not logged in")

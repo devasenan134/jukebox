@@ -4,15 +4,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.security.MessageDigest
@@ -21,13 +17,13 @@ import java.security.SecureRandom
 class SubsonicException(message: String) : Exception(message)
 
 /**
- * Talks to Navidrome through the Subsonic API: `https://<server>/rest/<endpoint>?<auth>&<params>`.
+ * Talks to Jukebox through the Subsonic API: `https://<server>/rest/<endpoint>?<auth>&<params>`.
  * Docs: https://opensubsonic.netlify.app/docs/
  */
 class SubsonicApi(
     private val http: OkHttpClient,
     private val credentials: () -> Credentials?,
-    /** Called when Navidrome rejects the saved login (e.g. the password was changed on another device). */
+    /** Called when the server rejects the saved login (e.g. the password was changed on another device). */
     private val onLoginRejected: (Credentials) -> Unit = {},
 ) {
     private val json = Json {
@@ -59,8 +55,8 @@ class SubsonicApi(
             .decode<SearchResult>("searchResult3") ?: SearchResult()
 
     /**
-     * Singers (artists with the "artist" role), a page at a time, A to Z. Navidrome's artist list only
-     * has album artists, so this goes through search, which covers everyone.
+     * Singers (artists with the "artist" role), a page at a time, A to Z. The app's artist list (getArtists)
+     * is for music directors, so this goes through search, which covers everyone.
      */
     suspend fun singers(offset: Int, count: Int = 200): List<Artist> =
         (get("search3", mapOf("query" to "", "artistCount" to count, "artistOffset" to offset, "albumCount" to 0, "songCount" to 0))
@@ -104,33 +100,21 @@ class SubsonicApi(
     }
 
     suspend fun playlists(): List<Playlist> =
-        get("getPlaylists").decode<Playlists>("playlists")?.playlist.orEmpty().map { it.withFreshCover() }
+        get("getPlaylists").decode<Playlists>("playlists")?.playlist.orEmpty()
 
     suspend fun playlist(id: String): Playlist =
-        (get("getPlaylist", mapOf("id" to id)).decode<Playlist>("playlist") ?: throw SubsonicException("Playlist not found")).withFreshCover()
-
-    /**
-     * Navidrome keeps a playlist's cover id ("pl-<id>") the same when its picture changes, so phones would
-     * keep showing the old one. Adding when it last changed ("pl-<id>_<hex>", which Navidrome accepts)
-     * gives a new picture a new address.
-     */
-    private fun Playlist.withFreshCover(): Playlist {
-        val art = coverArt ?: return this
-        if (!art.startsWith("pl-") || '_' in art) return this
-        val version = changed?.let { runCatching { java.time.Instant.parse(it).epochSecond }.getOrNull() } ?: return this
-        return copy(coverArt = art + "_" + java.lang.Long.toHexString(version))
-    }
+        get("getPlaylist", mapOf("id" to id)).decode<Playlist>("playlist") ?: throw SubsonicException("Playlist not found")
 
     suspend fun songDetails(id: String): SongDetails =
         get("getSong", mapOf("id" to id)).decode<SongDetails>("song") ?: throw SubsonicException("Song not found")
 
-    /** Your liked songs and movies (Navidrome's "starred" items), newest likes first. */
+    /** Your liked songs and movies ("starred" in the Subsonic API), newest likes first. */
     suspend fun starred(): Starred =
         (get("getStarred2").decode<Starred>("starred2") ?: Starred()).let { s ->
             Starred(album = s.album.sortedByDescending { it.starred }, song = s.song.sortedByDescending { it.starred })
         }
 
-    /** Likes (stars) a song or a movie in Navidrome, so it's liked on every device. */
+    /** Likes (stars) a song or a movie on the server, so it's liked on every device. */
     suspend fun like(songId: String? = null, albumId: String? = null, liked: Boolean) {
         val params = buildMap<String, Any> {
             songId?.let { put("id", it) }
@@ -145,52 +129,6 @@ class SubsonicApi(
     /** Records a play. submission=false means "now playing"; true adds it to play counts and history. */
     suspend fun scrobble(songId: String, submission: Boolean) {
         get("scrobble", mapOf("id" to songId, "submission" to submission, "time" to System.currentTimeMillis()))
-    }
-
-    /**
-     * Changes the password through Navidrome's own API, as the user themselves (no admin involved).
-     * Navidrome checks [current] and only lets normal users change their own password, name and email.
-     */
-    suspend fun changePassword(current: String, new: String) = withContext(Dispatchers.IO) {
-        val creds = credentials() ?: throw SubsonicException("Not logged in")
-        val jsonType = "application/json".toMediaType()
-
-        // 1. Log in to Navidrome with the current password (this is what proves it's really you).
-        val loginBody = buildJsonObject {
-            put("username", creds.username)
-            put("password", current)
-        }.toString().toRequestBody(jsonType)
-        val login = http.newCall(Request.Builder().url("${creds.server}/auth/login").post(loginBody).build()).execute().use {
-            when {
-                it.code == 401 -> throw SubsonicException("Your current password is wrong")
-                it.code == 429 -> throw SubsonicException("Too many attempts. Wait a minute and try again")
-                !it.isSuccessful -> throw SubsonicException("Navidrome returned ${it.code}")
-            }
-            json.parseToJsonElement(it.body.string()).jsonObject
-        }
-        val token = login["token"]?.jsonPrimitive?.content ?: throw SubsonicException("Navidrome didn't accept the login")
-        val id = login["id"]?.jsonPrimitive?.content ?: throw SubsonicException("Navidrome didn't return your account")
-
-        // 2. Read your own account record, so the unchanged fields are sent back as they are.
-        val record = http.newCall(
-            Request.Builder().url("${creds.server}/api/user/$id").header("X-ND-Authorization", "Bearer $token").build()
-        ).execute().use {
-            if (!it.isSuccessful) throw SubsonicException("Couldn't read your account (${it.code})")
-            json.parseToJsonElement(it.body.string()).jsonObject
-        }
-
-        // 3. Save it with the new password.
-        val update = buildJsonObject {
-            listOf("id", "userName", "name", "email").forEach { key -> record[key]?.let { put(key, it) } }
-            put("currentPassword", current)
-            put("password", new)
-        }.toString().toRequestBody(jsonType)
-        http.newCall(
-            Request.Builder().url("${creds.server}/api/user/$id").header("X-ND-Authorization", "Bearer $token").put(update).build()
-        ).execute().use {
-            if (it.code == 400) throw SubsonicException("Navidrome refused the change. Check your current password")
-            if (!it.isSuccessful) throw SubsonicException("Couldn't change the password (${it.code})")
-        }
     }
 
     fun streamUrl(songId: String): String = url("stream", mapOf("id" to songId)).toString()
@@ -227,7 +165,7 @@ class SubsonicApi(
             if (!response.isSuccessful) throw SubsonicException("Server returned HTTP ${response.code}")
             val body = runCatching {
                 json.parseToJsonElement(response.body.string()).jsonObject["subsonic-response"]?.jsonObject
-            }.getOrNull() ?: throw SubsonicException("That doesn't look like a Navidrome server")
+            }.getOrNull() ?: throw SubsonicException("That doesn't look like a Jukebox server")
             if (body["status"]?.jsonPrimitive?.content != "ok") {
                 val error = body["error"]?.jsonObject
                 // Error 40 = wrong username or password. Only react when using the saved login.

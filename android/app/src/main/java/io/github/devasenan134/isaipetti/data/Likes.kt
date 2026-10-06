@@ -13,8 +13,8 @@ import java.time.Instant
 /**
  * What you've liked, for the hearts everywhere and the Your Library page.
  *
- * Songs and movies are liked in Navidrome itself ("starred"), so they're the same on every device
- * and in Navidrome's web page. Navidrome can't like playlists, so liked playlists are saved with your
+ * Songs and movies are liked through the Subsonic API ("starred"), so they're the same on every device
+ * and on the website. It can't like playlists, so liked playlists are saved with your
  * account on the friends server (or only on this phone if you don't use one). A copy is kept on the
  * phone so the library shows right away. Changes show immediately and are undone if refused.
  */

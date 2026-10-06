@@ -191,8 +191,8 @@ fun SettingsScreen(nav: Nav) {
 }
 
 /**
- * The new password goes straight from the phone to Navidrome over HTTPS. The friends server
- * never sees it, and nothing stores it: the app keeps only the salted token, as at login.
+ * The new password goes to the server over HTTPS, which checks the current one first. The app keeps only
+ * the salted token, as at login.
  */
 @Composable
 private fun ChangePasswordCard() {
@@ -220,12 +220,10 @@ private fun ChangePasswordCard() {
         scope.launch {
             try {
                 val old = app.session.credentials.value ?: throw IllegalStateException("Not logged in")
-                app.api.changePassword(current, new)
+                app.social.changePassword(current, new)
                 // Switch this phone to the new password right away (as a fresh salted token).
                 val updated = SubsonicApi.credentialsFor(old.server, old.username, new)
                 app.session.save(updated)
-                // Sign out other phones from the friends server; Navidrome already rejects their old login.
-                runCatching { app.social.api.logoutOthers() }
                 current = ""
                 new = ""
                 confirm = ""
@@ -407,7 +405,7 @@ private fun RenameDialog(current: String, onDismiss: () -> Unit, onSaved: () -> 
     )
 }
 
-/** Only shown to Navidrome admins: the server says whether you are one. */
+/** Only shown to admins: the server says whether you are one. */
 @Composable
 private fun ListeningStatsCard(onOpen: () -> Unit) {
     val app = LocalApp.current

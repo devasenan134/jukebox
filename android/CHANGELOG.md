@@ -8,6 +8,15 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Unreleased
+
+### Improved
+- **Changing your password** goes to Jukebox's own password change, which checks your current password
+  and signs your other devices out. (It used Navidrome's way before; Jukebox still answers that for older
+  versions.)
+
+---
+
 ## 0.12.1 (2026-10-04): One server address
 
 App only.

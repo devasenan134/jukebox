@@ -107,7 +107,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
     val likedPlaylists by app.likes.playlists.collectAsStateWithLifecycle()
     val username = app.session.credentials.value?.username
     val playlist = (loader.state as? Loadable.Ready)?.value
-    // Only the person who made a playlist can change it (Navidrome checks this too).
+    // Only the person who made a playlist can change it (the server checks this too).
     val mine = playlist != null && playlist.owner == username
     // On your own playlist: how many friends liked it (null until known, or if the friends server can't say).
     val likes by androidx.compose.runtime.produceState<Int?>(null, mine, id) {

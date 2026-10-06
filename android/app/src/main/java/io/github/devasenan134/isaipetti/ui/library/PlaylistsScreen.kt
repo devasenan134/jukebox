@@ -16,7 +16,7 @@ import io.github.devasenan134.isaipetti.ui.components.PlaylistCard
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
 
-/** Every playlist in Navidrome that you can see, A to Z. */
+/** Every playlist you can see, A to Z. */
 @Composable
 fun PlaylistsScreen(nav: Nav) {
     val app = LocalApp.current
