@@ -1578,3 +1578,7 @@ a.nav-item:hover {
   gap: 4px;
   flex-shrink: 0;
 }
+.btn.danger {
+  background: var(--error);
+  color: #fff;
+}

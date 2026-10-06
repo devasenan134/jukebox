@@ -7,7 +7,8 @@ import { social } from '../api/social'
 import * as player from '../player/player'
 import { Avatar, GroupAvatar, useFriendsServerPicture } from '../social/avatars'
 import { useListen } from '../social/listen'
-import { markRead, me, onMessage, onRemoved, refresh, sendTyping, setOpenConversation, useSocial } from '../social/social'
+import { deleteConversation, markRead, me, onMessage, onRemoved, refresh, sendTyping, setOpenConversation, useSocial } from '../social/social'
+import { GroupInfoSheet, GroupMenu } from '../social/GroupInfo'
 import { Cover, formatDuration } from '../ui/components'
 import { Dialog, Icon, IconButton, Menu, toast, type MenuItem } from '../ui/kit'
 import { useNav } from '../ui/nav'
@@ -28,6 +29,8 @@ export function ChatScreen() {
   const [more, setMore] = useState(true)
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const [editing, setEditing] = useState<ChatMessage | null>(null)
+  const [members, setMembers] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const list = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
@@ -105,12 +108,18 @@ export function ChatScreen() {
       <div className="screen-header with-back" style={{ gap: 10, flexShrink: 0 }}>
         <IconButton icon="arrow_back" label="Back" onClick={nav.back} />
         {partner ? <Avatar name={partner.displayName} userKey={partner.username} user={partner} online={online} size={40} /> : <GroupAvatar groupKey={String(conversation.id)} conversation={conversation} size={40} />}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{ flex: 1, minWidth: 0, cursor: partner ? 'default' : 'pointer' }}
+          onClick={() => !partner && setMembers(true)}
+          title={partner ? undefined : 'Members'}
+        >
           <div className="title-medium ellipsis" data-testid="chat-title">{chatTitle(conversation)}</div>
           <div className={`body-small ellipsis ${typers.length ? 'primary-text' : 'muted'}`}>{subtitle}</div>
         </div>
         <JamButton conversation={conversation} />
+        {!partner && <GroupMenu conversation={conversation} onShowMembers={() => setMembers(true)} onGone={nav.back} />}
       </div>
+      {members && <GroupInfoSheet conversation={conversation} onClose={() => setMembers(false)} />}
       <div
         ref={list}
         onScroll={(e) => {
@@ -134,9 +143,13 @@ export function ChatScreen() {
             onChanged={(x) => merge([x])}
           />
         ))}
+        <Seen conversation={conversation} messages={messages} />
       </div>
       {conversation.canMessage === false ? (
-        <div className="body-medium muted" style={{ padding: 16, textAlign: 'center' }}>You can't message this chat anymore.</div>
+        <div className="body-medium muted" style={{ padding: 16, textAlign: 'center' }}>
+          You can't message this chat anymore.
+          <button className="btn text" style={{ marginLeft: 8 }} onClick={() => setDeleting(true)}>Delete chat</button>
+        </div>
       ) : (
         <Composer
           conversationId={id}
@@ -150,8 +163,35 @@ export function ChatScreen() {
         />
       )}
       {editing && <EditMessage m={editing} onClose={() => setEditing(null)} onSaved={(m) => merge([m])} />}
+      {deleting && (
+        <Dialog
+          title="Delete this chat?"
+          onClose={() => setDeleting(false)}
+          actions={
+            <>
+              <button className="btn text" onClick={() => setDeleting(false)}>Cancel</button>
+              <button className="btn danger" onClick={() => { setDeleting(false); deleteConversation(id).then(nav.back).catch((e) => toast((e as Error).message || "Couldn't delete it")) }}>Delete</button>
+            </>
+          }
+        >
+          It's removed for you only.
+        </Dialog>
+      )}
     </div>
   )
+}
+
+/** "Seen" (a DM) or "Seen by Alice, Bob" / "Seen by everyone" (a group) under your newest message, if it's the last one. */
+function Seen({ conversation, messages }: { conversation: Conversation; messages: ChatMessage[] }) {
+  const myId = me()?.id
+  const last = [...messages].reverse().find((m) => !m.system)
+  if (!last || last.sender.id !== myId || last.deleted) return null
+  const others = conversation.members.filter((m) => m.id !== myId)
+  const seenBy = others.filter((m) => (conversation.readMarks ?? []).some((r) => r.userId === m.id && r.lastReadId >= last.id))
+  if (!seenBy.length) return null
+  const text = conversation.kind !== 'group' ? 'Seen'
+    : seenBy.length === others.length ? 'Seen by everyone' : `Seen by ${seenBy.map((m) => m.displayName).join(', ')}`
+  return <div className="body-small muted" style={{ textAlign: 'right', fontSize: 11, margin: '2px 8px 0' }}>{text}</div>
 }
 
 /** Listen together: start a jam with this chat, join one that's on, or leave. */

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { social } from '../api/social'
 import { credentialsFor } from '../api/subsonic'
 import type { Invite } from '../api/socialTypes'
@@ -9,6 +9,7 @@ import { ScreenHeader, useLoad } from '../ui/components'
 import { Dialog, IconButton, NameDialog, toast } from '../ui/kit'
 import { checkPassword, PasswordStrength } from '../ui/password'
 import { useNav } from '../ui/nav'
+import { usePhotoPicker } from '../ui/PhotoPicker'
 
 /** Settings (ui/settings/SettingsScreen.kt): your profile, password, invites for friends, and signing out. */
 export function SettingsScreen() {
@@ -17,7 +18,6 @@ export function SettingsScreen() {
   const me = useSession((s) => s.social)
   const [renaming, setRenaming] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
-  const file = useRef<HTMLInputElement>(null)
   const username = credentials?.username ?? ''
   const name = me?.user.displayName || username
 
@@ -25,14 +25,17 @@ export function SettingsScreen() {
     if (me) useSession.getState().saveSocial({ ...me, user })
     toast(done)
   }
-  const pickPicture = async (f: File | undefined) => {
-    if (!f) return
-    try {
-      saveUser(await social.setAvatar(await squareJpeg(f, 512)), 'Profile picture updated')
-    } catch (e) {
-      toast((e as Error).message || "Couldn't change your picture")
-    }
-  }
+  const picker = usePhotoPicker({
+    title: 'Profile picture',
+    round: true,
+    onPicked: async (jpeg) => {
+      try {
+        saveUser(await social.setAvatar(jpeg), 'Profile picture updated')
+      } catch (e) {
+        toast((e as Error).message || "Couldn't change your picture")
+      }
+    },
+  })
 
   return (
     <div className="page">
@@ -41,7 +44,7 @@ export function SettingsScreen() {
         <Card>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <button
-              onClick={() => file.current?.click()}
+              onClick={() => picker.open()}
               disabled={!me}
               aria-label="Change profile picture"
               style={{ border: 0, padding: 0, background: 'none', cursor: me ? 'pointer' : 'default', position: 'relative', borderRadius: '50%' }}
@@ -53,7 +56,7 @@ export function SettingsScreen() {
                 </span>
               )}
             </button>
-            <input ref={file} type="file" accept="image/*" hidden onChange={(e) => void pickPicture(e.target.files?.[0])} />
+            {picker.element}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="headline-small ellipsis">{name}</div>
               <div className="body-medium muted">@{username}</div>
@@ -226,15 +229,4 @@ function Invites() {
       )}
     </Card>
   )
-}
-
-/** The middle square of a picture, as a JPEG at most [size] pixels wide (profile pictures). */
-async function squareJpeg(file: File, size: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(file)
-  const side = Math.min(bitmap.width, bitmap.height)
-  const out = Math.min(size, side)
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = out
-  canvas.getContext('2d')!.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, out, out)
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't read that picture"))), 'image/jpeg', 0.88))
 }

@@ -37,9 +37,9 @@ website has them.
 - [x] **Search history**: past searches to tap again, ✕ to remove, Clear (the store is there unused)
 
 **3. Chat**
-- [ ] Group settings: members (in the jam, online, offline), add and remove people, rename, group photo, leave,
+- [x] Group settings: members (in the jam, online, offline), add and remove people, rename, group photo, leave,
       delete for everyone; deleting a chat with someone who left
-- [ ] **Seen** / **Seen by …** under your newest message (the read marks already arrive)
+- [x] **Seen** / **Seen by …** under your newest message (the read marks already arrive)
 - [ ] **@mentions** in groups (picker while typing, highlighted, "@" in the chat list)
 - [ ] **Pins** (24 hours, 7 days, 30 days; the pinned bar)
 - [ ] **Forward** to up to 10 chats; **search in a chat**
@@ -52,6 +52,7 @@ website has them.
 **4. Pages and smaller things**
 - [ ] **Recommended songs** under your own playlists; **Save a copy as a playlist** for mixes
 - [ ] A playlist's **picture**; **likes** on your playlists ("By you · 3 likes")
+- [x] Framing a picture (zoom, move, rotate) for profiles and groups
 - [ ] All singers; all public playlists
 - [ ] **Listening stats** (admins); the **feedback** form (bug or feature)
 
