@@ -39,7 +39,7 @@ export function LikedSongsScreen() {
       title="Liked songs"
       meta={<Meta parts={[name && <b>{name}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />}
     >
-      {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} />}
+      {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} resume={{ source: 'liked', songs, onResume: () => activity.liked() }} />}
       {songs.length === 0 && <div className="muted" style={{ padding: 24 }}>Songs you like show up here. Tap ♡ in the player, or Like in a song's menu.</div>}
       <div className="tracks">
         {songs.length > 0 && <TrackHead />}
@@ -121,7 +121,11 @@ export function PlaylistScreen() {
       ) : (
         <>
           {songs.length > 0 ? (
-            <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
+            <PlayShuffleRow
+              onPlay={() => play(0)}
+              onShuffle={() => play(0, true)}
+              resume={{ source: `playlist:${playlist.id}`, songs, onResume: () => { activity.playlist(playlist); useRecentPlaylists.getState().played(playlist) } }}
+            >
               {!mine && <LikeButton liked={liked} onToggle={() => likes().togglePlaylist(playlist)} big />}
               {menu}
             </PlayShuffleRow>

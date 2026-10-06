@@ -44,7 +44,7 @@ export function AlbumScreen() {
         />
       }
     >
-      <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
+      <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} resume={{ source: `album:${album.id}`, songs, onResume: () => activity.movie(album) }}>
         <LikeButton liked={liked} onToggle={() => likes().toggleAlbum(album)} big />
         <MoreMenu
           icon="more_horiz"
