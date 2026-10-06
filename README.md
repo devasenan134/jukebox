@@ -4,8 +4,9 @@ A self-hosted music server built for film music: songs belong to films, and film
 lyricists and actors. It streams your library to the Jukebox Android app and web app, makes mixes and
 stations, and (optionally) lets friends chat, share songs and listen together.
 
-> Status: early. Jukebox grew out of the Isaipetti companion server and replaces Navidrome step by step
-> (see [ROADMAP.md](ROADMAP.md)). It has its own library and accounts; the move from Navidrome is under way.
+> Status: early, and in daily use. Jukebox grew out of the Isaipetti companion server and replaced Navidrome
+> on 2026-10-04; it has its own library, accounts and listening data (see [ROADMAP.md](ROADMAP.md)). To run
+> one, see [server/README.md](server/README.md).
 
 ## What's here
 

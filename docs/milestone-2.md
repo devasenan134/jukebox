@@ -1,5 +1,9 @@
 # Milestone 2: own the listening data
 
+> Done: Jukebox took over on 2026-10-04. This is the plan as it was written; afterwards the Navidrome
+> sign-in fallback and the old servers' settings were removed (accounts are made with `jukebox user add`
+> or an invite). How things work now is in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Jukebox stops depending on Navidrome and the old Isaipetti server: it signs people in itself, keeps likes,
 playlists and plays, writes every action to an event log, and makes the mixes from its own catalog. A
 re-runnable import brings everything over from the live servers, so the switch-over is one last import.

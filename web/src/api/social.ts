@@ -8,8 +8,8 @@ import type {
 } from './socialTypes'
 import { session, type Credentials } from '../state/session'
 
-// HTTP calls to the companion server (isaipetti-social): accounts, invites, friends, chat, mixes and
-// search. The container forwards /social to it. Same calls as the Android app's SocialApi.kt.
+// HTTP calls to the server's friends API: accounts, invites, friends, chat, mixes and search, at the
+// same address as the web app. Same calls as the Android app's SocialApi.kt.
 
 // Jukebox serves the social API at its own root, on the same address as this app.
 export const SOCIAL_BASE = ''

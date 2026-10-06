@@ -15,7 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 class SocialException(message: String, val code: Int = 0) : Exception(message)
 
-/** HTTP calls to the companion server (isaipetti-social): accounts, invites, friends and chat. */
+/** HTTP calls to the server's friends API: accounts, invites, friends and chat. */
 class SocialApi(
     private val http: OkHttpClient,
     /** The friends server this talks to (typed in at login); null when none is set. */

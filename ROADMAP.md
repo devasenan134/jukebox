@@ -8,7 +8,7 @@ Milestones in the order they're built. Each one leaves the app working.
 | 1 | Catalog and library ([plan](docs/milestone-1.md)) | Scanner (folders, tags, cover art), the catalog (albums, releases, tracks, recordings, versions, people and roles), stable recording ids, streaming with range requests, the Subsonic API subset the app uses. Runs beside Navidrome | Done (fingerprint merges running) |
 | 2 | Own the listening data ([plan](docs/milestone-2.md)) | Users and sign-in without Navidrome, likes, playlists, plays, lyrics, the event log; a one-time import from Navidrome | Done (switched over 2026-10-04) |
 | 3 | Realtime gateway | One WebSocket per device: presence, playback state across devices, jam, notifications; the social module behind a setting | |
-| 4 | Jukebox API v2 | Albums with film details, people, lyrics search in the API; the app and web app move to it; Navidrome is switched off | |
+| 4 | Jukebox API v2 | Albums with film details, people, lyrics search in the API; the app and web app move to it | |
 | 5 | Data plane | Mobile-quality copies made ahead of time, prefetch, offline downloads | |
 | 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, APK releases (the Android app and web app are in this repo already) | |
 | – | Engine | The recommendation engine in its own repository, following the event stream | Later |
@@ -26,8 +26,14 @@ How it all works today: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - [ ] Stop the `isaipetti-engine` container (the paused engine prototype); it reads the old servers' frozen
       databases and nothing uses it.
 - [ ] Archive the isaipetti repository, with a note that the app and server moved here.
-- [ ] Send in-app feedback to this repository's issues instead of isaipetti's.
-- [ ] Drop the `NAVIDROME_DATA` mount: mixes read the analyzer's features by recording id now.
+- [ ] Send in-app feedback to this repository's issues instead of isaipetti's (`GITHUB_REPO` on the server, with
+      a token for this repository).
+- [x] The code no longer knows about Navidrome or the old servers: no Navidrome sign-in or settings, admin
+      stats from Jukebox's own plays, `jukebox user` for accounts, and the analyzer's one-time `adopt` gone.
+- [ ] On the server, drop `NAVIDROME_URL`, `NAVIDROME_ADMIN_USER` and `NAVIDROME_DATA` from `.env` and the
+      Navidrome mount from `docker-compose.yml` when deploying that.
+- [ ] Release the app with the password change through `/me/password`; once every phone has it, remove
+      Navidrome's password-change calls from the server (`/api/user/{id}`, `/auth/login` with a password).
 
 ### Then, in this order
 
