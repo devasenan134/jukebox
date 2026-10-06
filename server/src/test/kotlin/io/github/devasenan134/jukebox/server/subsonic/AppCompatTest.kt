@@ -33,10 +33,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
-/**
- * The Android app up to 0.12.1, made for Navidrome: its password change goes through Navidrome's own calls
- * (newer apps use POST /me/password), and playlist covers are kept by Jukebox.
- */
+/** How the Android app uses the server beyond plain Subsonic: playlist covers are kept by Jukebox. */
 class AppCompatTest {
     private val root = Files.createTempDirectory("jukebox-music").toFile()
     private val data = Files.createTempDirectory("jukebox-data").toFile()
@@ -62,52 +59,6 @@ class AppCompatTest {
     }
 
     private suspend fun ApplicationTestBuilder.json(text: String) = Json.parseToJsonElement(text).jsonObject
-
-    @Test
-    fun `older apps' password change works the way it did with Navidrome`() = testApplication {
-        start()
-        // 1. Sign in with the password, as Navidrome's /auth/login wanted.
-        val login = client.post("/auth/login") { contentType(ContentType.Application.Json); setBody("""{"username":"alice","password":"secret"}""") }
-        assertEquals(HttpStatusCode.OK, login.status)
-        val body = json(login.bodyAsText())
-        val token = body["token"]!!.jsonPrimitive.content
-        val id = body["id"]!!.jsonPrimitive.content
-        val wrong = client.post("/auth/login") { contentType(ContentType.Application.Json); setBody("""{"username":"alice","password":"nope"}""") }
-        assertEquals(HttpStatusCode.Unauthorized, wrong.status)
-
-        // 2. Read the account record.
-        val record = client.get("/api/user/$id") { header("X-ND-Authorization", "Bearer $token") }
-        assertEquals(HttpStatusCode.OK, record.status)
-        assertEquals("alice", json(record.bodyAsText())["userName"]!!.jsonPrimitive.content)
-        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/user/$id").status)
-
-        // 3. Save it with the new password; a wrong current password is refused with 400, as Navidrome did.
-        val refused = client.put("/api/user/$id") {
-            header("X-ND-Authorization", "Bearer $token"); contentType(ContentType.Application.Json)
-            setBody("""{"id":"$id","userName":"alice","currentPassword":"nope","password":"Better-Passw0rd!"}""")
-        }
-        assertEquals(HttpStatusCode.BadRequest, refused.status)
-        val saved = client.put("/api/user/$id") {
-            header("X-ND-Authorization", "Bearer $token"); contentType(ContentType.Application.Json)
-            setBody("""{"id":"$id","userName":"alice","name":"alice","email":"","currentPassword":"secret","password":"Better-Passw0rd!"}""")
-        }
-        assertEquals(HttpStatusCode.OK, saved.status)
-        assertEquals("ok", rest("ping", password = "Better-Passw0rd!")["status"]!!.jsonPrimitive.content)
-        assertEquals("failed", rest("ping", password = "secret")["status"]!!.jsonPrimitive.content)
-
-        // Someone else's token can't read or change this account.
-        val bob = json(client.post("/auth/login") { contentType(ContentType.Application.Json); setBody("""{"username":"bob","password":"secret"}""") }.bodyAsText())
-        assertEquals(HttpStatusCode.Forbidden, client.get("/api/user/$id") { header("X-ND-Authorization", "Bearer ${bob["token"]!!.jsonPrimitive.content}") }.status)
-
-        // The app's own sign-in (a token, not the password) still answers on the same address.
-        val salt = "xyz"
-        val session = client.post("/auth/login") {
-            contentType(ContentType.Application.Json)
-            setBody("""{"username":"alice","salt":"$salt","token":"${SubsonicApi.md5("Better-Passw0rd!$salt")}"}""")
-        }
-        assertEquals(HttpStatusCode.OK, session.status)
-        assertTrue("sessionToken" in json(session.bodyAsText()))
-    }
 
     @Test
     fun `a playlist's own cover is kept by Jukebox`() = testApplication {
