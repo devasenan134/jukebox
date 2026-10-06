@@ -1,0 +1,58 @@
+# Builds Jukebox.app and Jukebox.dmg for macOS (one universal file for Apple silicon and Intel Macs).
+# Every change to desktop/ gets a DMG as a workflow artifact; a desktop-v* tag also publishes a release.
+name: Desktop (macOS)
+
+on:
+  push:
+    paths: ['desktop/**', '.github/workflows/desktop-macos.yml']
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - run: npm ci
+      - run: npm run build:mac
+
+      - name: Name the DMG
+        id: dmg
+        run: |
+          src=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          out="Jukebox-$version-macos.dmg"
+          mv "$src" "$out"
+          echo "file=desktop/$out" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Jukebox-macos
+          path: ${{ steps.dmg.outputs.file }}
+
+      - if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.dmg.outputs.file }}
+          make_latest: false
