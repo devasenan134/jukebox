@@ -8,8 +8,8 @@ import { load, save } from './storage'
 /**
  * What you've liked, for the hearts everywhere and the Your Library page (as data/Likes.kt).
  *
- * Songs and movies are liked in Navidrome itself ("starred"), so they're the same on every device.
- * Navidrome can't like playlists, so liked playlists are saved with your account on the friends
+ * Songs and movies are liked through the Subsonic API ("starred"), so they're the same on every device.
+ * It can't like playlists, so liked playlists are saved with your account through the friends
  * server. A copy is kept in the browser so the library shows right away. Changes show immediately
  * and are undone if refused.
  */

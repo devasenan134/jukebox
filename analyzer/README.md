@@ -25,15 +25,3 @@ docker logs -f jukebox-analyzer        # "Analyzing 3061 new or changed songs", 
 
 The first run takes about 1.5 seconds per song on 4 cores (an Apple M1: about 80 minutes for 3,000 songs).
 After that, only new or changed songs are analyzed, a few minutes after Jukebox's scan finds them.
-
-## Coming from Isaipetti
-
-The Isaipetti analyzer keyed songs by Navidrome's ids. Instead of listening to everything again, take its
-results over (files are matched by path, so Navidrome and Jukebox must read the same music folder):
-
-```bash
-docker compose run --rm -v /path/to/isaipetti-analyzer/data:/old:ro -v /path/to/navidrome/data:/navidrome:ro \
-  jukebox-analyzer adopt /old/features.db /navidrome/navidrome.db
-```
-
-Copy its `models` folder into `ANALYZER_DATA` too, to skip downloading the model again.

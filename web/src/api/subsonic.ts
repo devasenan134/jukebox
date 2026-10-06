@@ -41,7 +41,7 @@ function url(endpoint: string, params: Params = {}, creds?: Credentials): string
   return `/rest/${endpoint}?${q}`
 }
 
-/** Called when Navidrome rejects the saved login (e.g. the password was changed on another device). */
+/** Called when the server rejects the saved login (e.g. the password was changed on another device). */
 let onLoginRejected: () => void = () => {}
 export const setLoginRejectedHandler = (f: () => void) => (onLoginRejected = f)
 
@@ -61,7 +61,7 @@ async function get(endpoint: string, params: Params = {}, creds?: Credentials): 
   } catch {
     body = undefined
   }
-  if (!body) throw new SubsonicError("That doesn't look like a Navidrome server")
+  if (!body) throw new SubsonicError("That doesn't look like a Jukebox server")
   if (body.status !== 'ok') {
     const code = body.error?.code != null ? String(body.error.code) : undefined
     // Error 40 = wrong username or password. Only react when using the saved login.
@@ -69,18 +69,6 @@ async function get(endpoint: string, params: Params = {}, creds?: Credentials): 
     throw new SubsonicError(body.error?.message ?? 'Request failed', code)
   }
   return body
-}
-
-/**
- * Navidrome keeps a playlist's cover id ("pl-<id>") the same when its picture changes, so browsers
- * would keep showing the old one. Adding when it last changed ("pl-<id>_<hex>") gives a new picture a new address.
- */
-function withFreshCover(p: Playlist): Playlist {
-  const art = p.coverArt
-  if (!art || !art.startsWith('pl-') || art.includes('_') || !p.changed) return p
-  const t = Date.parse(p.changed)
-  if (Number.isNaN(t)) return p
-  return { ...p, coverArt: art + '_' + Math.floor(t / 1000).toString(16) }
 }
 
 export const subsonic = {
@@ -143,12 +131,12 @@ export const subsonic = {
 
   deletePlaylist: (id: string) => get('deletePlaylist', { id }),
 
-  playlists: async (): Promise<Playlist[]> => ((await get('getPlaylists')).playlists?.playlist ?? []).map(withFreshCover),
+  playlists: async (): Promise<Playlist[]> => (await get('getPlaylists')).playlists?.playlist ?? [],
 
   playlist: async (id: string): Promise<Playlist> => {
     const p = (await get('getPlaylist', { id })).playlist
     if (!p) throw new SubsonicError('Playlist not found')
-    return withFreshCover(p)
+    return p
   },
 
   songDetails: async (id: string): Promise<SongDetails> => {
@@ -157,14 +145,14 @@ export const subsonic = {
     return s
   },
 
-  /** Your liked songs and movies (Navidrome's "starred" items), newest likes first. */
+  /** Your liked songs and movies ("starred" in the Subsonic API), newest likes first. */
   starred: async (): Promise<Starred> => {
     const s = (await get('getStarred2')).starred2 ?? {}
     const byNewest = (a: { starred?: string }, b: { starred?: string }) => (b.starred ?? '').localeCompare(a.starred ?? '')
     return { album: [...(s.album ?? [])].sort(byNewest), song: [...(s.song ?? [])].sort(byNewest) }
   },
 
-  /** Likes (stars) a song or a movie in Navidrome, so it's liked on every device. */
+  /** Likes (stars) a song or a movie on the server, so it's liked on every device. */
   like: (o: { songId?: string; albumId?: string }, liked: boolean) =>
     get(liked ? 'star' : 'unstar', { id: o.songId, albumId: o.albumId }),
 

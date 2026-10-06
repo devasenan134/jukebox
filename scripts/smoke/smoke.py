@@ -2,7 +2,7 @@
 crash, console error, blank screen or missing mini player. Screenshots go to the output folder.
 
   uv run --with playwright python smoke.py http://127.0.0.1:8195 OUT_DIR [CHROME_PATH]
-  (user "tester" / "secret", as fake_navidrome.py accepts)
+  (user "tester" / "smoke-test-secret", made with `jukebox user add`, see README.md)
 """
 import asyncio, sys, time
 from pathlib import Path
@@ -40,7 +40,7 @@ async def main():
             await page.goto(BASE + "/", wait_until="load")
             await page.wait_for_selector("input[type=password]")
             await page.fill("input[autocomplete=username]", "tester")
-            await page.fill("input[type=password]", "secret")
+            await page.fill("input[type=password]", "smoke-test-secret")
             await page.click("button[type=submit]")
             await page.wait_for_selector(".card", timeout=15000)
             check(True, f"signed in, Home with albums in {time.time() - t:.1f}s")
@@ -151,7 +151,7 @@ async def main():
             check("Change password" in await visible_text(), "Settings opens")
             await shot("13-settings")
             if name == "phone":
-                await page.fill("input[autocomplete=current-password]", "secret")
+                await page.fill("input[autocomplete=current-password]", "smoke-test-secret")
                 await page.fill("input[autocomplete=new-password]", "Brand-new-Passw0rd!")
                 await page.get_by_role("button", name="Update password").click()
                 await page.wait_for_timeout(1500)

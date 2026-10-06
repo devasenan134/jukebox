@@ -87,7 +87,7 @@ export const social = {
   removeGroupPicture: (conversationId: number) => send<Conversation>('DELETE', `/conversations/${conversationId}/picture`),
   groupPicturePath: (c: Conversation) => (c.picture != null ? `/conversations/${c.id}/picture?v=${c.picture}` : undefined),
 
-  /** A cover for a playlist you made; the friends server stores it in Navidrome. */
+  /** A cover for a playlist you made. */
   setPlaylistCover: (playlistId: string, jpeg: Blob) =>
     send<void>('PUT', `/playlists/${enc(playlistId)}/cover`, undefined, { bytes: jpeg }),
   removePlaylistCover: (playlistId: string) => send<void>('DELETE', `/playlists/${enc(playlistId)}/cover`),
@@ -95,7 +95,7 @@ export const social = {
   registerDevice: (token: string) => post<void>('/devices', { token }),
   unregisterDevice: (token: string) => post<void>('/devices/remove', { token }),
 
-  /** Your liked playlists, saved with your account on the friends server (Navidrome can't like playlists). */
+  /** Your liked playlists, saved with your account on the friends server (the Subsonic API can't like playlists). */
   likedPlaylists: async (): Promise<Playlist[]> =>
     (await get<{ id: string; name?: string; coverArt?: string; songCount?: number }[]>('/likes/playlists')).map((p) => ({
       id: p.id, name: p.name ?? '', coverArt: p.coverArt, songCount: p.songCount ?? 0,

@@ -1,7 +1,7 @@
 """Two people in two browsers: they become friends, chat (messages arrive live), and listen together.
 
   uv run --with playwright python friends.py http://127.0.0.1:8195 OUT_DIR [CHROME_PATH]
-  (users "tester" and "friend" / "secret", as fake_navidrome.py accepts)
+  (users "tester" and "friend" / "smoke-test-secret", made with `jukebox user add`, see README.md)
 """
 import asyncio, sys
 from pathlib import Path
@@ -30,7 +30,7 @@ async def main():
             page.on("pageerror", lambda e: errors.append(f"{name}: {e}"))
             await page.goto(BASE + "/")
             await page.fill("input[autocomplete=username]", name)
-            await page.fill("input[type=password]", "secret")
+            await page.fill("input[type=password]", "smoke-test-secret")
             await page.click("button[type=submit]")
             await page.wait_for_selector(".card", timeout=15000)
             return page
