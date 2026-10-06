@@ -8,12 +8,18 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
-## Unreleased
+## 0.12.2 (2026-10-06): Password change through Jukebox
 
-### Improved
+App and server. The Mac app gets the same version (no changes of its own).
+
+### Fixed
 - **Changing your password** works again: it goes to Jukebox's own password change, which checks your
   current password and signs your other devices out. (0.12.1 and older used Navidrome's way, which the
   server no longer answers.)
+
+### Server
+- **Listening stats** (admins) count everything again: they had stopped at 2026-10-04.
+- **Feedback** from the app now goes to the jukebox repository's issues.
 
 ---
 
