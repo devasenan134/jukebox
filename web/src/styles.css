@@ -1627,3 +1627,15 @@ a.nav-item:hover {
     background: transparent;
   }
 }
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: rec-blink 1.2s infinite;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.3;
+  }
+}

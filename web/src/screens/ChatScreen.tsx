@@ -8,6 +8,7 @@ import * as player from '../player/player'
 import { Avatar, GroupAvatar, useFriendsServerPicture } from '../social/avatars'
 import { useListen } from '../social/listen'
 import { deleteConversation, markRead, me, onMessage, onRemoved, refresh, refreshConversationsSoon, sendTyping, setOpenConversation, useSocial } from '../social/social'
+import { RecordingBar, useVoiceRecorder, VoicePlayer } from '../social/Voice'
 import { ChatSearch, ForwardDialog, MentionList, mentionSuggestions, PinDialog, PinnedBar, quoteText, WithMentions } from '../social/ChatTools'
 import type { SocialUser } from '../api/types'
 import { GroupInfoSheet, GroupMenu } from '../social/GroupInfo'
@@ -335,7 +336,7 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, on
             <>
               {m.song && <SongCard song={m.song} />}
               {m.image && <ChatPicture m={m} />}
-              {m.voiceMs != null && m.voiceMs > 0 && <Voice m={m} />}
+              {m.voiceMs != null && m.voiceMs > 0 && <VoicePlayer m={m} />}
               {m.request && <RequestLine m={m} conversation={conversation} onChanged={onChanged} />}
               {m.body && <div style={{ padding: m.image ? '6px 8px 4px' : 0, marginTop: m.song ? 6 : 0 }}><WithMentions body={m.body} m={m} conversation={conversation} /></div>}
             </>
@@ -419,16 +420,6 @@ function ChatPicture({ m }: { m: ChatMessage }) {
   )
 }
 
-function Voice({ m }: { m: ChatMessage }) {
-  const url = useFriendsServerPicture(social.voicePath(m))
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 220 }}>
-      <Icon name="mic" />
-      {url ? <audio src={url} controls preload="none" style={{ height: 32, maxWidth: 260 }} /> : <span className="muted">Voice message · {formatDuration((m.voiceMs ?? 0) / 1000)}</span>}
-    </div>
-  )
-}
-
 /** A song request in a jam: the owner can play it or say no. */
 function RequestLine({ m, conversation, onChanged }: { m: ChatMessage; conversation: Conversation; onChanged: (m: ChatMessage) => void }) {
   const owner = useListen((s) => s.owners[conversation.id])
@@ -456,6 +447,7 @@ function Composer({ conversation, replyTo, onCancelReply, onSent }: {
 }) {
   const conversationId = conversation.id
   const [text, setText] = useState('')
+  const voice = useVoiceRecorder(conversationId, (m) => { onCancelReply(); onSent(m) })
   // @mentions put in the text: who, and the name typed for them. A name deleted from the text isn't mentioned.
   const [mentioned, setMentioned] = useState<Record<number, string>>({})
   const [cursor, setCursor] = useState(0)
@@ -506,7 +498,10 @@ function Composer({ conversation, replyTo, onCancelReply, onSent }: {
           <IconButton icon="close" label="Cancel reply" size={18} onClick={onCancelReply} />
         </div>
       )}
- {suggest.members.length > 0 && <MentionList members={suggest.members} onPick={pickMention} />}
+      {suggest.members.length > 0 && <MentionList members={suggest.members} onPick={pickMention} />}
+ {voice.recording ? (
+        <RecordingBar elapsed={voice.elapsed} onCancel={voice.cancel} onSend={voice.send} />
+      ) : (
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
         <IconButton icon="image" label="Send a picture" onClick={() => file.current?.click()} />
         <input ref={file} type="file" accept="image/*" hidden onChange={(e) => { void sendPicture(e.target.files?.[0]); e.target.value = '' }} />
@@ -536,10 +531,18 @@ function Composer({ conversation, replyTo, onCancelReply, onSent }: {
             background: 'var(--surface-container-high)', fontSize: 15, lineHeight: 1.35, fieldSizing: 'content',
           } as React.CSSProperties}
         />
-        <button className="fab-play" style={{ width: 40, height: 40, boxShadow: 'none' }} aria-label="Send" disabled={!text.trim() || busy} onClick={() => void send()}>
-          <Icon name="send" filled size={20} />
-        </button>
+        {/* With nothing typed, the button records a voice message instead. */}
+        {text.trim() ? (
+          <button className="fab-play" style={{ width: 40, height: 40, boxShadow: 'none' }} aria-label="Send" disabled={busy} onClick={() => void send()}>
+            <Icon name="send" filled size={20} />
+          </button>
+        ) : (
+          <button className="fab-play" style={{ width: 40, height: 40, boxShadow: 'none' }} aria-label="Record a voice message" disabled={voice.sending} onClick={() => void voice.start(replyTo?.id)}>
+            <Icon name="mic" filled size={20} />
+          </button>
+        )}
       </div>
+      )}
     </div>
   )
 }

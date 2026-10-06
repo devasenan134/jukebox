@@ -43,7 +43,7 @@ website has them.
 - [x] **@mentions** in groups (picker while typing, highlighted, "@" in the chat list)
 - [x] **Pins** (24 hours, 7 days, 30 days; the pinned bar)
 - [x] **Forward** to up to 10 chats; **search in a chat**
-- [ ] **Recording voice notes** (the server takes MP4/AAC: Chrome, Edge and Safari can record that, Firefox can't)
+- [x] **Recording voice notes** (the server takes MP4/AAC: Chrome, Edge and Safari can record that, Firefox can't)
       and a voice player with a seek bar
 - [ ] **Who reacted** (a tab per emoji), any emoji, your own quick reactions
 - [ ] **GIFs** that stay animated, pasting a picture, saving a picture; **share music from the chat** (what's
