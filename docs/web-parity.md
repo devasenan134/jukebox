@@ -64,6 +64,7 @@ website has them.
 
 ## Only in the app, on purpose
 
-- **Lock-screen lyrics, app updates, Android notifications**: phone features. Notifications could come to the
-  website later as browser push (the server already sends its Firebase settings).
+- **Lock-screen lyrics, Android notifications, the APK updates screen**: phone features. The website (and the Mac
+  app) shows notifications while it's open (Settings › Notifications); push when it's closed would need browser push
+  (the server already sends its Firebase settings). The Mac app updates itself from the same releases.
 - **Light theme**: the website is dark only, by design. The app will get the same dark look later.
