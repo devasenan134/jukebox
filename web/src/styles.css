@@ -52,7 +52,8 @@
   font-style: normal;
   font-weight: 400;
   font-display: block;
-  src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
+  /* Bundled by Vite, so its file name has a hash: a new icon set is fetched at once, never stuck in a cache. */
+  src: url('./assets/fonts/material-symbols-rounded.woff2') format('woff2');
 }
 
 * {

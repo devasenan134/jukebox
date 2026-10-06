@@ -1,4 +1,4 @@
-"""Makes web/public/fonts/material-symbols-rounded.woff2: the Material Symbols Rounded font (Apache 2.0) with
+"""Makes web/src/assets/fonts/material-symbols-rounded.woff2: the Material Symbols Rounded font (Apache 2.0) with
 only the icons the web app uses, served by Jukebox itself instead of Google Fonts.
 
 Every word in src/ that is also an icon name is kept (a few extra don't hurt), so icons picked in code
@@ -27,6 +27,6 @@ icons = sorted(words & known)
 css = get("https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0..1,0"
           f"&icon_names={','.join(icons)}&display=block").decode()
 font = re.search(r"url\((https://[^)]+)\)", css).group(1)
-out = WEB / "public/fonts/material-symbols-rounded.woff2"
+out = WEB / "src/assets/fonts/material-symbols-rounded.woff2"
 out.write_bytes(get(font))
 print(f"{len(icons)} icons, {out.stat().st_size // 1024} KB -> {out.relative_to(WEB)}")
