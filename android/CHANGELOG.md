@@ -8,6 +8,30 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## 0.12.3 (2026-10-06): The Mac app and the website catch up
+
+Mac app and website; the Android app has no changes of its own (same features as 0.12.2).
+
+### New
+- **Mac app: notifications.** Turn on **Settings → Notifications** and new messages, friend requests and friends
+  starting to listen together show as macOS notifications while Jukebox is open.
+- **Mac app: voice messages, saved pictures and links.** The microphone records voice messages (macOS asks once),
+  **Save** on a chat picture puts it in Downloads, and links that open a new tab open in your browser.
+- **The website (and so the Mac app) now does what the Android app does:** the queue, Resume, About this song,
+  requesting music that isn't in the library, search history, group settings, Seen, @mentions, pins, forwarding,
+  search in a chat, voice messages, reactions your way, GIFs and captions, sharing music from a chat, recommended
+  songs and covers for your playlists, Save a copy for mixes, all singers and playlists, listening stats and
+  feedback. The full list is in [docs/web-parity.md](../docs/web-parity.md).
+
+### Fixed
+- **Jams:** songs the host added with **Play next**, or moved in the queue, now play in the same place for everyone
+  listening on the website or the Mac app.
+
+### Server
+- Reloading the Friends or Requests page on the website shows the page again (it showed an error).
+
+---
+
 ## 0.12.2 (2026-10-06): Password change through Jukebox
 
 App and server. The Mac app gets the same version (no changes of its own).
