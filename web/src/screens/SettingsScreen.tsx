@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { social } from '../api/social'
 import { credentialsFor } from '../api/subsonic'
 import type { Invite } from '../api/socialTypes'
@@ -6,9 +6,12 @@ import * as player from '../player/player'
 import { useSession } from '../state/session'
 import { Avatar } from '../social/avatars'
 import { ScreenHeader, useLoad } from '../ui/components'
-import { Dialog, IconButton, NameDialog, toast } from '../ui/kit'
+import { Dialog, IconButton, NameDialog, Switch, toast } from '../ui/kit'
+import { useNotifications } from '../social/notifications'
 import { checkPassword, PasswordStrength } from '../ui/password'
 import { useNav } from '../ui/nav'
+import { usePhotoPicker } from '../ui/PhotoPicker'
+import { useQuery } from '@tanstack/react-query'
 
 /** Settings (ui/settings/SettingsScreen.kt): your profile, password, invites for friends, and signing out. */
 export function SettingsScreen() {
@@ -17,7 +20,6 @@ export function SettingsScreen() {
   const me = useSession((s) => s.social)
   const [renaming, setRenaming] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
-  const file = useRef<HTMLInputElement>(null)
   const username = credentials?.username ?? ''
   const name = me?.user.displayName || username
 
@@ -25,14 +27,17 @@ export function SettingsScreen() {
     if (me) useSession.getState().saveSocial({ ...me, user })
     toast(done)
   }
-  const pickPicture = async (f: File | undefined) => {
-    if (!f) return
-    try {
-      saveUser(await social.setAvatar(await squareJpeg(f, 512)), 'Profile picture updated')
-    } catch (e) {
-      toast((e as Error).message || "Couldn't change your picture")
-    }
-  }
+  const picker = usePhotoPicker({
+    title: 'Profile picture',
+    round: true,
+    onPicked: async (jpeg) => {
+      try {
+        saveUser(await social.setAvatar(jpeg), 'Profile picture updated')
+      } catch (e) {
+        toast((e as Error).message || "Couldn't change your picture")
+      }
+    },
+  })
 
   return (
     <div className="page">
@@ -41,7 +46,7 @@ export function SettingsScreen() {
         <Card>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <button
-              onClick={() => file.current?.click()}
+              onClick={() => picker.open()}
               disabled={!me}
               aria-label="Change profile picture"
               style={{ border: 0, padding: 0, background: 'none', cursor: me ? 'pointer' : 'default', position: 'relative', borderRadius: '50%' }}
@@ -53,7 +58,7 @@ export function SettingsScreen() {
                 </span>
               )}
             </button>
-            <input ref={file} type="file" accept="image/*" hidden onChange={(e) => void pickPicture(e.target.files?.[0])} />
+            {picker.element}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="headline-small ellipsis">{name}</div>
               <div className="body-medium muted">@{username}</div>
@@ -74,6 +79,12 @@ export function SettingsScreen() {
         <ChangePassword username={username} />
 
         {me && <Invites />}
+
+        {me && <NotificationsCard />}
+
+        {me && <AdminCard onOpen={nav.openStats} />}
+
+        {me && <FeedbackCard />}
 
         <Card title="Signed in devices">
           <div className="body-medium muted" style={{ marginBottom: 12 }}>Sign out everywhere else, for example on a phone you no longer use.</div>
@@ -130,6 +141,111 @@ export function SettingsScreen() {
         </Dialog>
       )}
     </div>
+  )
+}
+
+/** Notifications while Jukebox is in the background: messages, friend requests, jams. */
+function NotificationsCard() {
+  const { on, permission, setOn } = useNotifications()
+  const note =
+    permission === 'unsupported' ? "This browser doesn't show notifications from websites."
+      : permission === 'denied' ? 'Notifications are blocked for this site: allow them in the browser\'s site settings, then switch this on.'
+        : 'New messages, friend requests, and friends starting to listen together, while Jukebox is open in the background.'
+  return (
+    <Card title="Notifications">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div className="body-medium muted" style={{ flex: 1 }}>{note}</div>
+        <Switch checked={on && permission === 'granted'} disabled={permission === 'unsupported'} onChange={(v) => void setOn(v)} />
+      </div>
+    </Card>
+  )
+}
+
+/** Admins only: everyone's listening. */
+function AdminCard({ onOpen }: { onOpen: () => void }) {
+  const user = useSession((s) => s.social?.user.id)
+  const admin = useQuery({ queryKey: ['admin-access', user], queryFn: () => social.adminAccess(), enabled: user != null, staleTime: Infinity }).data?.isAdmin
+  if (!admin) return null
+  return (
+    <Card title="Listening stats">
+      <div className="body-medium muted" style={{ marginBottom: 12 }}>How much everyone listens, and what. Only admins see this.</div>
+      <button className="btn tonal" onClick={onOpen}>Open listening stats</button>
+    </Card>
+  )
+}
+
+const FEEDBACK = {
+  bug: { title: 'Report a bug', titleLabel: "What's wrong, in a few words", descriptionLabel: 'What happened, and what did you expect?', device: true },
+  feature: { title: 'Suggest a feature', titleLabel: 'Your idea, in a few words', descriptionLabel: 'What would you like Jukebox to do, and why?', device: false },
+} as const
+
+/** Feedback (UpdatesAndFeedback.kt): a bug or an idea becomes an issue on GitHub. Reports are public but don't show your name. */
+function FeedbackCard() {
+  const [open, setOpen] = useState<keyof typeof FEEDBACK | null>(null)
+  return (
+    <Card title="Feedback">
+      <div className="body-medium muted" style={{ marginBottom: 12 }}>
+        Something broken, or an idea? It becomes an issue on Jukebox's GitHub page. Issues are public but don't show your name.
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn tonal" onClick={() => setOpen('bug')}>Report a bug</button>
+        <button className="btn tonal" onClick={() => setOpen('feature')}>Suggest a feature</button>
+      </div>
+      {open && <FeedbackDialog kind={open} onClose={() => setOpen(null)} />}
+    </Card>
+  )
+}
+
+function FeedbackDialog({ kind, onClose }: { kind: keyof typeof FEEDBACK; onClose: () => void }) {
+  const t = FEEDBACK[kind]
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  const [withDevice, setWithDevice] = useState<boolean>(t.device)
+  const [busy, setBusy] = useState(false)
+  const [issue, setIssue] = useState<{ number: number; url: string } | null>(null)
+  const device = `Jukebox website${navigator.userAgent.includes('Jukebox') ? ' (Mac app)' : ''} · ${navigator.userAgent}`
+  const send = async () => {
+    setBusy(true)
+    try {
+      setIssue(await social.sendFeedback(kind, title.trim(), text.trim(), withDevice ? device : null))
+    } catch (e) {
+      toast((e as Error).message || "Couldn't send it")
+    }
+    setBusy(false)
+  }
+  if (issue) {
+    return (
+      <Dialog
+        title="Thanks!"
+        onClose={onClose}
+        actions={<><button className="btn text" onClick={onClose}>Done</button><a className="btn" href={issue.url} target="_blank" rel="noreferrer">Open it</a></>}
+      >
+        It's issue #{issue.number} on GitHub.
+      </Dialog>
+    )
+  }
+  return (
+    <Dialog
+      title={t.title}
+      onClose={onClose}
+      actions={<><button className="btn text" onClick={onClose}>Cancel</button><button className="btn" disabled={busy || !title.trim() || !text.trim()} onClick={() => void send()}>Send</button></>}
+    >
+      <div className="field" style={{ marginBottom: 12 }}>
+        <label>{t.titleLabel}</label>
+        <input autoFocus value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div className="field" style={{ marginBottom: 12 }}>
+        <label>{t.descriptionLabel}</label>
+        <textarea value={text} maxLength={5000} rows={5} onChange={(e) => setText(e.target.value)} />
+      </div>
+      <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
+        <input type="checkbox" checked={withDevice} onChange={(e) => setWithDevice(e.target.checked)} style={{ marginTop: 3 }} />
+        <span>
+          Include browser details
+          <div className="body-small muted" style={{ wordBreak: 'break-word' }}>{device}</div>
+        </span>
+      </label>
+    </Dialog>
   )
 }
 
@@ -226,15 +342,4 @@ function Invites() {
       )}
     </Card>
   )
-}
-
-/** The middle square of a picture, as a JPEG at most [size] pixels wide (profile pictures). */
-async function squareJpeg(file: File, size: number): Promise<Blob> {
-  const bitmap = await createImageBitmap(file)
-  const side = Math.min(bitmap.width, bitmap.height)
-  const out = Math.min(size, side)
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = out
-  canvas.getContext('2d')!.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, out, out)
-  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't read that picture"))), 'image/jpeg', 0.88))
 }

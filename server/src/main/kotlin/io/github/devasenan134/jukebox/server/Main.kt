@@ -573,4 +573,4 @@ class RateLimiter(private val maxPerMinute: Int) {
 }
 
 /** Pages of the web app whose address is also an API route (the API answers when a session token is sent). */
-private val WEB_PAGES_SHARED_WITH_API = listOf("/search")
+private val WEB_PAGES_SHARED_WITH_API = listOf("/search", "/friends", "/requests")

@@ -6,13 +6,46 @@
 // window hides it so the music keeps playing (clicking the Dock icon brings it back); and updates: at start
 // and from Jukebox › Check for Updates…, it reads latest-macos.json on the newest GitHub release, asks, then
 // installs the signed update and restarts.
+//
+// And what the Mac's web view lacks next to a browser: notifications (the page's `Notification` is filled in
+// to call the `notify` command), downloads (saved to Downloads), and links that open a new tab (they open in
+// the default browser). Microphone use, for voice messages, is declared in Info.plist and Entitlements.plist.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::menu::{Menu, MenuItemBuilder, SubmenuBuilder};
-use tauri::{AppHandle, Manager, RunEvent, Url, WindowEvent};
+use tauri::webview::{DownloadEvent, NewWindowResponse};
+use tauri::{AppHandle, Manager, RunEvent, Url, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
+
+/// Runs in every page before its own scripts: a `Notification` for pages to use (the web view has none) that
+/// shows a macOS notification through the `notify` command. The website asks for permission and gets it here;
+/// macOS asks you once, the first time one is shown.
+const NOTIFICATION_SHIM: &str = r#"
+(() => {
+  if (window.Notification) return;
+  class AppNotification {
+    constructor(title, options = {}) {
+      this.title = title;
+      this.onclick = null;
+      try { window.__TAURI_INTERNALS__.invoke('notify', { title: String(title), body: String(options.body || '') }); } catch (_) {}
+    }
+    close() {}
+  }
+  AppNotification.permission = 'granted';
+  AppNotification.requestPermission = async () => 'granted';
+  window.Notification = AppNotification;
+})();
+"#;
+
+/// Shows a notification for the website (see NOTIFICATION_SHIM).
+#[tauri::command]
+fn notify(app: AppHandle, title: String, body: String) {
+    let _ = app.notification().builder().title(title).body(body).show();
+}
 
 /// The start page with the server form showing, even when a server is saved.
 fn change_server_url() -> Url {
@@ -71,7 +104,30 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![notify])
         .setup(|app| {
+            // The window from tauri.conf.json, with what the web view needs from the app.
+            let config = app.config().app.windows.first().cloned().expect("a window in tauri.conf.json");
+            let links = app.handle().clone();
+            let downloads = app.handle().clone();
+            WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .initialization_script(NOTIFICATION_SHIM)
+                // A link that opens a new tab (GitHub, a feedback issue) opens in the default browser.
+                .on_new_window(move |url, _| {
+                    let _ = links.opener().open_url(url.as_str(), None::<&str>);
+                    NewWindowResponse::Deny
+                })
+                // Saving a picture from a chat: it goes to Downloads, and a notification says so.
+                .on_download(move |_, event| {
+                    if let DownloadEvent::Finished { success, .. } = event {
+                        let text = if success { "Saved to your Downloads folder" } else { "Couldn't save it" };
+                        let _ = downloads.notification().builder().title("Jukebox").body(text).show();
+                    }
+                    true
+                })
+                .build()?;
             check_for_update(app.handle().clone(), false);
             Ok(())
         })

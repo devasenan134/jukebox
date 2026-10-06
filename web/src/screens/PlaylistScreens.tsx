@@ -9,7 +9,8 @@ import { activity, useRecentPlaylists } from '../state/history'
 import { useMixes, useMyPlaylists } from '../state/library'
 import { likes, useLikes } from '../state/likes'
 import { useSession } from '../state/session'
-import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { Cover, formatTotalDuration, likeCount, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { usePhotoPicker } from '../ui/PhotoPicker'
 import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
 import { Dialog, ErrorBox, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover, mixTint, updatedText } from '../ui/mixes'
@@ -39,7 +40,7 @@ export function LikedSongsScreen() {
       title="Liked songs"
       meta={<Meta parts={[name && <b>{name}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />}
     >
-      {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} />}
+      {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} resume={{ source: 'liked', songs, onResume: () => activity.liked() }} />}
       {songs.length === 0 && <div className="muted" style={{ padding: 24 }}>Songs you like show up here. Tap ♡ in the player, or Like in a song's menu.</div>}
       <div className="tracks">
         {songs.length > 0 && <TrackHead />}
@@ -61,6 +62,23 @@ export function PlaylistScreen() {
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [editing, setEditing] = useState<Song[] | null>(null)
+  const mineNow = data.data != null && data.data.owner === username
+  // How many friends liked a playlist you made (your own like doesn't count).
+  const likeTotal = useLoad<Record<string, number>>(['playlist-likes', id, mineNow], () => (mineNow ? social.playlistLikeCounts([id]) : Promise.resolve({})), 30_000).data?.[id] ?? 0
+  const cover = usePhotoPicker({
+    title: 'Playlist cover',
+    onPicked: async (jpeg) => {
+      try {
+        await social.setPlaylistCover(id, jpeg)
+        data.set(await subsonic.playlist(id))
+        playlistChanged()
+        useMyPlaylists.getState().refresh()
+        toast('Cover changed')
+      } catch (e) {
+        toast((e as Error).message || "Couldn't change the cover")
+      }
+    },
+  })
 
   if (data.loading && !data.data) return <PageSkeleton />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
@@ -96,6 +114,11 @@ export function PlaylistScreen() {
       items={[
         { label: 'Edit songs', onClick: () => setEditing(songs), hidden: songs.length === 0 },
         { label: 'Rename', onClick: () => setRenaming(true) },
+        { label: 'Change cover', onClick: () => cover.open() },
+        {
+          label: 'Use the automatic cover', hidden: !playlist.coverArt?.startsWith('pl-'),
+          onClick: () => void change(() => social.removePlaylistCover(id), 'Back to the automatic cover'),
+        },
         {
           label: playlist.public ? 'Make private' : 'Make public',
           onClick: () => void change(() => subsonic.updatePlaylist(id, { public: !playlist.public }), playlist.public ? 'Only you can see it now' : 'Your friends can find it now'),
@@ -112,7 +135,7 @@ export function PlaylistScreen() {
       meta={
         <>
           {playlist.comment && <div style={{ width: '100%', marginBottom: 4 }}>{playlist.comment}</div>}
-          <Meta parts={[playlist.owner && <b>{playlist.owner}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />
+          <Meta parts={[mine ? <b>By you</b> : playlist.owner && <b>{playlist.owner}</b>, mine && likeCount(likeTotal), songCount(songs.length), songs.length > 0 && total(songs)]} />
         </>
       }
     >
@@ -121,7 +144,11 @@ export function PlaylistScreen() {
       ) : (
         <>
           {songs.length > 0 ? (
-            <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
+            <PlayShuffleRow
+              onPlay={() => play(0)}
+              onShuffle={() => play(0, true)}
+              resume={{ source: `playlist:${playlist.id}`, songs, onResume: () => { activity.playlist(playlist); useRecentPlaylists.getState().played(playlist) } }}
+            >
               {!mine && <LikeButton liked={liked} onToggle={() => likes().togglePlaylist(playlist)} big />}
               {menu}
             </PlayShuffleRow>
@@ -146,8 +173,10 @@ export function PlaylistScreen() {
               />
             ))}
           </div>
+          {mine && <RecommendedSongs playlist={playlist} onAdded={() => void change(async () => {})} />}
         </>
       )}
+      {cover.element}
       {renaming && (
         <NameDialog
           title="Rename playlist"
@@ -228,6 +257,56 @@ function DeleteDialog({ playlist, onClose, onDeleted }: { playlist: Playlist; on
   )
 }
 
+/** Today's songs of a mix as a normal playlist of yours ("By Jukebox" in its description), then opens it. */
+async function saveCopy(title: string, songIds: string[], nav: ReturnType<typeof useNav>) {
+  try {
+    const playlist = await subsonic.createPlaylist(title)
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    await subsonic.updatePlaylist(playlist.id, { add: songIds, comment: `By ${MIX_AUTHOR}. ${title} as it was on ${today}.` })
+    playlistChanged()
+    useMyPlaylists.getState().refresh()
+    toast('Saved as a playlist')
+    nav.openPlaylist(playlist.id)
+  } catch (e) {
+    toast((e as Error).message || "Couldn't save it")
+  }
+}
+
+/** Under a playlist you made: songs that would fit it, each with + to add it (Recommendations.kt). */
+function RecommendedSongs({ playlist, onAdded }: { playlist: Playlist; onAdded: () => void }) {
+  const ids = (playlist.entry ?? []).map((s) => s.id)
+  const [page, setPage] = useState(0)
+  const [added, setAdded] = useState<string[]>([])
+  // Nothing shows when the server has no suggestions (or no mixes).
+  const songs = useLoad(['recommend', playlist.id, ids.length, page], () => social.recommend(ids, 10, page)).data?.map(mixSongToSong)
+  if (!songs) return null
+  const add = (s: Song) =>
+    subsonic.updatePlaylist(playlist.id, { add: [s.id] })
+      .then(() => { setAdded((a) => [...a, s.id]); onAdded(); toast(`Added to ${playlist.name}`) })
+      .catch((e) => toast((e as Error).message || "Couldn't add it"))
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="section-title-row" style={{ display: 'flex', alignItems: 'center', padding: '0 8px 0 16px' }}>
+        <h2 className="section-title" style={{ flex: 1, margin: '12px 0 4px' }}>Recommended songs</h2>
+        {ids.length > 0 && <button className="btn text" onClick={() => setPage((p) => (p + 1) % 10)}>Refresh</button>}
+      </div>
+      <div className="body-small muted" style={{ padding: '0 16px 8px' }}>
+        {ids.length ? `By ${MIX_AUTHOR}, based on the songs in this playlist` : `Add a few songs, and ${MIX_AUTHOR} will suggest more like them.`}
+      </div>
+      <div className="tracks">
+        {songs.filter((s) => !added.includes(s.id)).map((s) => (
+          <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SongRow song={s} showCover onClick={() => { activity.song(s); player.play([s]) }} note={[s.artist, s.album].filter(Boolean).join(' · ')} />
+            </div>
+            <IconButton icon="add_circle" label={`Add to ${playlist.name}`} onClick={() => void add(s)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** A mix by Jukebox: its cover, what it is, Save to Your Library, and its songs. */
 export function MixScreen() {
   const { id = '' } = useParams()
@@ -262,6 +341,7 @@ export function MixScreen() {
     >
       <PlayShuffleRow onPlay={() => play(0)} onShuffle={mix.endless ? undefined : () => play(0, true)}>
         <LikeButton liked={followed} onToggle={() => void toggle()} big />
+        {songs.length > 0 && <MoreMenu items={[{ label: 'Save a copy as a playlist', onClick: () => void saveCopy(mix.title, songs.map((s) => s.id), nav) }]} />}
       </PlayShuffleRow>
       <div className="tracks">
         <TrackHead />

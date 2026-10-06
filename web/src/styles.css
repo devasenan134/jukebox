@@ -1474,3 +1474,281 @@ a.nav-item:hover {
     display: none !important;
   }
 }
+
+/* ---- The queue: a panel on the right of wide screens (player/QueuePanel.tsx) ---- */
+.queue-panel {
+  display: none;
+}
+@media (min-width: 900px) {
+  .app.with-queue {
+    grid-template-columns: var(--sidebar-width) 1fr var(--queue-width, 340px);
+  }
+  .app.with-queue .player-bar {
+    grid-column: 1 / 4;
+  }
+  .queue-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    grid-column: 3;
+    grid-row: 1;
+    overflow: hidden;
+  }
+}
+.queue-row .drag-handle {
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--on-surface-variant);
+  cursor: grab;
+  touch-action: none;
+}
+.queue-row .drag-handle:active {
+  cursor: grabbing;
+}
+@media (hover: hover) {
+  .queue-row .row-remove {
+    opacity: 0;
+  }
+  .queue-row:hover .row-remove,
+  .queue-row .row-remove:focus-visible {
+    opacity: 1;
+  }
+}
+.hero-bar .resume {
+  height: 36px;
+  padding: 0 16px 0 12px;
+  gap: 6px;
+  min-width: 0;
+  max-width: 280px;
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* ---- Full player extras: the line being sung, About this song ---- */
+.np-line {
+  border: 0;
+  background: none;
+  color: #fff;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  max-width: min(460px, 84vw);
+  animation: rise 0.3s ease-out;
+}
+@media (min-width: 900px) {
+  .np-line {
+    display: none;
+  }
+}
+.song-details {
+  max-width: 760px;
+  margin: 8px auto 24px;
+}
+.details-card {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+}
+.details-card .detail {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+
+/* ---- Rows of chips; small buttons (requests, filters) ---- */
+.chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips .chip {
+  gap: 6px;
+  flex-shrink: 0;
+}
+.btn.small {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn.danger {
+  background: var(--error);
+  color: #fff;
+}
+
+/* ---- Chat tools: pinned bar, @mentions, search, a message being jumped to ---- */
+.pinned-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 6px 16px;
+  background: var(--surface-container);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.mention-list {
+  background: var(--surface-container);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.mention {
+  color: var(--primary);
+}
+.mention.me {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.chat-search {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bubble-row.flash > div,
+[data-mid].flash {
+  animation: flash 1.6s ease-out;
+}
+@keyframes flash {
+  0%,
+  40% {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
+    border-radius: 12px;
+  }
+  100% {
+    background: transparent;
+  }
+}
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: rec-blink 1.2s infinite;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ---- Reactions ---- */
+.reaction-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.menu .reaction-row {
+  margin: -4px -4px 4px;
+}
+.emoji {
+  border: 0;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  padding: 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease-spring), background 0.12s;
+}
+.emoji:hover {
+  transform: scale(1.18);
+  background: var(--hover);
+}
+.emoji.mine {
+  background: var(--primary-container);
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  max-height: 260px;
+  overflow-y: auto;
+}
+/* The menu's button style is for its text rows: the emoji row keeps its own sizes. */
+.menu:has(.reaction-row) {
+  max-width: none;
+}
+.menu .reaction-row button {
+  width: auto;
+  height: auto;
+  padding: 6px;
+  font-size: 22px;
+  gap: 0;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.menu .reaction-row .icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+/* ---- Listening stats: a meter per person, single-series bar charts (screens/StatsScreen.tsx) ---- */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-container-highest);
+  overflow: hidden;
+}
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+}
+.bar-chart .chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 140px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.bar-hit {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+.bar-hit span {
+  display: block;
+  width: 100%;
+  min-height: 1px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary);
+  opacity: 0.85;
+  transition: opacity 0.12s;
+}
+.bar-hit.on span,
+.bar-hit:hover span {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--background);
+}
+.bar-chart .chart-bars:hover .bar-hit:not(:hover) span {
+  opacity: 0.55;
+}
+.bar-ticks {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+}
+.bar-ticks span {
+  flex: 1;
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: visible;
+}

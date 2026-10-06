@@ -5,10 +5,10 @@ import { refToSong } from '../api/types'
 import { social } from '../api/social'
 import * as player from '../player/player'
 import { Avatar, GroupAvatar } from '../social/avatars'
-import { me, refresh, useSocial } from '../social/social'
+import { deleteConversation, me, refresh, useSocial } from '../social/social'
 import { load, save } from '../state/storage'
 import { ScreenHeader } from '../ui/components'
-import { Checkbox, Dialog, Icon, IconButton, MoreMenu, toast } from '../ui/kit'
+import { Checkbox, Dialog, Icon, IconButton, Menu, MoreMenu, toast } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
 /** A chat's name: the other person in a DM, the group's name otherwise. */
@@ -152,8 +152,32 @@ function ChatRow({ c, friends, onOpen }: { c: Conversation; friends: Friend[]; o
   const partner = dmPartner(c)
   const online = partner ? friends.some((f) => f.user.id === partner.id && f.online) : false
   const jamming = (c.listeners?.length ?? 0) > 0
+  // A chat you can't message anymore (they left, or aren't your friend now) can be deleted: right-click or long-press it.
+  const [menu, setMenu] = useState<DOMRect | null>(null)
+  const [confirm, setConfirm] = useState(false)
   return (
-    <div className="list-row" onClick={onOpen} data-testid="chat-row">
+    <div
+      className="list-row" onClick={onOpen} data-testid="chat-row"
+      onContextMenu={(e) => { if (c.canMessage === false) { e.preventDefault(); setMenu(new DOMRect(e.clientX, e.clientY, 0, 0)) } }}
+    >
+      {/* Clicks in the menu and dialog bubble up through React to this row: keep them from opening the chat. */}
+      <span onClick={(e) => e.stopPropagation()} style={{ display: 'contents' }}>
+      {menu && <Menu anchor={menu} onClose={() => setMenu(null)} items={[{ label: 'Delete chat', danger: true, onClick: () => setConfirm(true) }]} />}
+      {confirm && (
+        <Dialog
+          title="Delete this chat?"
+          onClose={() => setConfirm(false)}
+          actions={
+            <>
+              <button className="btn text" onClick={() => setConfirm(false)}>Cancel</button>
+              <button className="btn danger" onClick={() => { setConfirm(false); deleteConversation(c.id).catch((x) => toast((x as Error).message || "Couldn't delete it")) }}>Delete</button>
+            </>
+          }
+        >
+          It's removed for you only.
+        </Dialog>
+      )}
+      </span>
       {partner ? <Avatar name={partner.displayName} userKey={partner.username} user={partner} online={online} size={52} /> : <GroupAvatar groupKey={String(c.id)} conversation={c} size={52} />}
       <div className="text">
         <div className="title-medium ellipsis" style={{ fontWeight: c.unread > 0 ? 800 : 600 }}>{chatTitle(c)}</div>

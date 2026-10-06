@@ -1,7 +1,7 @@
 # The website and the Android app
 
 The website (`web/`) is meant to do what the Android app does, in the browser. This is where it stands
-(checked screen by screen against `android/` on 2026-10-04). Update it when either side changes.
+(checked screen by screen against `android/` on 2026-10-04, again on 2026-10-06). Update it when either side changes.
 
 ## On both
 
@@ -17,23 +17,54 @@ The website (`web/`) is meant to do what the Android app does, in the browser. T
 - **Settings**: profile picture and name, change password, invite codes, sign out other devices, log out
 - **Friends**: friend requests, friends with what they're playing, add a friend, new group chat
 - **Chat**: live messages, shared songs and clips that play, pictures, voice notes, replies, reactions,
-  edit, delete, typing, read marks, earlier messages
+  edit, delete, typing, earlier messages
 - **Listening together (jam)**: start, join, leave; listeners follow the host; song requests
 
 ## Only in the app (still to do on the website)
 
-Most useful first.
+Checked again against `android/CHANGELOG.md` on 2026-10-06. In the order they're being built; ticked when the
+website has them.
 
-| Area | Missing on the website |
-|---|---|
-| Player | The **queue**: see what's next, reorder, take out. Save, share and radio buttons in the full player (they work from song menus) |
-| Search | **Not in the library** results (the iTunes catalog) with **Request**; the **music requests** page (yours, and everyone's for admins); search history |
-| Chat | Recording voice notes; GIFs, stickers and camera; forward; pins; group settings (rename, members, photo, leave, delete for everyone); emoji picker and quick reactions; search in a chat; @mentions; deleting a chat |
-| Pages | All singers; all public playlists; listening stats (admins) |
-| Smaller | Setting a playlist's picture; the feedback form (bug or feature) |
+**1. Player**
+- [x] The **queue**: see what's next, reorder, take out; in a jam, the host edits it and the others see it
+- [x] **Resume** a playlist, album or Liked songs where you left off (the store, `queueMemory`, is there unused)
+- [x] **About this song** in the full player: artists, composer, lyricist, album, year, genre, track, length, quality
+- [x] The **lyric being sung** under the cover; save, share and radio buttons in the full player
+
+**2. Music requests**
+- [x] **Not in the library** results in Search (the iTunes catalog) with **Request** / **Requested ✓**
+- [x] **Your requests** (waiting, added, can't find) and, for admins, **Everyone's** with Added / Can't find
+- [x] **Search history**: past searches to tap again, ✕ to remove, Clear (the store is there unused)
+
+**3. Chat**
+- [x] Group settings: members (in the jam, online, offline), add and remove people, rename, group photo, leave,
+      delete for everyone; deleting a chat with someone who left
+- [x] **Seen** / **Seen by …** under your newest message (the read marks already arrive)
+- [x] **@mentions** in groups (picker while typing, highlighted, "@" in the chat list)
+- [x] **Pins** (24 hours, 7 days, 30 days; the pinned bar)
+- [x] **Forward** to up to 10 chats; **search in a chat**
+- [x] **Recording voice notes** (the server takes MP4/AAC: Chrome, Edge and Safari can record that, Firefox can't)
+      and a voice player with a seek bar
+- [x] **Who reacted** (a tab per emoji), any emoji, your own quick reactions
+- [x] **GIFs** that stay animated, pasting a picture, saving a picture; **share music from the chat** (what's
+      playing and recent songs, whole or a part); the jam queue in the chat
+
+**4. Pages and smaller things**
+- [x] **Recommended songs** under your own playlists; **Save a copy as a playlist** for mixes
+- [x] A playlist's **picture**; **likes** on your playlists ("By you · 3 likes")
+- [x] Framing a picture (zoom, move, rotate) for profiles and groups
+- [x] All singers; all public playlists
+- [x] **Listening stats** (admins); the **feedback** form (bug or feature)
+
+**5. The Mac app** (`desktop/`, the website in a window)
+- [x] Microphone for voice notes (macOS asks once; the app has to say why)
+- [x] Saving pictures and files, and links that open a new tab (to the browser)
+- [x] Notifications for messages, friend requests and jams (the window's web view has no browser
+      notifications, so the app shows them itself)
 
 ## Only in the app, on purpose
 
-- **Lock-screen lyrics, app updates, Android notifications**: phone features. Notifications could come to the
-  website later as browser push (the server already sends its Firebase settings).
+- **Lock-screen lyrics, Android notifications, the APK updates screen**: phone features. The website (and the Mac
+  app) shows notifications while it's open (Settings › Notifications); push when it's closed would need browser push
+  (the server already sends its Firebase settings). The Mac app updates itself from the same releases.
 - **Light theme**: the website is dark only, by design. The app will get the same dark look later.

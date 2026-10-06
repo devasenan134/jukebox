@@ -3,6 +3,7 @@ import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigationType }
 import { setLoginRejectedHandler } from './api/subsonic'
 import { MiniPlayer } from './player/MiniPlayer'
 import { PlayerBar } from './player/PlayerBar'
+import { QueuePanel, useQueuePanel } from './player/QueuePanel'
 import { Sidebar } from './shell/Sidebar'
 import * as player from './player/player'
 import { AlbumScreen } from './screens/AlbumScreen'
@@ -16,8 +17,12 @@ import { LibraryScreen } from './screens/LibraryScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { FriendsScreen } from './screens/FriendsScreen'
 import { ChatScreen } from './screens/ChatScreen'
+import { RequestsScreen } from './screens/RequestsScreen'
+import { PlaylistsScreen, SingersScreen } from './screens/BrowseScreens'
+import { StatsScreen } from './screens/StatsScreen'
 import { startSocial, useFriendsBadge } from './social/social'
 import { startJamSync } from './social/jamSync'
+import { startNotifications } from './social/notifications'
 import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistScreens'
 import { useLikes } from './state/likes'
 import { useMixes, useMyPlaylists } from './state/library'
@@ -46,6 +51,7 @@ export default function App() {
 
 function Main() {
   const open = usePlayerOpen((s) => s.open)
+  const queueOpen = useQueuePanel((s) => s.open)
   const friendsBadge = useFriendsBadge()
   const location = useLocation()
   const navigationType = useNavigationType()
@@ -64,13 +70,14 @@ function Main() {
     ready.then(() => {
       startSocial()
       startJamSync()
+      startNotifications()
       useLikes.getState().refresh()
       useMyPlaylists.getState().refresh()
       useMixes.getState().refresh()
     })
   }, [])
   return (
-    <div className="app">
+    <div className={`app${queueOpen ? ' with-queue' : ''}`}>
       <div className="content" ref={scroller} onScroll={(e) => positions.current.set(location.key, e.currentTarget.scrollTop)}>
         <ErrorBoundary resetKey={location.pathname + location.search}>
         <Routes>
@@ -89,6 +96,10 @@ function Main() {
           <Route path="/settings" element={<SettingsScreen />} />
           <Route path="/friends" element={<FriendsScreen />} />
           <Route path="/chat/:id" element={<ChatScreen />} />
+          <Route path="/requests" element={<RequestsScreen />} />
+          <Route path="/singers" element={<SingersScreen />} />
+          <Route path="/playlists" element={<PlaylistsScreen />} />
+          <Route path="/stats" element={<StatsScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
         </ErrorBoundary>
@@ -96,6 +107,11 @@ function Main() {
       <ErrorBoundary>
         <Sidebar />
       </ErrorBoundary>
+      {queueOpen && (
+        <ErrorBoundary>
+          <QueuePanel />
+        </ErrorBoundary>
+      )}
       <div className="mini-slot">
         <ErrorBoundary>
           <MiniPlayer onOpen={() => usePlayerOpen.getState().setOpen(true)} />

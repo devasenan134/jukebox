@@ -7,7 +7,7 @@ import { useLikes, likes } from '../state/likes'
 import { useQuery } from '@tanstack/react-query'
 import { keys, playlistChanged, prefetchAlbum, queryClient } from '../state/queries'
 import { useMyPlaylists } from '../state/library'
-import { activity } from '../state/history'
+import { activity, queueMemory } from '../state/history'
 import { session } from '../state/session'
 import * as player from '../player/player'
 import { usePlayer, currentItem } from '../player/player'
@@ -545,8 +545,14 @@ export async function startStation(kind: 'song' | 'album' | 'composer' | 'singer
   }
 }
 
-/** Under a page's header: the big play button, shuffle, then the page's own buttons (like, more). */
-export function PlayShuffleRow({ onPlay, onShuffle, children }: { onPlay: () => void; onShuffle?: () => void; children?: ReactNode }) {
+/** Under a page's header: the big play button, shuffle, the page's own buttons (like, more), then Resume. */
+export function PlayShuffleRow({ onPlay, onShuffle, children, resume }: {
+  onPlay: () => void
+  onShuffle?: () => void
+  children?: ReactNode
+  /** Offers "Resume · song" when this page was played before (see ResumeButton). */
+  resume?: { source: string; songs: Song[]; onResume?: () => void }
+}) {
   return (
     <div className="hero-bar">
       <button className="fab-play" aria-label="Play" onClick={onPlay}>
@@ -554,7 +560,34 @@ export function PlayShuffleRow({ onPlay, onShuffle, children }: { onPlay: () => 
       </button>
       {onShuffle && <IconButton icon="shuffle" label="Shuffle" onClick={onShuffle} size={30} className="big" />}
       {children}
+      {resume && <ResumeButton {...resume} />}
     </div>
+  )
+}
+
+/**
+ * "Resume · Song name" (ResumeButton in DetailScreens.kt): continue a playlist, album or Liked songs from the
+ * song you were on last time, in the same order as then (a shuffled order stays as it was). Songs added since
+ * join at the end. Hidden while you're already playing from this page.
+ */
+function ResumeButton({ source, songs, onResume }: { source: string; songs: Song[]; onResume?: () => void }) {
+  const playingFrom = usePlayer((s) => currentItem(s)?.source)
+  if (playingFrom === source) return null
+  const saved = queueMemory.get(source)
+  const byId = new Map(songs.map((s) => [s.id, s]))
+  const current = saved && byId.get(saved.currentId)
+  if (!saved || !current) return null
+  const resume = () => {
+    const order = [...new Set(saved.songIds)].map((id) => byId.get(id)).filter((s): s is Song => !!s)
+    const queue = [...order, ...songs.filter((s) => !order.some((o) => o.id === s.id))]
+    onResume?.()
+    player.play(queue, Math.max(0, queue.findIndex((s) => s.id === current.id)), false, source)
+  }
+  return (
+    <button className="btn tonal resume" onClick={resume} title={`Resume · ${current.title}`}>
+      <Icon name="play_arrow" filled size={18} />
+      <span className="ellipsis">Resume · {current.title}</span>
+    </button>
   )
 }
 
