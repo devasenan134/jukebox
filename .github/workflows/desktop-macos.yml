@@ -4,6 +4,7 @@ name: Desktop (macOS)
 
 on:
   push:
+    branches: ['**']
     paths: ['desktop/**', '.github/workflows/desktop-macos.yml']
     tags: ['desktop-v*']
   workflow_dispatch:
