@@ -9,6 +9,7 @@ import { Avatar, GroupAvatar, useFriendsServerPicture } from '../social/avatars'
 import { useListen } from '../social/listen'
 import { deleteConversation, markRead, me, onMessage, onRemoved, refresh, refreshConversationsSoon, sendTyping, setOpenConversation, useSocial } from '../social/social'
 import { RecordingBar, useVoiceRecorder, VoicePlayer } from '../social/Voice'
+import { EditQuickReactions, EmojiPicker, myReaction, ReactionRow, WhoReacted } from '../social/Reactions'
 import { ChatSearch, ForwardDialog, MentionList, mentionSuggestions, PinDialog, PinnedBar, quoteText, WithMentions } from '../social/ChatTools'
 import type { SocialUser } from '../api/types'
 import { GroupInfoSheet, GroupMenu } from '../social/GroupInfo'
@@ -17,7 +18,6 @@ import { Dialog, Icon, IconButton, Menu, toast, type MenuItem } from '../ui/kit'
 import { useNav } from '../ui/nav'
 import { chatTitle, dmPartner, shortTime } from './FriendsScreen'
 
-const REACTIONS = ['❤️', '😂', '🔥', '😮', '😢', '👍']
 const PAGE = 50
 
 /** A chat (ui/social/ChatScreen.kt): messages with songs, pictures and voice notes, replies, reactions, and listening together. */
@@ -281,6 +281,7 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, on
 }) {
   const mine = m.sender.id === me()?.id
   const [menu, setMenu] = useState<DOMRect | null>(null)
+  const [reacting, setReacting] = useState<'more' | 'edit' | 'who' | null>(null)
   const isGroup = conversation.kind === 'group'
   const pinned = (conversation.pins ?? []).some((p) => p.message.id === m.id && p.expiresAt > Date.now())
   const canMessage = conversation.canMessage !== false
@@ -295,8 +296,8 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, on
   }
 
   const react = (emoji: string) => {
-    const mineNow = m.reactions?.find((r) => r.userIds.includes(me()?.id ?? -1))?.emoji
-    social.react(m.conversationId, m.id, mineNow === emoji ? null : emoji).then(onChanged).catch(() => toast("Couldn't react"))
+    // One reaction each: choosing another replaces it, choosing yours again takes it back.
+    social.react(m.conversationId, m.id, myReaction(m) === emoji ? null : emoji).then(onChanged).catch(() => toast("Couldn't react"))
   }
   const items: MenuItem[] = [
     { label: 'Reply', onClick: onReply, hidden: m.deleted },
@@ -345,7 +346,7 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, on
         {m.reactions && m.reactions.length > 0 && (
           <div style={{ display: 'flex', gap: 4, marginTop: -6, zIndex: 1 }}>
             {m.reactions.map((r) => (
-              <button key={r.emoji} className="chip" onClick={() => react(r.emoji)} style={{ height: 24, padding: '0 8px', fontSize: 13, background: r.userIds.includes(me()?.id ?? -1) ? 'var(--primary-container)' : 'var(--surface-container-highest)' }}>
+              <button key={r.emoji} className="chip" title="Who reacted" onClick={() => setReacting('who')} style={{ height: 24, padding: '0 8px', fontSize: 13, background: r.userIds.includes(me()?.id ?? -1) ? 'var(--primary-container)' : 'var(--surface-container-highest)' }}>
                 {r.emoji}{r.userIds.length > 1 ? ` ${r.userIds.length}` : ''}
               </button>
             ))}
@@ -368,12 +369,20 @@ function Bubble({ m, conversation, first, onReply, onEdit, onChanged, onJump, on
         <Menu
           anchor={menu}
           onClose={() => setMenu(null)}
-          items={[
-            ...(!m.deleted ? REACTIONS.map((e) => ({ label: `${e}  React`, onClick: () => react(e) })) : []),
-            ...items,
-          ]}
+          header={!m.deleted && canMessage ? (
+            <ReactionRow
+              m={m}
+              onReact={(e) => { setMenu(null); react(e) }}
+              onMore={() => { setMenu(null); setReacting('more') }}
+              onEdit={() => { setMenu(null); setReacting('edit') }}
+            />
+          ) : undefined}
+          items={items}
         />
       )}
+      {reacting === 'more' && <EmojiPicker onClose={() => setReacting(null)} onPick={(e) => { setReacting(null); react(e) }} />}
+      {reacting === 'edit' && <EditQuickReactions onClose={() => setReacting(null)} />}
+      {reacting === 'who' && <WhoReacted m={m} conversation={conversation} onClose={() => setReacting(null)} onRemoveMine={() => social.react(m.conversationId, m.id, null).then(onChanged).catch(() => toast("Couldn't change it"))} />}
     </div>
   )
 }

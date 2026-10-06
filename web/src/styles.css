@@ -1639,3 +1639,56 @@ a.nav-item:hover {
     opacity: 0.3;
   }
 }
+
+/* ---- Reactions ---- */
+.reaction-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.menu .reaction-row {
+  margin: -4px -4px 4px;
+}
+.emoji {
+  border: 0;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  padding: 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease-spring), background 0.12s;
+}
+.emoji:hover {
+  transform: scale(1.18);
+  background: var(--hover);
+}
+.emoji.mine {
+  background: var(--primary-container);
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  max-height: 260px;
+  overflow-y: auto;
+}
+/* The menu's button style is for its text rows: the emoji row keeps its own sizes. */
+.menu:has(.reaction-row) {
+  max-width: none;
+}
+.menu .reaction-row button {
+  width: auto;
+  height: auto;
+  padding: 6px;
+  font-size: 22px;
+  gap: 0;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.menu .reaction-row .icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}

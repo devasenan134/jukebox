@@ -108,7 +108,7 @@ export interface MenuItem {
 }
 
 /** A dropdown menu opened from a button (the ⋮ menus). */
-export function Menu({ items, anchor, onClose }: { items: MenuItem[]; anchor: DOMRect; onClose: () => void }) {
+export function Menu({ items, anchor, onClose, header }: { items: MenuItem[]; anchor: DOMRect; onClose: () => void; header?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: anchor.right, top: anchor.bottom })
   useLayoutEffect(() => {
@@ -140,6 +140,7 @@ export function Menu({ items, anchor, onClose }: { items: MenuItem[]; anchor: DO
   }, [onClose])
   return createPortal(
     <div className="menu" ref={ref} style={pos} onClick={(e) => e.stopPropagation()}>
+      {header}
       {items
         .filter((i) => !i.hidden)
         .map((i) => (

@@ -45,7 +45,7 @@ website has them.
 - [x] **Forward** to up to 10 chats; **search in a chat**
 - [x] **Recording voice notes** (the server takes MP4/AAC: Chrome, Edge and Safari can record that, Firefox can't)
       and a voice player with a seek bar
-- [ ] **Who reacted** (a tab per emoji), any emoji, your own quick reactions
+- [x] **Who reacted** (a tab per emoji), any emoji, your own quick reactions
 - [ ] **GIFs** that stay animated, pasting a picture, saving a picture; **share music from the chat** (what's
       playing and recent songs, whole or a part); the jam queue in the chat
 
