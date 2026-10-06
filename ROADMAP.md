@@ -26,14 +26,13 @@ How it all works today: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - [ ] Stop the `isaipetti-engine` container (the paused engine prototype); it reads the old servers' frozen
       databases and nothing uses it.
 - [ ] Archive the isaipetti repository, with a note that the app and server moved here.
-- [ ] Send in-app feedback to this repository's issues instead of isaipetti's (`GITHUB_REPO` on the server, with
-      a token for this repository).
+- [x] Send in-app feedback to this repository's issues instead of isaipetti's.
 - [x] The code no longer knows about Navidrome or the old servers: no Navidrome sign-in or settings, admin
       stats from Jukebox's own plays, `jukebox user` for accounts, and the analyzer's one-time `adopt` gone.
-- [ ] On the server, drop `NAVIDROME_URL`, `NAVIDROME_ADMIN_USER` and `NAVIDROME_DATA` from `.env` and the
-      Navidrome mount from `docker-compose.yml` when deploying that.
-- [ ] Release the app with the password change through `/me/password`; once every phone has it, remove
-      Navidrome's password-change calls from the server (`/api/user/{id}`, `/auth/login` with a password).
+- [x] On the server, drop the Navidrome settings from `.env` and the Navidrome mount from `docker-compose.yml`.
+- [x] Remove Navidrome's password-change calls from the server (`/api/user/{id}`, `/auth/login` with a
+      password). App 0.12.1 and older can't change passwords any more.
+- [ ] Release the app with the password change through `/me/password`.
 
 ### Then, in this order
 

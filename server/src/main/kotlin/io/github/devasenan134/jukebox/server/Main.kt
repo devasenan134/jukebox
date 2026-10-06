@@ -26,11 +26,6 @@ import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.JsonObject
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
@@ -222,27 +217,10 @@ fun Application.jukeboxServer(
         // route above and below wins over it.
         config.webDir?.let { dir -> singlePageApplication { filesPath = dir; defaultPage = "index.html"; useResources = false } }
 
-        // Navidrome's account record, read and saved by apps up to 0.12.1 when they change a password (see Accounts).
-        route("/api/user/{id}") {
-            get { call.respond(accounts.navidromeAccount(call.request.headers["X-ND-Authorization"], call.parameters["id"].orEmpty())) }
-            put {
-                limiter.check(call)
-                accounts.navidromeChangePassword(call.request.headers["X-ND-Authorization"], call.parameters["id"].orEmpty(), call.receive<JsonObject>())
-                call.respond(buildJsonObject { put("id", call.parameters["id"].orEmpty()) })
-            }
-        }
-
         route("/auth") {
             post("/login") {
                 limiter.check(call)
-                // Navidrome's sign-in sends the password (older apps' password change); the app's own sends a token.
-                val body = call.receive<JsonObject>()
-                val password = body["password"]?.jsonPrimitive?.contentOrNull
-                if (password != null) {
-                    call.respond(accounts.navidromeLogin(body["username"]?.jsonPrimitive?.contentOrNull.orEmpty(), password))
-                } else {
-                    call.respond(accounts.login(eventJson.decodeFromJsonElement(LoginRequest.serializer(), body)))
-                }
+                call.respond(accounts.login(call.receive()))
             }
             post("/signup") {
                 limiter.check(call)
