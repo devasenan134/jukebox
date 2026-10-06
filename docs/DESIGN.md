@@ -13,7 +13,7 @@ size of one home server and a group of friends: one small machine (the reference
   albums never loses a like, a play or a playlist entry.
 - **Works without the engine.** Smart mixes come from the separate recommendation engine when it's running;
   without it, Jukebox still makes simple mixes.
-- **Replaces Navidrome step by step**, with the app working at every step.
+- **Replaced Navidrome step by step**, with the app working at every step (done 2026-10-04).
 
 Not goals: many machines, millions of users, DRM, a CDN.
 
@@ -113,7 +113,9 @@ folder.
 
 ## Moving off Navidrome
 
-Jukebox replaces Navidrome in milestones (see [ROADMAP.md](../ROADMAP.md)), keeping the Subsonic API subset
-the app uses, so the app works against Jukebox before it moves to Jukebox's own API. Users, likes, plays
-and playlists are imported once from Navidrome; passwords can't be carried over, so everyone sets a new
-one.
+Jukebox replaced Navidrome in milestones (see [ROADMAP.md](../ROADMAP.md)), keeping the Subsonic API subset
+the app uses, so the app worked against Jukebox before it moves to Jukebox's own API. Users, likes, plays
+and playlists were imported once from Navidrome. Passwords came over too: Navidrome had been left on its
+built-in encryption key, so they could be decrypted and encrypted again with Jukebox's own
+([milestone 2](milestone-2.md)). Since then Jukebox doesn't talk to Navidrome at all; `jukebox import` stays
+for moving over from it.

@@ -1,5 +1,8 @@
 # Milestone 1: catalog and library
 
+> Done. This is the plan as it was written, while Jukebox ran beside Navidrome; how things work now is in
+> [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Jukebox learns the library itself: it scans the music folders, builds the catalog (albums, releases, tracks,
 recordings, songs, people), serves cover art, lyrics and audio, and answers the Subsonic calls the app makes
 to browse, search and play. It runs **beside** the live Navidrome and Isaipetti server, read-only on the

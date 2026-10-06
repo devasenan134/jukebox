@@ -295,7 +295,7 @@ fun Application.jukeboxServer(
                 call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=2592000")
                 call.respondFile(file)
             }
-            // A cover for a playlist you made (stored in Navidrome, which the server changes as admin after checking).
+            // A cover for a playlist you made (kept with the rest of the artwork).
             put("/playlists/{id}/cover") {
                 pictures.setPlaylistCover(call.me(), call.parameters["id"].orEmpty(), Picture(call.receive<ByteArray>()))
                 call.respond(HttpStatusCode.NoContent)
@@ -415,7 +415,7 @@ fun Application.jukeboxServer(
                 }
             }
 
-            // Listening stats, only for people who are admins in Navidrome.
+            // Listening stats, only for admins.
             route("/admin") {
                 get("/access") { call.respond(AdminAccessDto(stats.isAdmin(call.me()))) }
                 get("/stats") { call.respond(stats.report(call.me(), call.request.queryParameters["tz"])) }
