@@ -57,9 +57,9 @@ website has them.
 - [x] **Listening stats** (admins); the **feedback** form (bug or feature)
 
 **5. The Mac app** (`desktop/`, the website in a window)
-- [ ] Microphone for voice notes (macOS asks once; the app has to say why)
-- [ ] Saving pictures and files, and links that open a new tab (to the browser)
-- [ ] Notifications for messages, friend requests and jams (the window's web view has no browser
+- [x] Microphone for voice notes (macOS asks once; the app has to say why)
+- [x] Saving pictures and files, and links that open a new tab (to the browser)
+- [x] Notifications for messages, friend requests and jams (the window's web view has no browser
       notifications, so the app shows them itself)
 
 ## Only in the app, on purpose

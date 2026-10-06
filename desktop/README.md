@@ -9,6 +9,11 @@ always matches the website and has no features of its own except these:
 - **Closing the window** hides it and the music keeps playing. Click the Dock icon to bring it back; ⌘Q quits.
 - **Updates itself:** at start and from **Jukebox › Check for Updates…** it looks at the newest GitHub release; if
   it's newer, it asks, installs it and restarts.
+- **Notifications** from the website (Settings › Notifications) show as macOS notifications. The web view has no
+  notifications of its own, so the app gives pages a `Notification` that calls its `notify` command (the only
+  command pages may call).
+- **Voice messages** can use the microphone (macOS asks once). **Saved pictures** go to Downloads. Links that open a
+  new tab open in your browser.
 - Media keys and Now Playing come from the website's Media Session code (`web/src/player/player.ts`).
 
 ## Getting the DMG
