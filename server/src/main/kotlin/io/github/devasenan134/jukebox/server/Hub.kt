@@ -61,6 +61,7 @@ data class DeviceDto(
     val positionMs: Long = 0,
     val volume: Float = 1f,
     val lastSeen: Long = 0,
+    val source: String? = null,
 )
 
 @Serializable
@@ -73,6 +74,7 @@ data class DevicePlaybackState(
     val playing: Boolean = false,
     val volume: Float = 1f,
     val updatedAt: Long = 0,
+    val source: String? = null,
 )
 
 /** The list of connected devices for the current user and which one is active. */
@@ -197,6 +199,7 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
                 positionMs = d.playback?.positionMs ?: 0L,
                 volume = d.playback?.volume ?: 1f,
                 lastSeen = d.lastSeen,
+                source = d.playback?.source,
             )
         }.orEmpty()
     }

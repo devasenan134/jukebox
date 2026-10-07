@@ -49,6 +49,7 @@ export const useDevices = create<DevicesState>((set) => ({
       playing: true,
       volume: p.volume,
       updatedAt: Date.now(),
+      source: item?.source,
     }
 
     if (toDeviceId === currentId && p.items.length > 0 && !p.isPlaying) {
@@ -82,6 +83,7 @@ export function syncCurrentPlayback(positionMs?: number) {
     playing: p.isPlaying,
     volume: p.volume,
     updatedAt: Date.now(),
+    source: item?.source,
   }
   sendEvent({ type: 'devicePlayback', playback })
 }

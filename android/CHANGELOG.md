@@ -8,6 +8,13 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Remote Playback Fixes (0.14.4)
+
+**Fixed**
+*   Fixed the Web app showing "Recently played albums" unconditionally.
+*   Fixed the Phone app not showing remote playback correctly in the "Jump back in" section. Playback source (like playlists) is now synced properly across devices.
+
+---
 ## 0.14.3 (2026-10-07): Fix Jump back in showing albums for playlists
 
 App, website, Mac app and server.

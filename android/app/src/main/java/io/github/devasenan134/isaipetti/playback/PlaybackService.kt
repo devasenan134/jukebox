@@ -136,7 +136,7 @@ class PlaybackService : MediaSessionService() {
             val state = transfer.state
             val queueRefs = state.queue ?: (state.song?.let { listOf(it) } ?: emptyList())
             if (queueRefs.isNotEmpty()) {
-                val items = queueRefs.map { it.toSong().toMediaItem(api) }
+                val items = queueRefs.map { it.toSong().toMediaItem(api, source = state.source) }
                 val targetIndex = state.index.coerceIn(items.indices)
                 val targetPos = state.positionMs.coerceAtLeast(0L)
                 player.setMediaItems(items, targetIndex, targetPos)

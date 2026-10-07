@@ -87,7 +87,7 @@ export function HomeScreen() {
         </>
       )}
       {collections.length > QUICK - 1 && <JumpBackIn items={collections.slice(QUICK - 1)} mixes={knownMixes} nav={nav} />}
-      <AlbumRow title="Recently played albums" albums={d.recent} nav={nav} />
+      {songs.length === 0 && collections.length === 0 && <AlbumRow title="Jump back in" albums={d.recent} nav={nav} />}
       <MixSections sections={sections.filter((s) => s.id !== 'made-for-you')} nav={nav} />
       <AlbumRow title="Most played" albums={d.frequent} nav={nav} />
       <AlbumRow title="Recently added" albums={d.newest} nav={nav} action={{ label: 'Show all', onClick: nav.openAlbums }} />

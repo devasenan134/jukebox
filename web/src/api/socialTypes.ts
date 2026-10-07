@@ -145,6 +145,7 @@ export interface DevicePlaybackState {
   playing?: boolean
   volume?: number
   updatedAt?: number
+  source?: string | null
 }
 
 /** Live events from the server's WebSocket ("type" tells which). */

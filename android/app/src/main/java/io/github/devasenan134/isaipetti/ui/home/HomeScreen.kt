@@ -71,13 +71,31 @@ fun HomeScreen(nav: Nav) {
     val playedSongs by app.recent.songs.collectAsStateWithLifecycle()
     val recents = remember(playedSongs, recentlyPlayed) { splitRecents(playedSongs, recentlyPlayed) }
     val nowPlaying by app.player.nowPlaying.collectAsStateWithLifecycle()
+    val devices by app.social.devices.collectAsStateWithLifecycle()
+    val activeDeviceId by app.social.activeDeviceId.collectAsStateWithLifecycle()
+    val effectiveNowPlaying = remember(nowPlaying, devices, activeDeviceId) {
+        val remotePlaying = devices.firstOrNull { it.id == activeDeviceId && it.playing && it.id != app.social.myDeviceId }
+        if (remotePlaying != null) {
+            io.github.devasenan134.isaipetti.playback.NowPlaying(
+                songId = remotePlaying.song?.id,
+                title = remotePlaying.song?.title.orEmpty(),
+                artist = remotePlaying.song?.artist.orEmpty(),
+                album = remotePlaying.song?.album.orEmpty(),
+                albumId = remotePlaying.song?.albumId,
+                artworkUri = remotePlaying.song?.coverArt?.let { android.net.Uri.parse(app.api.coverUrl(it)) },
+                isPlaying = remotePlaying.playing,
+                song = remotePlaying.song,
+                source = remotePlaying.source,
+            )
+        } else nowPlaying
+    }
     // Mixes by Isai Pettai; worked out again on the server whenever the library or your listening changed.
     val mixes by app.mixes.home.collectAsStateWithLifecycle()
     // Every mix we know, so "Jump back in" can draw a mix with its own art (not just one song's cover).
     val followedMixes by app.mixes.followed.collectAsStateWithLifecycle()
     val knownMixes = remember(mixes, followedMixes) { (mixes?.sections.orEmpty().flatMap { it.mixes } + followedMixes).associateBy { it.id } }
     // What the music is playing from (a playlist, movie, mix…), for the "Now playing" tile.
-    val playingFrom = remember(nowPlaying.songId, nowPlaying.source, recentlyPlayed) { playingFrom(nowPlaying, recentlyPlayed) }
+    val playingFrom = remember(effectiveNowPlaying.songId, effectiveNowPlaying.source, recentlyPlayed) { playingFrom(effectiveNowPlaying, recentlyPlayed) }
     LaunchedEffect(Unit) { app.mixes.refresh() }
     val loader = rememberLoader("home") {
         // Fetch all rows at the same time instead of one after another.
@@ -107,7 +125,7 @@ fun HomeScreen(nav: Nav) {
                         SongRow(
                             song = song,
                             onClick = { app.activity.song(song); app.player.play(listOf(song)) },
-                            isCurrent = song.id == nowPlaying.songId,
+                            isCurrent = song.id == effectiveNowPlaying.songId,
                             showCover = true,
                             onOpenAlbum = nav.openAlbum,
                         )
@@ -116,7 +134,7 @@ fun HomeScreen(nav: Nav) {
                 // 3. "Jump back in": movies, playlists, artists and mixes you played as a whole, as tiles.
                 // Until there's any listening, the movies the server says you played.
                 if (recents.collections.isNotEmpty() || playingFrom != null) {
-                    recentRow(recents.collections, playingFrom, nowPlaying.isPlaying, knownMixes, nav) { app.player.play(listOf(it)) }
+                    recentRow(recents.collections, playingFrom, effectiveNowPlaying.isPlaying, knownMixes, nav) { app.player.play(listOf(it)) }
                 }
                 else if (recents.songs.isEmpty()) albumRow("Jump back in", data.recent, nav)
                 mixSections(sections.filter { it.id != "made-for-you" }, nav)

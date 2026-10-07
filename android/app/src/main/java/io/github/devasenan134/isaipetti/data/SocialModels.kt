@@ -278,6 +278,7 @@ data class DeviceDto(
     val positionMs: Long = 0,
     val volume: Float = 1f,
     val lastSeen: Long = 0,
+    val source: String? = null,
 )
 
 @Serializable
@@ -290,6 +291,7 @@ data class DevicePlaybackState(
     val playing: Boolean = false,
     val volume: Float = 1f,
     val updatedAt: Long = 0,
+    val source: String? = null,
 )
 
 /** What the app sends over the WebSocket. */
