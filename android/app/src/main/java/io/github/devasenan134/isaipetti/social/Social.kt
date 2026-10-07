@@ -15,6 +15,9 @@ import io.github.devasenan134.isaipetti.data.FriendRequestEvent
 import io.github.devasenan134.isaipetti.data.FriendRequests
 import io.github.devasenan134.isaipetti.data.ListenSessionEvent
 import io.github.devasenan134.isaipetti.data.ListenStateEvent
+import io.github.devasenan134.isaipetti.data.DevicesEvent
+import io.github.devasenan134.isaipetti.data.RemoteCommandEvent
+import io.github.devasenan134.isaipetti.data.TransferPlaybackEvent
 import io.github.devasenan134.isaipetti.data.MessageEvent
 import io.github.devasenan134.isaipetti.data.ConversationUpdatedEvent
 import io.github.devasenan134.isaipetti.data.ReadEvent
