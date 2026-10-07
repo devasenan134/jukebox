@@ -70,14 +70,27 @@ export const currentItem = (s: PlayerState = st()): QueueItem | undefined => s.i
 let nextUid = 1
 const toItems = (songs: Song[], source?: string): QueueItem[] => songs.map((song) => ({ uid: nextUid++, song, source }))
 
-const audio = new Audio()
-audio.preload = 'auto'
-audio.volume = st().volume
+// Two audio elements: the one playing, and a standby that loads the next song during the last 30 seconds of
+// this one, so the switch is instant. Without it, the page goes quiet while the next song loads, and a browser
+// (or macOS) may freeze a hidden page that's quiet: music stopped after a song or two in a background tab.
+// Events from the standby are ignored until it becomes the playing one.
+function makeAudio(): HTMLAudioElement {
+  const a = new Audio()
+  a.preload = 'auto'
+  a.volume = st().volume
+  return a
+}
+let audio = makeAudio()
+let standby = makeAudio()
+/** The queue entry the standby holds (-1: none). */
+let standbyUid = -1
+const PRELOAD_LAST_MS = 30_000
 
 /** Sets the volume (0 to 1) and remembers it. */
 export function setVolume(v: number) {
   const volume = Math.min(1, Math.max(0, v))
   audio.volume = volume
+  standby.volume = volume
   setSt({ volume })
   try {
     localStorage.setItem('player.volume', String(volume))
@@ -120,7 +133,18 @@ function load_(index: number, startMs = 0, autoplay = true) {
   setSt({ current: index, durationMs: item.song.duration * 1000 })
   if (loadedUid !== item.uid) {
     loadedUid = item.uid
-    audio.src = subsonic.streamUrl(item.song.id)
+    if (standbyUid === item.uid) {
+      // Already loaded in the standby: it becomes the playing one, the old one is emptied.
+      const old = audio
+      audio = standby
+      standby = old
+      old.pause()
+      old.removeAttribute('src')
+      old.load()
+    } else {
+      audio.src = subsonic.streamUrl(item.song.id)
+    }
+    standbyUid = -1
     onTransition(item)
   }
   audio.currentTime = startMs / 1000
@@ -269,6 +293,9 @@ export function stop() {
   audio.pause()
   audio.removeAttribute('src')
   audio.load()
+  standby.removeAttribute('src')
+  standby.load()
+  standbyUid = -1
   loadedUid = -1
   setSt({ items: [], order: [], current: -1, isPlaying: false, durationMs: 0 })
   remove('player.queue')
@@ -374,49 +401,72 @@ export function followState(songs: Song[], index: number, positionMsAt: number, 
   }
 }
 
-// ---- Audio events ----
+// ---- Audio events (from the playing element only) ----
 
-audio.addEventListener('playing', () => setSt({ isPlaying: true, isBuffering: false }))
-audio.addEventListener('play', () => {
-  setSt({ isPlaying: true })
-  const item = currentItem()
-  // Remember songs that actually play, for "recently played" when sharing in a chat.
-  if (item) useRecentSongs.getState().played(songToRef(item.song))
-  notifyPlayback()
-})
-audio.addEventListener('pause', () => {
-  setSt({ isPlaying: false })
-  persist()
-  notifyPlayback()
-})
-audio.addEventListener('waiting', () => setSt({ isBuffering: true }))
-audio.addEventListener('canplay', () => setSt({ isBuffering: false }))
-audio.addEventListener('durationchange', () => {
-  if (Number.isFinite(audio.duration) && audio.duration > 0) setSt({ durationMs: Math.round(audio.duration * 1000) })
-  updatePositionState()
-})
-audio.addEventListener('ended', () => {
+function listen(a: HTMLAudioElement) {
+  a.addEventListener('playing', () => a === audio && setSt({ isPlaying: true, isBuffering: false }))
+  a.addEventListener('play', () => {
+    if (a !== audio) return
+    setSt({ isPlaying: true })
+    const item = currentItem()
+    // Remember songs that actually play, for "recently played" when sharing in a chat.
+    if (item) useRecentSongs.getState().played(songToRef(item.song))
+    notifyPlayback()
+  })
+  a.addEventListener('pause', () => {
+    if (a !== audio) return
+    setSt({ isPlaying: false })
+    persist()
+    notifyPlayback()
+  })
+  a.addEventListener('waiting', () => a === audio && setSt({ isBuffering: true }))
+  a.addEventListener('canplay', () => a === audio && setSt({ isBuffering: false }))
+  a.addEventListener('durationchange', () => {
+    if (a !== audio) return
+    if (Number.isFinite(audio.duration) && audio.duration > 0) setSt({ durationMs: Math.round(audio.duration * 1000) })
+    updatePositionState()
+  })
+  a.addEventListener('ended', () => {
+    if (a !== audio) return
+    const s = st()
+    const item = currentItem()
+    if (s.repeat === 'one') {
+      audio.currentTime = 0
+      void audio.play()
+      return
+    }
+    if (item) reportTransition(item, true)
+    const i = step(1, s.repeat === 'all')
+    if (i != null) load_(i)
+    else setSt({ isPlaying: false })
+  })
+  a.addEventListener('timeupdate', () => {
+    if (a !== audio) return
+    const item = currentItem()
+    // A shared clip pauses once at its end point; pressing play afterwards carries on with the rest.
+    if (item?.clipEndMs && item.uid !== clipStoppedUid && positionMs() >= item.clipEndMs) {
+      clipStoppedUid = item.uid
+      audio.pause()
+    }
+    scrobbleCheck()
+    prepareNext()
+  })
+}
+listen(audio)
+listen(standby)
+
+/** During the last 30 seconds of a song, the standby loads the next one (not for repeat one or a clip). */
+function prepareNext() {
   const s = st()
-  const item = currentItem()
-  if (s.repeat === 'one') {
-    audio.currentTime = 0
-    void audio.play()
-    return
-  }
-  if (item) reportTransition(item, true)
+  const item = currentItem(s)
+  if (!item || item.clipEndMs || s.repeat === 'one' || !s.durationMs || s.durationMs - positionMs() > PRELOAD_LAST_MS) return
   const i = step(1, s.repeat === 'all')
-  if (i != null) load_(i)
-  else setSt({ isPlaying: false })
-})
-audio.addEventListener('timeupdate', () => {
-  const item = currentItem()
-  // A shared clip pauses once at its end point; pressing play afterwards carries on with the rest.
-  if (item?.clipEndMs && item.uid !== clipStoppedUid && positionMs() >= item.clipEndMs) {
-    clipStoppedUid = item.uid
-    audio.pause()
-  }
-  scrobbleCheck()
-})
+  const next = i != null ? s.items[i] : undefined
+  if (!next || next.uid === standbyUid || next.uid === item.uid) return
+  standbyUid = next.uid
+  standby.src = subsonic.streamUrl(next.song.id)
+  standby.load()
+}
 
 // ---- Things that happen when the song changes ----
 

@@ -18,7 +18,8 @@
         "minHeight": 600,
         "theme": "Dark",
         "backgroundColor": "#121212",
-        "create": false
+        "create": false,
+        "backgroundThrottling": "disabled"
       }
     ],
     "security": {
