@@ -80,8 +80,6 @@ class PlaybackService : MediaSessionService() {
         PlayReporter(player, socialApi, listeningTogether = { app.social.listen.joined.value != null }, scope)
         Stations(player, api, socialApi, scope)
 
-        runCatching { startService(Intent(this, PlaybackService::class.java)) }
-
         fun syncDevicePlayback() {
             val song = player.currentMediaItem?.toSongRef()
             val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSongRef() }

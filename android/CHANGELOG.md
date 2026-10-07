@@ -8,6 +8,15 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## 0.14.2 (2026-10-07): Fix Android crash on launch
+
+App.
+
+### Fixed
+- **Crash on startup.** Fixed an uninitialized property crash during application startup that caused the app to close immediately upon opening.
+
+---
+
 ## 0.14.1 (2026-10-07): Android device picker and seamless playback transfer
 
 App, website, Mac app and server.
