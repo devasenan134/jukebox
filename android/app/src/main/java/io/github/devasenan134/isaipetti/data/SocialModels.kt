@@ -426,3 +426,34 @@ data class CatalogResults(val movies: List<CatalogHit> = emptyList(), val songs:
         songs.map { if (it.item.id == itemId) it.copy(request = request) else it },
     )
 }
+
+// ---- Importing playlists from other services ----
+
+/** One song of a playlist from somewhere else, as that service describes it. */
+@Serializable
+data class ImportedTrack(
+    val title: String,
+    val artists: List<String> = emptyList(),
+    val album: String? = null,
+    val durationMs: Long? = null,
+    val isrc: String? = null,
+    /** Its catalog id (Apple Music songs), so it can be requested straight away. */
+    val catalogId: String? = null,
+)
+
+/** A song of the playlist and what it is in the library: [match] if found ([sure] when nothing is in doubt), [choices] to pick from. */
+@Serializable
+data class ImportRow(val track: ImportedTrack, val match: MixSong? = null, val sure: Boolean = false, val choices: List<MixSong> = emptyList())
+
+@Serializable
+data class ImportPreview(
+    val name: String,
+    /** "spotify", "apple", "youtube" or "file". */
+    val source: String,
+    val rows: List<ImportRow>,
+    val truncated: Boolean = false,
+    val note: String? = null,
+)
+
+@Serializable
+data class ImportCreated(val playlistId: String, val songCount: Int = 0)

@@ -82,6 +82,15 @@ class SocialApi(
     /** Your requests for music, waiting ones first. */
     suspend fun musicRequests(): List<MusicRequest> = get("/requests")
     suspend fun requestMusic(catalogId: String): MusicRequest = post("/requests", CatalogIdBody(catalogId))
+
+    /** Reads a playlist link (Spotify, Apple Music, YouTube) or an exported file's text, and finds its songs in the library. */
+    suspend fun importPreview(url: String? = null, text: String? = null, name: String? = null): ImportPreview =
+        post("/imports/preview", ImportPreviewBody(url, text, name))
+    /** Saves an imported playlist with these songs (in this order). */
+    suspend fun importCreate(name: String, songIds: List<String>): ImportCreated = post("/imports", ImportCreateBody(name, songIds))
+    /** Requests a song of an imported playlist that isn't in the library. */
+    suspend fun importRequest(track: ImportedTrack): MusicRequest =
+        post("/imports/request", ImportRequestBody(track.title, track.artists.firstOrNull(), track.album, track.catalogId))
     suspend fun cancelMusicRequest(id: Long) = send<Unit>("DELETE", "/requests/$id", null)
     /** Admins: everyone's requests, and answering them (done means it's in the library now). */
     suspend fun allMusicRequests(): List<MusicRequest> = get("/admin/requests")
@@ -286,6 +295,9 @@ class SocialApi(
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 
     @Serializable private data class CatalogIdBody(val id: String)
+    @Serializable private data class ImportPreviewBody(val url: String?, val text: String?, val name: String?)
+    @Serializable private data class ImportCreateBody(val name: String, val songIds: List<String>)
+    @Serializable private data class ImportRequestBody(val title: String, val artist: String?, val album: String?, val catalogId: String?)
     @Serializable private data class NoteBody(val note: String?)
     @Serializable private data class SongRequestBody(val song: SongRef, val mode: String)
     @Serializable private data class SongRequestAnswer(val accept: Boolean)

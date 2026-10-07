@@ -11,7 +11,7 @@ import { useSession } from '../state/session'
 import { load, save } from '../state/storage'
 import { Cover, likeCount, PlayingBars, ScreenHeader, songCount, useLoad } from '../ui/components'
 import { keys, playlistChanged } from '../state/queries'
-import { IconButton, NameDialog, toast } from '../ui/kit'
+import { IconButton, Menu, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover } from '../ui/mixes'
 import { useNav } from '../ui/nav'
 
@@ -124,8 +124,24 @@ export function useNewPlaylist() {
       toast((e as Error).message || "Couldn't create it")
     }
   }
-  const dialog = creating && <NameDialog title="New playlist" confirm="Create" onClose={() => setCreating(false)} onConfirm={create} />
-  return { start: () => setCreating(true), dialog }
+  // + offers a new playlist, or importing one from Spotify, Apple Music, YouTube or a file.
+  const [menu, setMenu] = useState<DOMRect | null>(null)
+  const dialog = (
+    <>
+      {creating && <NameDialog title="New playlist" confirm="Create" onClose={() => setCreating(false)} onConfirm={create} />}
+      {menu && (
+        <Menu
+          anchor={menu}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: 'New playlist', icon: 'add', onClick: () => setCreating(true) },
+            { label: 'Import a playlist', icon: 'download', onClick: nav.openImport },
+          ]}
+        />
+      )}
+    </>
+  )
+  return { start: (e: { currentTarget: EventTarget }) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect()), dialog }
 }
 
 /** The filter chips over the list (remembered in this browser). Tapping the chosen one again shows everything. */
@@ -183,7 +199,7 @@ export function LibraryScreen() {
         actions={
           <>
             <IconButton icon={grid ? 'view_list' : 'grid_view'} label={grid ? 'Show as list' : 'Show as grid'} onClick={toggleGrid} />
-            <IconButton icon="add" label="New playlist" onClick={newPlaylist.start} />
+            <IconButton icon="add" label="New or import playlist" onClick={newPlaylist.start} />
             <IconButton icon="settings" label="Settings" onClick={nav.openSettings} />
           </>
         }

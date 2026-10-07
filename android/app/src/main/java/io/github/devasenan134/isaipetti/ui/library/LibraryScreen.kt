@@ -1,5 +1,7 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -92,6 +94,7 @@ fun LibraryScreen(nav: Nav) {
     // Playlists you created, next to the ones you liked.
     var reloadOwn by remember { mutableIntStateOf(0) }
     var creating by remember { mutableStateOf(false) }
+    var addMenu by remember { mutableStateOf(false) }
     val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username, reloadOwn) {
         value = runCatching { app.api.playlists().filter { it.owner == credentials?.username } }.getOrDefault(emptyList())
     }
@@ -119,7 +122,14 @@ fun LibraryScreen(nav: Nav) {
                 if (grid) Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Show as list")
                 else Icon(painterResource(R.drawable.ic_grid), contentDescription = "Show as grid")
             }
-            IconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, contentDescription = "New playlist") }
+            // + : a new playlist, or one imported from Spotify, Apple Music, YouTube or a file.
+            Box {
+                IconButton(onClick = { addMenu = true }) { Icon(Icons.Filled.Add, contentDescription = "New or import playlist") }
+                DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
+                    DropdownMenuItem(text = { Text("New playlist") }, onClick = { addMenu = false; creating = true })
+                    DropdownMenuItem(text = { Text("Import a playlist") }, onClick = { addMenu = false; nav.openImport() })
+                }
+            }
         }
         if (creating) {
             NameDialog(title = "New playlist", confirm = "Create", onDismiss = { creating = false }) { name ->

@@ -311,3 +311,31 @@ export interface CatalogResults {
   movies: CatalogHit[]
   songs: CatalogHit[]
 }
+
+// ---- Importing playlists ----
+
+export interface ImportedTrack {
+  title: string
+  artists: string[]
+  album?: string
+  durationMs?: number
+  isrc?: string
+  catalogId?: string
+}
+
+/** A song of the playlist being imported, and what it is in the library: match if found (sure when no doubt), choices to pick from. */
+export interface ImportRow {
+  track: ImportedTrack
+  match?: MixSong
+  sure: boolean
+  choices: MixSong[]
+}
+
+export interface ImportPreview {
+  name: string
+  /** "spotify", "apple", "youtube" or "file". */
+  source: string
+  rows: ImportRow[]
+  truncated: boolean
+  note?: string
+}

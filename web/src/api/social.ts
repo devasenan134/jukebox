@@ -1,5 +1,5 @@
 import type {
-  CatalogResults, HomeMixes, LibrarySearchResults, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist,
+  CatalogResults, HomeMixes, ImportedTrack, ImportPreview, LibrarySearchResults, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist,
   SessionResponse, SocialUser, SongRef,
 } from './types'
 import type {
@@ -119,6 +119,11 @@ export const social = {
   recommend: (songIds: string[], count = 10, page = 0) => post<MixSong[]>('/mixes/recommend', { songIds, count, page }),
   /** What was played and skipped, so mixes can learn. */
   recordPlays: (events: PlayEvent[]) => post<void>('/plays', { events }),
+
+  // Importing playlists from other services or files.
+  importPreview: (o: { url?: string; text?: string; name?: string }) => post<ImportPreview>('/imports/preview', o),
+  importCreate: (name: string, songIds: string[]) => post<{ playlistId: string; songCount: number }>('/imports', { name, songIds }),
+  importRequest: (t: ImportedTrack) => post<MusicRequest>('/imports/request', { title: t.title, artist: t.artists[0], album: t.album, catalogId: t.catalogId }),
 
   /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
   search: (q: string) => get<LibrarySearchResults>(`/search?q=${enc(q)}`),

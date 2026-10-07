@@ -8,6 +8,25 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Unreleased
+
+### New
+- **Import playlists from Spotify, Apple Music, YouTube or a file.** Your Library › **+** › **Import a playlist**:
+  paste a playlist link, or share it to Isaipetti straight from the Spotify, Apple Music or YouTube app. Exported
+  files work too (CSV from Exportify, TuneMyMusic or Soundiiz; M3U; Apple Music exports; or a list of "Title -
+  Artist" lines). Jukebox finds each song in the library, spelling forgiven, and shows what it found: tick or
+  untick songs, pick the right one where it isn't sure, and **Request** the ones it doesn't have. Then **Save
+  playlist**. Also on the website and the Mac app.
+
+### Fixed
+- **Website and Mac app:** music no longer stops after a song or two when the tab or app is in the background.
+
+### Server
+- `POST /imports/preview` (a link, or a file's text), `POST /imports` (save) and `POST /imports/request`. Optional
+  `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` for whole Spotify playlists.
+
+---
+
 ## 0.12.3 (2026-10-06): The Mac app and the website catch up
 
 Mac app and website; the Android app has no changes of its own (same features as 0.12.2).

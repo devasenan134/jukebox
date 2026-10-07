@@ -51,6 +51,8 @@ export function useNav() {
     openMix: (id: string) => go(`/mix/${enc(id)}`),
     /** Your requests for music that isn't in the library (admins: everyone's). */
     openRequests: () => go('/requests'),
+    /** Import a playlist from Spotify, Apple Music, YouTube or a file. */
+    openImport: () => go('/import'),
     back: () => (history.length > 1 ? navigate(-1) : navigate('/')),
   }
 }
