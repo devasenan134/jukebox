@@ -8,6 +8,15 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## 0.14.3 (2026-10-07): Fix Jump back in showing albums for playlists
+
+App, website, Mac app and server.
+
+### Fixed
+- **Jump back in.** When playing from a playlist (especially across devices via remote control), the "Jump back in" section on Home correctly shows the playlist instead of falling back to the current song's movie/album.
+
+---
+
 ## 0.14.2 (2026-10-07): Fix Android crash on launch
 
 App.

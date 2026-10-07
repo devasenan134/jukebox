@@ -173,6 +173,22 @@ private fun playingFrom(now: NowPlaying, items: List<RecentActivity.Item>): Rece
     val from = if (source == "liked") RecentActivity.Kind.Liked to "liked"
     else kinds.entries.firstOrNull { source.startsWith(it.key) }?.let { it.value to source.removePrefix(it.key) }
     from?.let { (kind, id) -> items.firstOrNull { it.kind == kind && it.id == id } }?.let { return it }
+    
+    // If we couldn't find the source in local history (e.g. playback started on another device),
+    // construct a placeholder tile of the correct kind so tapping it opens the right screen.
+    if (from != null) {
+        val (kind, id) = from
+        val title = when (kind) {
+            RecentActivity.Kind.Playlist -> "Playlist"
+            RecentActivity.Kind.Liked -> "Liked songs"
+            RecentActivity.Kind.Composer -> "Composer"
+            RecentActivity.Kind.Artist -> now.artist.ifBlank { "Artist" }
+            RecentActivity.Kind.Mix -> "Mix"
+            else -> now.album.ifBlank { now.title }
+        }
+        return RecentActivity.Item(kind, id, title, null, now.song?.coverArt)
+    }
+
     val albumId = now.albumId ?: return null
     return RecentActivity.Item(RecentActivity.Kind.Movie, albumId, now.album.ifBlank { now.title }, now.artist, now.song?.coverArt)
 }
