@@ -20,6 +20,7 @@ import { ChatScreen } from './screens/ChatScreen'
 import { RequestsScreen } from './screens/RequestsScreen'
 import { PlaylistsScreen, SingersScreen } from './screens/BrowseScreens'
 import { StatsScreen } from './screens/StatsScreen'
+import { ImportScreen } from './screens/ImportScreen'
 import { startSocial, useFriendsBadge } from './social/social'
 import { startJamSync } from './social/jamSync'
 import { startNotifications } from './social/notifications'
@@ -100,6 +101,7 @@ function Main() {
           <Route path="/singers" element={<SingersScreen />} />
           <Route path="/playlists" element={<PlaylistsScreen />} />
           <Route path="/stats" element={<StatsScreen />} />
+          <Route path="/import" element={<ImportScreen />} />
           <Route path="*" element={<HomeScreen />} />
         </Routes>
         </ErrorBoundary>

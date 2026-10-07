@@ -34,6 +34,12 @@ data class Config(
     val rescanEveryMinutes: Long = 60,
     /** The built web app (web/dist), served at /. Empty: no web app. */
     val webDir: String? = null,
+    /**
+     * A Spotify app's id and secret (free at developer.spotify.com), for importing whole Spotify playlists with
+     * their ISRCs. Without them, imports read Spotify's public page (the first 100 songs).
+     */
+    val spotifyClientId: String? = null,
+    val spotifyClientSecret: String? = null,
 ) {
     companion object {
         fun fromEnv(): Config {
@@ -55,6 +61,8 @@ data class Config(
                 fingerprints = System.getenv("FINGERPRINTS")?.lowercase() != "off",
                 rescanEveryMinutes = System.getenv("RESCAN_EVERY_MINUTES")?.toLongOrNull() ?: 60,
                 webDir = System.getenv("WEB_DIR")?.takeIf { File(it, "index.html").isFile },
+                spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID")?.takeIf { it.isNotBlank() },
+                spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET")?.takeIf { it.isNotBlank() },
             )
         }
     }

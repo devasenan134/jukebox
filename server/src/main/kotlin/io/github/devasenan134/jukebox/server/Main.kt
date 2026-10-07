@@ -99,6 +99,7 @@ fun Application.jukeboxServer(
     /** Where mixes, search, requests and stats get their music; by default the library in [Config.libraries]. */
     music: MusicSource? = null,
     catalog: Catalog = ITunesCatalog(),
+    playlistReader: PlaylistReader = WebPlaylistReader(spotifyClientId = config.spotifyClientId, spotifyClientSecret = config.spotifyClientSecret),
 ) {
     val db = Db(config.dbPath)
     val friends = Friends(db)
@@ -139,6 +140,8 @@ fun Application.jukeboxServer(
         ).also { it.start(this) }
     }
     val listening = Listening(db)
+    // Playlists from Spotify, Apple Music, YouTube or a file, matched to the library.
+    val imports = music?.let { PlaylistImports(db, it, listening, requests, playlistReader) }
     val pictures = Pictures(db, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
     val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.covers, lib::roots), signIn::checkToken, signIn::userId, listening) }
     val limiter = RateLimiter(maxPerMinute = 10)
@@ -199,7 +202,12 @@ fun Application.jukeboxServer(
             val length = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
             // Chat pictures can be bigger (a GIF from the keyboard); ChatImage checks them.
             val path = call.request.local.uri.substringBefore('?')
-            val limit = if (path.endsWith("/images") || path.endsWith("/voice")) ChatImage.MAX_BYTES + 1024L else MAX_BODY_BYTES
+            // An exported playlist file (an Apple Music library export can be several MB) is sent as text to preview.
+            val limit = when {
+                path.endsWith("/images") || path.endsWith("/voice") -> ChatImage.MAX_BYTES + 1024L
+                path == "/imports/preview" -> 12 * 1024 * 1024L
+                else -> MAX_BODY_BYTES
+            }
             if (length != null && length > limit) call.respond(HttpStatusCode.PayloadTooLarge, ErrorResponse("Request is too large"))
         }
     })
@@ -334,6 +342,14 @@ fun Application.jukeboxServer(
                 get("/people/{id}") { call.respond(searchOn().person(call.parameters["id"].orEmpty())) }
                 // Songs and movies from the music catalog that aren't in the library, to request.
                 get("/catalog") { call.respond(requestsOn().search(call.me(), call.request.queryParameters["q"].orEmpty().take(100))) }
+            }
+
+            // Importing a playlist from another service or a file: preview the matches, then save it.
+            route("/imports") {
+                fun importsOn() = imports ?: throw ApiError(HttpStatusCode.NotFound, "Importing is off on this server")
+                post("/preview") { call.respond(importsOn().preview(call.receive())) }
+                post { call.respond(importsOn().create(call.me(), call.receive())) }
+                post("/request") { call.respond(importsOn().request(call.me(), call.receive())) }
             }
 
             // Requests for music that isn't in the library; admins answer them.
