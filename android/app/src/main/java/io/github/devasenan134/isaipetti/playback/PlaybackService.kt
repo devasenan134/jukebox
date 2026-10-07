@@ -16,6 +16,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import io.github.devasenan134.isaipetti.IsaipettiApp
+import io.github.devasenan134.isaipetti.data.SongRef
 import io.github.devasenan134.isaipetti.lockscreen.LockScreenLyrics
 import io.github.devasenan134.isaipetti.MainActivity
 import com.google.common.util.concurrent.Futures
@@ -78,11 +79,66 @@ class PlaybackService : MediaSessionService() {
         val socialApi = { app.social.api.takeIf { app.session.social.value != null } }
         PlayReporter(player, socialApi, listeningTogether = { app.social.listen.joined.value != null }, scope)
         Stations(player, api, socialApi, scope)
-        // Tell friends what's playing (only while it's actually playing).
+
+        app.social.onRemoteCommand = { cmd ->
+            when (cmd.action) {
+                "play" -> {
+                    if (!player.isPlaying) {
+                        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) {
+                            player.prepare()
+                        }
+                        player.play()
+                    }
+                }
+                "pause" -> player.pause()
+                "next" -> {
+                    if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                }
+                "previous" -> {
+                    if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+                }
+                "seek" -> {
+                    cmd.positionMs?.let { player.seekTo(it) }
+                }
+                "volume" -> {
+                    cmd.volume?.let { player.volume = it }
+                }
+            }
+        }
+
+        app.social.onTransferPlayback = { transfer ->
+            val state = transfer.state
+            val queueRefs = state.queue ?: (state.song?.let { listOf(it) } ?: emptyList())
+            if (queueRefs.isNotEmpty()) {
+                val items = queueRefs.map { it.toSong().toMediaItem(api) }
+                val targetIndex = state.index.coerceIn(items.indices)
+                val targetPos = state.positionMs.coerceAtLeast(0L)
+                player.setMediaItems(items, targetIndex, targetPos)
+                player.prepare()
+                if (state.playing) {
+                    player.play()
+                } else {
+                    player.pause()
+                }
+            }
+        }
+
+        fun syncDevicePlayback() {
+            val song = player.currentMediaItem?.toSongRef()
+            val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSongRef() }
+            val index = player.currentMediaItemIndex.coerceAtLeast(0)
+            val pos = player.currentPosition.coerceAtLeast(0L)
+            val isPlaying = player.isPlaying
+            val vol = player.volume
+            app.social.onDevicePlayback(song, queue, index, pos, isPlaying, vol)
+        }
+
+        // Tell friends what's playing (only while it's actually playing) and sync devices.
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) {
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) {
                     app.social.onPlayback(player.currentMediaItem?.toSongRef(), player.isPlaying)
+                    syncDevicePlayback()
                 }
                 // Remember songs that actually play, for "recently played" when sharing in a chat.
                 if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && player.isPlaying) {
@@ -103,7 +159,10 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         lockScreenLyrics?.unregister()
         lockScreenLyrics = null
+        app.social.onRemoteCommand = null
+        app.social.onTransferPlayback = null
         app.social.onPlayback(null, false)
+        app.social.onDevicePlayback(null, emptyList(), 0, 0L, false, 1f)
         // Without a player there's nothing to keep in sync.
         listenSync?.release()
         listenSync = null

@@ -15,8 +15,14 @@ import io.github.devasenan134.isaipetti.data.FriendRequestEvent
 import io.github.devasenan134.isaipetti.data.FriendRequests
 import io.github.devasenan134.isaipetti.data.ListenSessionEvent
 import io.github.devasenan134.isaipetti.data.ListenStateEvent
+import io.github.devasenan134.isaipetti.data.DeviceDto
+import io.github.devasenan134.isaipetti.data.DevicePlaybackState
+import io.github.devasenan134.isaipetti.data.DevicePlaybackUpdate
 import io.github.devasenan134.isaipetti.data.DevicesEvent
+import io.github.devasenan134.isaipetti.data.RemoteCommand
 import io.github.devasenan134.isaipetti.data.RemoteCommandEvent
+import io.github.devasenan134.isaipetti.data.SetActiveDevice
+import io.github.devasenan134.isaipetti.data.TransferPlayback
 import io.github.devasenan134.isaipetti.data.TransferPlaybackEvent
 import io.github.devasenan134.isaipetti.data.MessageEvent
 import io.github.devasenan134.isaipetti.data.ConversationUpdatedEvent
@@ -88,6 +94,28 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations
+
+    private val _devices = MutableStateFlow<List<DeviceDto>>(emptyList())
+    val devices: StateFlow<List<DeviceDto>> = _devices
+
+    private val _activeDeviceId = MutableStateFlow<String?>(null)
+    val activeDeviceId: StateFlow<String?> = _activeDeviceId
+
+    var onRemoteCommand: ((RemoteCommandEvent) -> Unit)? = null
+
+    var pendingTransfer: TransferPlaybackEvent? = null
+    var onRequestPlayerConnect: (() -> Unit)? = null
+
+    var onTransferPlayback: ((TransferPlaybackEvent) -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                pendingTransfer?.let {
+                    pendingTransfer = null
+                    value.invoke(it)
+                }
+            }
+        }
 
     private val _messages = MutableSharedFlow<ChatMessage>(extraBufferCapacity = 64)
 
@@ -186,6 +214,39 @@ class Social(private val context: Context, private val session: SessionStore, pr
         if (shown == nowPlaying) return
         nowPlaying = shown
         sendEvent(NowPlayingUpdate(shown))
+    }
+
+    /** Sends this device's current playback snapshot to the realtime gateway. */
+    fun onDevicePlayback(
+        song: SongRef?,
+        queue: List<SongRef>,
+        index: Int,
+        positionMs: Long,
+        isPlaying: Boolean,
+        volume: Float = 1f,
+    ) {
+        val state = DevicePlaybackState(
+            song = song,
+            queue = queue,
+            index = index,
+            positionMs = positionMs,
+            playing = isPlaying,
+            volume = volume,
+            updatedAt = System.currentTimeMillis(),
+        )
+        sendEvent(DevicePlaybackUpdate(state))
+    }
+
+    fun transferPlayback(toDeviceId: String) {
+        sendEvent(TransferPlayback(toDeviceId))
+    }
+
+    fun sendRemoteCommand(targetDeviceId: String, action: String, positionMs: Long? = null, volume: Float? = null) {
+        sendEvent(RemoteCommand(targetDeviceId = targetDeviceId, action = action, positionMs = positionMs, volume = volume))
+    }
+
+    fun setActiveDevice(deviceId: String) {
+        sendEvent(SetActiveDevice(deviceId))
     }
 
     /** Reloads friends, requests and chats from the server. */
@@ -349,7 +410,22 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 refreshFriends()
                 refreshRequests()
             }
-            is DevicesEvent, is RemoteCommandEvent, is TransferPlaybackEvent -> Unit
+            is DevicesEvent -> {
+                _devices.value = event.devices
+                _activeDeviceId.value = event.activeDeviceId
+            }
+            is RemoteCommandEvent -> {
+                onRemoteCommand?.invoke(event)
+            }
+            is TransferPlaybackEvent -> {
+                val handler = onTransferPlayback
+                if (handler != null) {
+                    handler.invoke(event)
+                } else {
+                    pendingTransfer = event
+                    onRequestPlayerConnect?.invoke()
+                }
+            }
         }
     }
 

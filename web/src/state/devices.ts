@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { DeviceInfo, DevicePlaybackState } from '../api/socialTypes'
-import { songToRef } from '../api/types'
+import { songToRef, refToSong } from '../api/types'
 import { currentItem, usePlayer, onPlayback } from '../player/player'
 import * as player from '../player/player'
 import { onEvent, sendEvent } from '../social/social'
@@ -103,12 +103,14 @@ export function startDeviceSync(): () => void {
           break
       }
     } else if (event.type === 'transferPlayback') {
-      if (event.state.song) {
-        if (!usePlayer.getState().isPlaying) {
-          player.togglePlay()
-        }
-        if (event.state.positionMs) {
-          setTimeout(() => player.seekTo(event.state.positionMs!), 200)
+      const state = event.state
+      const queue = state.queue?.map(refToSong) ?? (state.song ? [refToSong(state.song)] : [])
+      if (queue.length > 0) {
+        const index = state.index != null && state.index >= 0 ? state.index : 0
+        player.play(queue, index, false)
+        const pos = state.positionMs
+        if (pos != null && pos > 0) {
+          setTimeout(() => player.seekTo(pos), 200)
         }
       }
     }
