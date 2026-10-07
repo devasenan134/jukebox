@@ -40,6 +40,8 @@ data class Config(
      */
     val spotifyClientId: String? = null,
     val spotifyClientSecret: String? = null,
+    /** Social features: friends, chat, listen-together jams, push notifications. */
+    val socialEnabled: Boolean = true,
 ) {
     companion object {
         fun fromEnv(): Config {
@@ -63,6 +65,7 @@ data class Config(
                 webDir = System.getenv("WEB_DIR")?.takeIf { File(it, "index.html").isFile },
                 spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID")?.takeIf { it.isNotBlank() },
                 spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET")?.takeIf { it.isNotBlank() },
+                socialEnabled = System.getenv("JUKEBOX_SOCIAL")?.lowercase() != "off" && System.getenv("JUKEBOX_SOCIAL")?.lowercase() != "false",
             )
         }
     }

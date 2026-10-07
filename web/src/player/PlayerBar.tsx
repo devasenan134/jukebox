@@ -7,6 +7,7 @@ import { Cover, formatDuration, LikeButton } from '../ui/components'
 import { Icon, IconButton } from '../ui/kit'
 import { useNav, usePlayerOpen } from '../ui/nav'
 import { useQueuePanel } from './QueuePanel'
+import { DevicePickerButton } from './DevicePicker'
 
 /** A slider (seek or volume) that fills up to its value. */
 export function Slider({ value, max, onChange, label, style }: { value: number; max: number; onChange: (v: number) => void; label: string; style?: CSSProperties }) {
@@ -88,6 +89,7 @@ export function PlayerBar() {
       <div className="extra">
         <IconButton icon="lyrics" label="Lyrics" onClick={open} disabled={!song} size={20} />
         <IconButton icon="queue_music" label="Queue" onClick={useQueuePanel.getState().toggle} size={20} color={queueOpen ? 'var(--primary)' : undefined} />
+        <DevicePickerButton />
         <IconButton
           icon={volume === 0 ? 'volume_off' : volume < 0.5 ? 'volume_down' : 'volume_up'}
           label={volume === 0 ? 'Unmute' : 'Mute'}

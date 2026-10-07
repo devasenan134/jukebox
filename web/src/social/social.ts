@@ -165,10 +165,12 @@ async function refreshAll() {
   await refreshConversations()
 }
 
+import { getDeviceId, getDeviceName, getClientType, syncCurrentPlayback } from '../state/devices'
+
 /** Opens the WebSocket and resolves when it closes. */
 function runSocket(): Promise<void> {
   return new Promise((resolve) => {
-    const url = api.eventsUrl()
+    const url = api.eventsUrl(getDeviceId(), getDeviceName(), getClientType())
     if (!url) return resolve()
     const ws = new WebSocket(url)
     socket = ws
@@ -176,6 +178,7 @@ function runSocket(): Promise<void> {
       setS({ status: 'Online' })
       sendEvent({ type: 'appState', visible: visible() })
       if (nowPlaying) sendEvent({ type: 'nowPlaying', song: nowPlaying })
+      syncCurrentPlayback()
       useListen.getState().onConnected()
     }
     ws.onmessage = (m) => {
@@ -262,6 +265,7 @@ onPlayback((song, isPlaying) => {
     nowPlaying = shown
     sendEvent({ type: 'nowPlaying', song: shown })
   }
+  syncCurrentPlayback()
   reconsider()
 })
 

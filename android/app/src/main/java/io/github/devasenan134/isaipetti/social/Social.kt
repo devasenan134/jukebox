@@ -274,7 +274,9 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     /** Opens the WebSocket and suspends until it closes. */
     private suspend fun runSocket() {
-        val url = api.eventsUrl() ?: return
+        val deviceId = "android-${android.os.Build.MODEL.lowercase().replace(" ", "-")}"
+        val deviceName = "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}"
+        val url = api.eventsUrl(deviceId = deviceId, deviceName = deviceName, clientType = "android") ?: return
         suspendCancellableCoroutine { continuation ->
             val ws = wsClient.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -344,6 +346,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 refreshFriends()
                 refreshRequests()
             }
+            is DevicesEvent, is RemoteCommandEvent, is TransferPlaybackEvent -> Unit
         }
     }
 

@@ -227,7 +227,18 @@ class SocialApi(
         post<ReadBody, Unit>("/conversations/$conversationId/read", ReadBody(messageId))
 
     /** WebSocket address for live events. */
-    fun eventsUrl(): String? = token()?.let { t -> baseUrl()?.let { it.replaceFirst("http", "ws") + "/ws?token=$t" } }
+    fun eventsUrl(deviceId: String? = null, deviceName: String? = null, clientType: String? = "android"): String? =
+        token()?.let { t ->
+            baseUrl()?.let { base ->
+                val ws = base.replaceFirst("http", "ws") + "/ws?token=$t"
+                val extra = buildString {
+                    if (deviceId != null) append("&device_id=${enc(deviceId)}")
+                    if (deviceName != null) append("&device_name=${enc(deviceName)}")
+                    if (clientType != null) append("&client_type=${enc(clientType)}")
+                }
+                ws + extra
+            }
+        }
 
     /** This server's Firebase settings for push notifications, or null if it has none. */
     suspend fun pushConfig(): PushConfig? = try {

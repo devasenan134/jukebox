@@ -8,6 +8,20 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## 0.14.0 (2026-10-07): Realtime gateway and playback across devices (Milestone 3)
+
+App, website, Mac app and server.
+
+### New
+- **Playback across devices and remote control.** Tap the new devices icon in the player bar on the web or desktop to see all your connected devices (phone, laptop, desktop). Transfer playback to another device with one tap ("Play here"), or remotely pause, skip, and resume from another screen.
+- **Realtime gateway.** Every connected device now carries its own identity (device name, model, platform) over the WebSocket, keeping presence and playback in sync across devices while preserving friend presence.
+- **Standalone music server mode.** For private self-hosting without friends or social tools, set `JUKEBOX_SOCIAL=off` in `.env`. The realtime gateway still synchronizes playback across all your personal devices.
+
+### Server
+- Device handshake metadata on `/ws`, device session tracking in `Hub`, `DevicesEvent`, `RemoteCommandEvent`, and `TransferPlaybackEvent`. Added `JUKEBOX_SOCIAL` setting in `Config`.
+
+---
+
 ## 0.13.0 (2026-10-07): Import playlists from Spotify, Apple Music, YouTube or a file
 
 App, website, Mac app and server.

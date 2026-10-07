@@ -245,7 +245,12 @@ fun Application.jukeboxServer(
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Not logged in"))
                 return@webSocket
             }
-            hub.connected(user.id, this)
+            val explicitDeviceId = call.request.queryParameters["device_id"]?.takeIf { it.isNotBlank() }
+            val deviceId = explicitDeviceId ?: "legacy-${System.identityHashCode(this)}"
+            val deviceName = call.request.queryParameters["device_name"]?.takeIf { it.isNotBlank() } ?: "Web Browser"
+            val clientType = call.request.queryParameters["client_type"]?.takeIf { it.isNotBlank() } ?: "web"
+
+            hub.connected(user.id, this, deviceId, deviceName, clientType, isExplicitDevice = explicitDeviceId != null)
             try {
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
@@ -254,11 +259,11 @@ fun Application.jukeboxServer(
                         null -> Unit
                         is ListenStart, is ListenJoin, is ListenLeave, is ListenUpdate -> listen.handle(user.id, event)
                         is TypingUpdate -> runCatching { chat.typing(user.id, event.conversationId) }
-                        else -> hub.handle(user.id, this, event)
+                        else -> hub.handle(user.id, this, event, deviceId)
                     }
                 }
             } finally {
-                hub.disconnected(user.id, this)
+                hub.disconnected(user.id, this, deviceId)
                 // Offline on every device: leave any listen-together session.
                 if (!hub.isOnline(user.id)) listen.wentOffline(user.id)
             }

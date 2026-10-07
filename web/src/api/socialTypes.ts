@@ -123,6 +123,30 @@ export interface ListenState {
   updatedAt?: number
 }
 
+export interface DeviceInfo {
+  id: string
+  name: string
+  type: string
+  isCurrent: boolean
+  isActive: boolean
+  playing: boolean
+  song?: SongRef
+  positionMs: number
+  volume: number
+  lastSeen: number
+}
+
+export interface DevicePlaybackState {
+  song?: SongRef | null
+  queue?: SongRef[] | null
+  queueId?: string | null
+  index?: number
+  positionMs?: number
+  playing?: boolean
+  volume?: number
+  updatedAt?: number
+}
+
 /** Live events from the server's WebSocket ("type" tells which). */
 export type SocialEvent =
   | { type: 'presence'; userId: number; online: boolean; nowPlaying?: SongRef }
@@ -137,6 +161,19 @@ export type SocialEvent =
   | { type: 'listenSession'; conversationId: number; listeners: number[]; owner?: number }
   | { type: 'messageUpdated'; message: ChatMessage }
   | { type: 'listenState'; conversationId: number; state: ListenState; by: number; serverTime: number }
+  | { type: 'devices'; activeDeviceId: string | null; devices: DeviceInfo[] }
+  | {
+      type: 'remoteCommand'
+      commandId: string
+      action: string
+      positionMs?: number
+      volume?: number
+      song?: SongRef
+      queue?: SongRef[]
+      index?: number
+      byDeviceId?: string
+    }
+  | { type: 'transferPlayback'; state: DevicePlaybackState; fromDeviceId: string }
 
 /** What the app sends over the WebSocket. */
 export type ClientEvent =
@@ -147,6 +184,19 @@ export type ClientEvent =
   | { type: 'listenJoin'; conversationId: number }
   | { type: 'listenLeave'; conversationId: number }
   | { type: 'listenUpdate'; conversationId: number; state: ListenState }
+  | { type: 'devicePlayback'; playback: DevicePlaybackState }
+  | {
+      type: 'remoteCommand'
+      targetDeviceId: string
+      action: string
+      positionMs?: number
+      volume?: number
+      song?: SongRef
+      queue?: SongRef[]
+      index?: number
+    }
+  | { type: 'transferPlayback'; toDeviceId: string }
+  | { type: 'setActiveDevice'; deviceId: string }
 
 export interface AdminAccess {
   isAdmin: boolean

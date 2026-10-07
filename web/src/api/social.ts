@@ -218,11 +218,15 @@ export const social = {
     post<ChatMessage>(`/conversations/${conversationId}/listen/requests/${messageId}`, { accept }),
 
   /** WebSocket address for live events. */
-  eventsUrl: () => {
+  eventsUrl: (deviceId?: string, deviceName?: string, clientType?: string) => {
     const token = session().social?.token
     if (!token) return undefined
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${location.host}${SOCIAL_BASE}/ws?token=${enc(token)}`
+    let url = `${proto}//${location.host}${SOCIAL_BASE}/ws?token=${enc(token)}`
+    if (deviceId) url += `&device_id=${enc(deviceId)}`
+    if (deviceName) url += `&device_name=${enc(deviceName)}`
+    if (clientType) url += `&client_type=${enc(clientType)}`
+    return url
   },
 
   /** This server's Firebase settings for push notifications, or null if it has none. */

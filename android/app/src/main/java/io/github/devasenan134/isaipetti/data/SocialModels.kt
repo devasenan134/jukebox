@@ -248,6 +248,50 @@ data class MessageUpdatedEvent(val message: ChatMessage) : SocialEvent
 @Serializable @SerialName("listenState")
 data class ListenStateEvent(val conversationId: Long, val state: ListenState, val by: Long, val serverTime: Long) : SocialEvent
 
+@Serializable @SerialName("devices")
+data class DevicesEvent(val activeDeviceId: String?, val devices: List<DeviceDto>) : SocialEvent
+
+@Serializable @SerialName("remoteCommand")
+data class RemoteCommandEvent(
+    val commandId: String,
+    val action: String,
+    val positionMs: Long? = null,
+    val volume: Float? = null,
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val index: Int? = null,
+    val byDeviceId: String? = null,
+) : SocialEvent
+
+@Serializable @SerialName("transferPlayback")
+data class TransferPlaybackEvent(val state: DevicePlaybackState, val fromDeviceId: String) : SocialEvent
+
+@Serializable
+data class DeviceDto(
+    val id: String,
+    val name: String,
+    val type: String,
+    val isCurrent: Boolean = false,
+    val isActive: Boolean = false,
+    val playing: Boolean = false,
+    val song: SongRef? = null,
+    val positionMs: Long = 0,
+    val volume: Float = 1f,
+    val lastSeen: Long = 0,
+)
+
+@Serializable
+data class DevicePlaybackState(
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val queueId: String? = null,
+    val index: Int = 0,
+    val positionMs: Long = 0,
+    val playing: Boolean = false,
+    val volume: Float = 1f,
+    val updatedAt: Long = 0,
+)
+
 /** What the app sends over the WebSocket. */
 @Serializable
 sealed interface ClientEvent
@@ -274,6 +318,26 @@ data class ListenLeave(val conversationId: Long) : ClientEvent
 
 @Serializable @SerialName("listenUpdate")
 data class ListenUpdate(val conversationId: Long, val state: ListenState) : ClientEvent
+
+@Serializable @SerialName("devicePlayback")
+data class DevicePlaybackUpdate(val playback: DevicePlaybackState) : ClientEvent
+
+@Serializable @SerialName("remoteCommand")
+data class RemoteCommand(
+    val targetDeviceId: String,
+    val action: String,
+    val positionMs: Long? = null,
+    val volume: Float? = null,
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val index: Int? = null,
+) : ClientEvent
+
+@Serializable @SerialName("transferPlayback")
+data class TransferPlayback(val toDeviceId: String) : ClientEvent
+
+@Serializable @SerialName("setActiveDevice")
+data class SetActiveDevice(val deviceId: String) : ClientEvent
 
 // Admin listening stats (server: Stats.kt). Only admins get these.
 
