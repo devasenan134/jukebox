@@ -8,7 +8,9 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
-## Unreleased
+## 0.13.0 (2026-10-07): Import playlists from Spotify, Apple Music, YouTube or a file
+
+App, website, Mac app and server.
 
 ### New
 - **Import playlists from Spotify, Apple Music, YouTube or a file.** Your Library › **+** › **Import a playlist**:
