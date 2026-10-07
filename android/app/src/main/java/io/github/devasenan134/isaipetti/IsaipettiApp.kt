@@ -112,8 +112,10 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         waveforms = Waveforms(this, api)
         // Notifications can wake the app before any screen opens: start Firebase from the saved settings first.
         PushSetup.startSaved(this)
-        social = Social(this, session, http)
-        social.onRequestPlayerConnect = { player.connect() }
+        social.onRequestPlayerConnect = {
+            runCatching { startService(android.content.Intent(this, io.github.devasenan134.isaipetti.playback.PlaybackService::class.java)) }
+            player.connect()
+        }
         // Listening along in someone else's jam: controls say who's in charge, and queueing a song asks them.
         player.jam = object : PlayerConnection.Jam {
             override fun isListener() = social.listen.isListener()

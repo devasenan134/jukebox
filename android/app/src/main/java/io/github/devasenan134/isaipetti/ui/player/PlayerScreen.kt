@@ -110,10 +110,17 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
     val lyrics by rememberLyrics(now.songId)
     var showLyrics by rememberSaveable { mutableStateOf(false) }
     var showQueue by rememberSaveable { mutableStateOf(false) }
+    var showDevices by rememberSaveable { mutableStateOf(false) }
     var showShare by rememberSaveable { mutableStateOf(false) }
     var addingToPlaylist by rememberSaveable { mutableStateOf(false) }
     // While the user drags the slider, show where they're dragging instead of the real position.
     var dragging by remember { mutableStateOf<Float?>(null) }
+
+    val devices by app.social.devices.collectAsStateWithLifecycle()
+    val activeDeviceId by app.social.activeDeviceId.collectAsStateWithLifecycle()
+    val myDeviceId = app.social.myDeviceId
+    val remoteActive = devices.firstOrNull { it.id == activeDeviceId && it.id != myDeviceId }
+    val isRemotePlaying = remoteActive?.playing == true
 
     val scope = rememberCoroutineScope()
 
@@ -179,6 +186,19 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
                         }
                         IconButton(onClick = { showShare = true }, enabled = now.song != null) {
                             Icon(Icons.Filled.Share, contentDescription = "Share with friends")
+                        }
+                        IconButton(onClick = { showDevices = true }) {
+                            Icon(
+                                painterResource(
+                                    when (remoteActive?.type) {
+                                        "web" -> R.drawable.ic_laptop
+                                        "desktop" -> R.drawable.ic_desktop
+                                        else -> R.drawable.ic_devices
+                                    }
+                                ),
+                                contentDescription = "Connect to a device",
+                                tint = if (isRemotePlaying || remoteActive != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                            )
                         }
                         IconButton(onClick = { showQueue = true }) {
                             Icon(painterResource(R.drawable.ic_queue), contentDescription = "Queue")
@@ -297,6 +317,41 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
                         }
                     }
 
+                    remoteActive?.let { dev ->
+                        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center) {
+                            Surface(
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                modifier = Modifier.clickable { showDevices = true },
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        painterResource(
+                                            when (dev.type) {
+                                                "web" -> R.drawable.ic_laptop
+                                                "desktop" -> R.drawable.ic_desktop
+                                                else -> R.drawable.ic_devices
+                                            }
+                                        ),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        if (dev.playing) "Playing on ${dev.name}" else "Connected to ${dev.name}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
                         FilterChip(selected = showLyrics, onClick = { showLyrics = !showLyrics }, label = { Text("Lyrics") })
                     }
@@ -314,6 +369,7 @@ fun PlayerScreen(onClose: () -> Unit, onOpenAlbum: (String) -> Unit, onOpenMix: 
         }
     }
 
+    if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false })
     if (showQueue) QueueSheet(onDismiss = { showQueue = false })
     if (showShare) now.song?.let { ShareSongSheet(it, onDismiss = { showShare = false }) }
     if (addingToPlaylist) now.song?.let { AddToPlaylistSheet(it.toSong(), onDismiss = { addingToPlaylist = false }) }

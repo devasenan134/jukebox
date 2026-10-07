@@ -137,6 +137,7 @@ data class RemoteCommand(
 @Serializable @SerialName("transferPlayback")
 data class TransferPlayback(
     val toDeviceId: String,
+    val state: DevicePlaybackState? = null,
 ) : ClientEvent
 
 /** Manually set which device is the active player (Milestone 3). */
@@ -302,6 +303,9 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
             is RemoteCommand -> {
                 val target = userDevices[userId]?.get(event.targetDeviceId)
                 if (target != null) {
+                    if (event.action == "play") {
+                        activeDevices[userId] = target.deviceId
+                    }
                     val cmd = RemoteCommandEvent(
                         commandId = UUID.randomUUID().toString(),
                         action = event.action,
@@ -314,25 +318,43 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
                     )
                     val text = eventJson.encodeToString(Event.serializer(), cmd)
                     runCatching { target.session.send(Frame.Text(text)) }
+                    if (event.action == "play") {
+                        pushDevices(userId)
+                    }
                 }
             }
             is TransferPlayback -> {
                 val target = userDevices[userId]?.get(event.toDeviceId)
-                val current = activeDevices[userId]?.let { userDevices[userId]?.get(it) } ?: dev
-                val currentState = current?.playback ?: DevicePlaybackState()
                 if (target != null) {
-                    if (current != null && current.deviceId != target.deviceId && current.playback?.playing == true) {
+                    val explicitState = event.state?.takeIf { it.song != null || !it.queue.isNullOrEmpty() }
+                    val devState = dev?.playback?.takeIf { it.song != null || !it.queue.isNullOrEmpty() }
+                    val activeSession = activeDevices[userId]?.let { userDevices[userId]?.get(it) }
+                    val activeState = activeSession?.playback?.takeIf { it.song != null || !it.queue.isNullOrEmpty() }
+                    val anyOtherState = userDevices[userId]?.values
+                        ?.firstOrNull { it.deviceId != target.deviceId && it.playback?.song != null }
+                        ?.playback
+
+                    val sourceDev = when {
+                        devState != null && dev?.deviceId != target.deviceId -> dev
+                        activeState != null && activeSession?.deviceId != target.deviceId -> activeSession
+                        dev?.deviceId != target.deviceId -> dev
+                        else -> null
+                    }
+
+                    val stateToTransfer = explicitState ?: devState ?: activeState ?: anyOtherState ?: (dev?.playback ?: DevicePlaybackState())
+
+                    if (sourceDev != null && sourceDev.playback?.playing == true) {
                         val pauseCmd = RemoteCommandEvent(
                             commandId = UUID.randomUUID().toString(),
                             action = "pause",
                             byDeviceId = dev?.deviceId,
                         )
                         val pauseText = eventJson.encodeToString(Event.serializer(), pauseCmd)
-                        runCatching { current.session.send(Frame.Text(pauseText)) }
+                        runCatching { sourceDev.session.send(Frame.Text(pauseText)) }
                     }
                     val transfer = TransferPlaybackEvent(
-                        state = currentState.copy(playing = true),
-                        fromDeviceId = current?.deviceId ?: "unknown",
+                        state = stateToTransfer.copy(playing = true),
+                        fromDeviceId = sourceDev?.deviceId ?: dev?.deviceId ?: "unknown",
                     )
                     val transferText = eventJson.encodeToString(Event.serializer(), transfer)
                     runCatching { target.session.send(Frame.Text(transferText)) }

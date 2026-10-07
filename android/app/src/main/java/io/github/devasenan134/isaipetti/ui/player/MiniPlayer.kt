@@ -6,6 +6,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,8 +22,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +48,83 @@ fun MiniPlayer(onOpen: () -> Unit) {
     val app = LocalApp.current
     val player = app.player
     val now by player.nowPlaying.collectAsStateWithLifecycle()
-    if (now.songId == null) return
+
+    val devices by app.social.devices.collectAsStateWithLifecycle()
+    val activeDeviceId by app.social.activeDeviceId.collectAsStateWithLifecycle()
+    val myDeviceId = app.social.myDeviceId
+    val remotePlaying = devices.firstOrNull { it.id == activeDeviceId && it.playing && it.id != myDeviceId }
+
+    var showDevices by rememberSaveable { mutableStateOf(false) }
+
+    if (now.songId == null && remotePlaying == null) return
+
+    if (now.songId == null && remotePlaying != null) {
+        val remoteIcon = when (remotePlaying.type) {
+            "web" -> R.drawable.ic_laptop
+            "desktop" -> R.drawable.ic_desktop
+            else -> R.drawable.ic_devices
+        }
+        Surface(tonalElevation = 3.dp) {
+            Column {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable { showDevices = true }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                painterResource(remoteIcon),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        Text(
+                            remotePlaying.song?.title ?: "Playing",
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            listOfNotNull(remotePlaying.song?.artist, remotePlaying.name).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(onClick = {
+                        app.social.sendRemoteCommand(remotePlaying.id, if (remotePlaying.playing) "pause" else "play")
+                    }) {
+                        Icon(
+                            painterResource(if (remotePlaying.playing) R.drawable.ic_pause else R.drawable.ic_play),
+                            contentDescription = if (remotePlaying.playing) "Pause" else "Play",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    IconButton(onClick = {
+                        app.social.sendRemoteCommand(remotePlaying.id, "next")
+                    }) {
+                        Icon(
+                            painterResource(R.drawable.ic_skip_next),
+                            contentDescription = "Next",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            }
+        }
+        if (showDevices) DevicePickerSheet(onDismiss = { showDevices = false })
+        return
+    }
     // In a jam, only its owner controls the music: listeners get a jam icon instead of the buttons.
     val joined by app.social.listen.joined.collectAsStateWithLifecycle()
     val owners by app.social.listen.owners.collectAsStateWithLifecycle()

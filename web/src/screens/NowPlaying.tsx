@@ -9,6 +9,7 @@ import { ShareSongSheet } from '../social/ShareSongSheet'
 import { useCoverColor } from '../ui/coverColor'
 import { Slider } from '../player/PlayerBar'
 import { QueueSheet } from '../player/QueuePanel'
+import { DevicePickerButton } from '../player/DevicePicker'
 import { likes, useLikes } from '../state/likes'
 import { Icon, IconButton } from '../ui/kit'
 import { useNav, usePlayerOpen } from '../ui/nav'
@@ -55,7 +56,10 @@ export function NowPlaying() {
           <div className="label-medium" style={{ opacity: 0.75, letterSpacing: '0.08em' }}>PLAYING FROM</div>
           <div className="body-medium ellipsis" style={{ fontWeight: 700 }}>{song.album ?? 'Your queue'}</div>
         </div>
-        <IconButton icon="queue_music" label="Queue" onClick={() => setQueue(true)} style={{ color: '#fff' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <DevicePickerButton />
+          <IconButton icon="queue_music" label="Queue" onClick={() => setQueue(true)} style={{ color: '#fff' }} />
+        </div>
       </div>
       {queue && <QueueSheet onClose={() => setQueue(false)} />}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>

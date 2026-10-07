@@ -38,9 +38,27 @@ export const useDevices = create<DevicesState>((set) => ({
   },
 
   transferPlayback: (toDeviceId) => {
+    const currentId = useDevices.getState().currentDeviceId
+    const p = usePlayer.getState()
+    const item = currentItem(p)
+    const localPlayback: DevicePlaybackState = {
+      song: item?.song ? songToRef(item.song) : null,
+      queue: p.items.map((it) => songToRef(it.song)),
+      index: p.current >= 0 ? p.current : 0,
+      positionMs: 0,
+      playing: true,
+      volume: p.volume,
+      updatedAt: Date.now(),
+    }
+
+    if (toDeviceId === currentId && p.items.length > 0 && !p.isPlaying) {
+      player.togglePlay()
+    }
+
     sendEvent({
       type: 'transferPlayback',
       toDeviceId,
+      state: localPlayback.song || (localPlayback.queue && localPlayback.queue.length > 0) ? localPlayback : undefined,
     })
   },
 
@@ -111,6 +129,11 @@ export function startDeviceSync(): () => void {
         const pos = state.positionMs
         if (pos != null && pos > 0) {
           setTimeout(() => player.seekTo(pos), 200)
+        }
+      } else {
+        const p = usePlayer.getState()
+        if (p.items.length > 0 && !p.isPlaying) {
+          player.togglePlay()
         }
       }
     }

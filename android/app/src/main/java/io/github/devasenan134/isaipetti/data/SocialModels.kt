@@ -334,7 +334,7 @@ data class RemoteCommand(
 ) : ClientEvent
 
 @Serializable @SerialName("transferPlayback")
-data class TransferPlayback(val toDeviceId: String) : ClientEvent
+data class TransferPlayback(val toDeviceId: String, val state: DevicePlaybackState? = null) : ClientEvent
 
 @Serializable @SerialName("setActiveDevice")
 data class SetActiveDevice(val deviceId: String) : ClientEvent

@@ -8,6 +8,20 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## 0.14.1 (2026-10-07): Android device picker and seamless playback transfer
+
+App, website, Mac app and server.
+
+### Fixed & Improved
+- **Device picker on Android.** Added device picker bottom sheet and device icon button to player screen and mini player, matching web and desktop.
+- **Playback transfer and remote control.** Transferred queues and playback state are reliably synchronized between phone, web, and desktop; incoming remote commands start and control the player service seamlessly.
+- **Remote player bar on Web.** Web player bar and mini-player display currently playing songs and remote controls when listening on another active device.
+
+### Server
+- Enhanced playback transfer resolving to reliably forward source states, pause source playback, and activate target devices.
+
+---
+
 ## 0.14.0 (2026-10-07): Realtime gateway and playback across devices (Milestone 3)
 
 App, website, Mac app and server.

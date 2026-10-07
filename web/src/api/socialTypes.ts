@@ -195,7 +195,7 @@ export type ClientEvent =
       queue?: SongRef[]
       index?: number
     }
-  | { type: 'transferPlayback'; toDeviceId: string }
+  | { type: 'transferPlayback'; toDeviceId: string; state?: DevicePlaybackState }
   | { type: 'setActiveDevice'; deviceId: string }
 
 export interface AdminAccess {

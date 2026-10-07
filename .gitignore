@@ -2,10 +2,12 @@
 .gradle/
 .kotlin/
 build/
+bin/
 local.properties
 .idea/
 *.iml
 /jukebox-*.apk
+/isaipetti-*.apk
 
 # Secrets and private data: never commit these (anywhere in the repo)
 .env

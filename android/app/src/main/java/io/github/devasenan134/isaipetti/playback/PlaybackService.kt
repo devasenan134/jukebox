@@ -80,28 +80,56 @@ class PlaybackService : MediaSessionService() {
         PlayReporter(player, socialApi, listeningTogether = { app.social.listen.joined.value != null }, scope)
         Stations(player, api, socialApi, scope)
 
+        runCatching { startService(Intent(this, PlaybackService::class.java)) }
+
+        fun syncDevicePlayback() {
+            val song = player.currentMediaItem?.toSongRef()
+            val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSongRef() }
+            val index = player.currentMediaItemIndex.coerceAtLeast(0)
+            val pos = player.currentPosition.coerceAtLeast(0L)
+            val isPlaying = player.isPlaying
+            val vol = player.volume
+            app.social.onDevicePlayback(song, queue, index, pos, isPlaying, vol)
+        }
+
         app.social.onRemoteCommand = { cmd ->
             when (cmd.action) {
                 "play" -> {
-                    if (!player.isPlaying) {
-                        if (player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0) {
+                    val queueRefs = cmd.queue ?: (cmd.song?.let { listOf(it) })
+                    if (queueRefs?.isNotEmpty() == true && player.mediaItemCount == 0) {
+                        val items = queueRefs.map { it.toSong().toMediaItem(api) }
+                        val targetIndex = (cmd.index ?: 0).coerceIn(items.indices)
+                        val targetPos = (cmd.positionMs ?: 0L).coerceAtLeast(0L)
+                        player.setMediaItems(items, targetIndex, targetPos)
+                        player.prepare()
+                        player.play()
+                    } else if (player.mediaItemCount > 0) {
+                        if (player.playbackState == Player.STATE_IDLE) {
                             player.prepare()
                         }
                         player.play()
                     }
+                    syncDevicePlayback()
                 }
-                "pause" -> player.pause()
+                "pause" -> {
+                    player.pause()
+                    syncDevicePlayback()
+                }
                 "next" -> {
                     if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                    syncDevicePlayback()
                 }
                 "previous" -> {
                     if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+                    syncDevicePlayback()
                 }
                 "seek" -> {
                     cmd.positionMs?.let { player.seekTo(it) }
+                    syncDevicePlayback()
                 }
                 "volume" -> {
                     cmd.volume?.let { player.volume = it }
+                    syncDevicePlayback()
                 }
             }
         }
@@ -120,18 +148,12 @@ class PlaybackService : MediaSessionService() {
                 } else {
                     player.pause()
                 }
+                syncDevicePlayback()
             }
         }
 
-        fun syncDevicePlayback() {
-            val song = player.currentMediaItem?.toSongRef()
-            val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSongRef() }
-            val index = player.currentMediaItemIndex.coerceAtLeast(0)
-            val pos = player.currentPosition.coerceAtLeast(0L)
-            val isPlaying = player.isPlaying
-            val vol = player.volume
-            app.social.onDevicePlayback(song, queue, index, pos, isPlaying, vol)
-        }
+        // Initial device playback broadcast on startup
+        syncDevicePlayback()
 
         // Tell friends what's playing (only while it's actually playing) and sync devices.
         player.addListener(object : Player.Listener {

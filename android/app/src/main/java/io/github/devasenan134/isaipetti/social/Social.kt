@@ -101,7 +101,20 @@ class Social(private val context: Context, private val session: SessionStore, pr
     private val _activeDeviceId = MutableStateFlow<String?>(null)
     val activeDeviceId: StateFlow<String?> = _activeDeviceId
 
+    val myDeviceId: String = "android-${android.os.Build.MODEL.lowercase().replace(" ", "-")}"
+    val myDeviceName: String = "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}"
+
+    var pendingRemoteCommand: RemoteCommandEvent? = null
     var onRemoteCommand: ((RemoteCommandEvent) -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                pendingRemoteCommand?.let {
+                    pendingRemoteCommand = null
+                    value.invoke(it)
+                }
+            }
+        }
 
     var pendingTransfer: TransferPlaybackEvent? = null
     var onRequestPlayerConnect: (() -> Unit)? = null
@@ -238,7 +251,18 @@ class Social(private val context: Context, private val session: SessionStore, pr
     }
 
     fun transferPlayback(toDeviceId: String) {
-        sendEvent(TransferPlayback(toDeviceId))
+        val song = nowPlaying
+        val queue = song?.let { listOf(it) } ?: emptyList()
+        val state = DevicePlaybackState(
+            song = song,
+            queue = queue,
+            index = 0,
+            positionMs = 0L,
+            playing = true,
+            volume = 1f,
+            updatedAt = System.currentTimeMillis(),
+        )
+        sendEvent(TransferPlayback(toDeviceId, state = if (song != null) state else null))
     }
 
     fun sendRemoteCommand(targetDeviceId: String, action: String, positionMs: Long? = null, volume: Float? = null) {
@@ -338,9 +362,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     /** Opens the WebSocket and suspends until it closes. */
     private suspend fun runSocket() {
-        val deviceId = "android-${android.os.Build.MODEL.lowercase().replace(" ", "-")}"
-        val deviceName = "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}"
-        val url = api.eventsUrl(deviceId = deviceId, deviceName = deviceName, clientType = "android") ?: return
+        val url = api.eventsUrl(deviceId = myDeviceId, deviceName = myDeviceName, clientType = "android") ?: return
         suspendCancellableCoroutine { continuation ->
             val ws = wsClient.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -415,7 +437,13 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 _activeDeviceId.value = event.activeDeviceId
             }
             is RemoteCommandEvent -> {
-                onRemoteCommand?.invoke(event)
+                val handler = onRemoteCommand
+                if (handler != null) {
+                    handler.invoke(event)
+                } else {
+                    pendingRemoteCommand = event
+                    onRequestPlayerConnect?.invoke()
+                }
             }
             is TransferPlaybackEvent -> {
                 val handler = onTransferPlayback

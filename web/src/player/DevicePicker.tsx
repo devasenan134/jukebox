@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { create } from 'zustand'
 import { useDevices } from '../state/devices'
 import { usePlayer } from './player'
 import { Dialog, IconButton } from '../ui/kit'
 import { PlayingBars } from '../ui/components'
+
+export const useDevicePicker = create<{ open: boolean; setOpen: (v: boolean) => void }>((set) => ({
+  open: false,
+  setOpen: (open) => set({ open }),
+}))
 
 function PhoneIcon({ size = 24 }: { size?: number }) {
   return (
@@ -36,7 +41,7 @@ function DevicesIcon({ size = 24 }: { size?: number }) {
   )
 }
 
-function DeviceIcon({ type, size = 24 }: { type: string; size?: number }) {
+export function DeviceIcon({ type, size = 24 }: { type: string; size?: number }) {
   switch (type) {
     case 'android':
       return <PhoneIcon size={size} />
@@ -50,14 +55,16 @@ function DeviceIcon({ type, size = 24 }: { type: string; size?: number }) {
 }
 
 export function DevicePickerButton() {
-  const [open, setOpen] = useState(false)
+  const { open, setOpen } = useDevicePicker()
   const devices = useDevices((s) => s.devices)
   const currentId = useDevices((s) => s.currentDeviceId)
   const activeId = useDevices((s) => s.activeDeviceId)
+  const isLocalPlaying = usePlayer((s) => s.isPlaying)
 
-  // Active device that is not this device
-  const remoteActive = devices.find((d) => d.id === activeId && d.id !== currentId)
-  const isRemotePlaying = remoteActive?.playing
+  // Remote active or playing device that is not this device
+  const remotePlaying = devices.find((d) => d.playing && d.id !== currentId)
+  const remoteActive = remotePlaying || devices.find((d) => d.id === activeId && d.id !== currentId)
+  const isRemotePlaying = !isLocalPlaying && !!remoteActive?.playing
 
   const activeColor = isRemotePlaying ? 'var(--primary)' : undefined
   const label = isRemotePlaying ? `Listening on ${remoteActive?.name || 'device'}` : 'Connect to a device'
@@ -94,6 +101,9 @@ export function DevicePickerDialog({ onClose }: { onClose: () => void }) {
   const sendRemoteCommand = useDevices((s) => s.sendRemoteCommand)
   const isLocalPlaying = usePlayer((s) => s.isPlaying)
 
+  const playingDevice = devices.find((d) => (d.id === currentId ? isLocalPlaying : d.playing))
+  const effectiveActiveId = playingDevice ? playingDevice.id : (activeId ?? (isLocalPlaying ? currentId : null))
+
   return (
     <Dialog title="Connect to a device" onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 320, maxWidth: 440 }}>
@@ -110,7 +120,7 @@ export function DevicePickerDialog({ onClose }: { onClose: () => void }) {
         ) : (
           devices.map((device) => {
             const isCurrent = device.id === currentId
-            const isActive = device.id === activeId || (!activeId && isCurrent && isLocalPlaying)
+            const isActive = device.id === effectiveActiveId
             const isPlaying = isCurrent ? isLocalPlaying : device.playing
 
             return (
@@ -167,7 +177,13 @@ export function DevicePickerDialog({ onClose }: { onClose: () => void }) {
                         icon={device.playing ? 'pause' : 'play_arrow'}
                         label={device.playing ? 'Pause' : 'Play'}
                         size={20}
-                        onClick={() => sendRemoteCommand(device.id, device.playing ? 'pause' : 'play')}
+                        onClick={() => {
+                          if (device.song) {
+                            sendRemoteCommand(device.id, device.playing ? 'pause' : 'play')
+                          } else {
+                            transferPlayback(device.id)
+                          }
+                        }}
                       />
                       <IconButton
                         icon="skip_next"
@@ -186,7 +202,7 @@ export function DevicePickerDialog({ onClose }: { onClose: () => void }) {
                       }
                     }}
                   >
-                    {isActive ? (isCurrent ? 'Listening here' : 'Active') : 'Play here'}
+                    {isActive ? (isCurrent ? 'Listening here' : 'Active') : (isCurrent ? 'Play here' : 'Play on device')}
                   </button>
                 </div>
               </div>
