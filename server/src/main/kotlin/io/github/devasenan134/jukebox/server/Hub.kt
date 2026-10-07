@@ -162,7 +162,7 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
         val clientType: String,
         val session: WebSocketSession,
         val isExplicitDevice: Boolean,
-        var visible: Boolean = true,
+        var visible: Boolean = false,
         var playback: DevicePlaybackState? = null,
         val connectedAt: Long = System.currentTimeMillis(),
         var lastSeen: Long = System.currentTimeMillis(),
@@ -239,8 +239,13 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
             val key = deviceId ?: map.entries.firstOrNull { it.value.session == session }?.key ?: return
             map.remove(key)
             if (activeDevices[userId] == key) {
-                activeDevices[userId] = map.values.firstOrNull { it.playback?.playing == true }?.deviceId
+                val nextActive = map.values.firstOrNull { it.playback?.playing == true }?.deviceId
                     ?: map.keys.firstOrNull()
+                if (nextActive != null) {
+                    activeDevices[userId] = nextActive
+                } else {
+                    activeDevices.remove(userId)
+                }
             }
             if (map.isEmpty()) {
                 userDevices.remove(userId)
