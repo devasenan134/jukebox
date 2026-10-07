@@ -147,6 +147,8 @@ sealed interface PendingOpen {
     /** A movie whose requested music is in the library now. */
     data class Album(val albumId: String) : PendingOpen
     data object Requests : PendingOpen
+    /** A playlist link shared to the app (Spotify's Share › Isaipetti): import it. */
+    data class Import(val link: String) : PendingOpen
 }
 
 private fun IsaipettiApp.toast(text: String) = android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()

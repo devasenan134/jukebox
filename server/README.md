@@ -105,6 +105,18 @@ this server, labelled `bug` or `enhancement`, so the token never ships inside th
 only **Issues: Read and write**, then set `GITHUB_REPO=owner/repo` and `GITHUB_TOKEN=...` in `.env` and
 restart; the log line then says `feedback on`. Issues don't say who sent them.
 
+## Importing playlists
+
+Your Library's **+ › Import a playlist** (app and website) reads a public playlist from Spotify, Apple Music,
+YouTube or YouTube Music, or an exported file (CSV from Exportify, TuneMyMusic or Soundiiz; M3U; an Apple Music
+playlist export; or plain "Title - Artist" lines), finds each song in the library and saves it as a playlist.
+Songs the library doesn't have can be requested.
+
+No keys are needed: the services' public pages are read. They show the first 100 songs of a playlist; for whole
+Spotify playlists (and exact matches by ISRC), make a free app at [developer.spotify.com](https://developer.spotify.com/dashboard)
+and set `SPOTIFY_CLIENT_ID=...` and `SPOTIFY_CLIENT_SECRET=...` in `.env`. Without them, a CSV from
+[exportify.app](https://exportify.app) imports a whole Spotify playlist too.
+
 ## Coming from Navidrome
 
 `jukebox import` copies users (with their passwords), likes, play counts and history, and playlists from a

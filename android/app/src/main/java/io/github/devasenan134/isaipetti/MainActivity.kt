@@ -1,6 +1,7 @@
 package io.github.devasenan134.isaipetti
 
 import android.content.Intent
+import io.github.devasenan134.isaipetti.ui.library.playlistLinkIn
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
@@ -53,7 +54,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleNotificationTap(intent: Intent?) {
         val conversationId = intent?.getLongExtra(Notifications.EXTRA_CONVERSATION, -1L) ?: -1L
+        // A playlist link shared from Spotify, Apple Music or YouTube.
+        val shared = if (intent?.action == Intent.ACTION_SEND) playlistLinkIn(intent.getStringExtra(Intent.EXTRA_TEXT)) else null
         when {
+            shared != null -> app.pendingOpen.value = PendingOpen.Import(shared)
             conversationId > 0 -> app.pendingOpen.value = PendingOpen.Chat(conversationId)
             intent?.getBooleanExtra(Notifications.EXTRA_OPEN_FRIENDS, false) == true -> app.pendingOpen.value = PendingOpen.Friends
             intent?.getStringExtra(Notifications.EXTRA_ALBUM) != null -> app.pendingOpen.value = PendingOpen.Album(intent.getStringExtra(Notifications.EXTRA_ALBUM)!!)
