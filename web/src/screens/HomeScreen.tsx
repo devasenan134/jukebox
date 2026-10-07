@@ -1,11 +1,13 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Album, Mix } from '../api/types'
 import { refToSong } from '../api/types'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
-import { activity, useActivity, useRecentSongs, type ActivityItem } from '../state/history'
+import { currentItem, usePlayer } from '../player/player'
+import { activity, useActivity, useRecentPlaylists, useRecentSongs, type ActivityItem, type ActivityKind } from '../state/history'
+import { useDevices } from '../state/devices'
 import { useMixes } from '../state/library'
-import { AlbumCard, CardPlay, Cover, playAlbum, SectionTitle, SongRow, useLoad } from '../ui/components'
+import { AlbumCard, CardPlay, Cover, playAlbum, SectionTitle, SongRow, SpinningDisc, useLoad } from '../ui/components'
 import { CardsSkeleton } from '../ui/collection'
 import { useCoverColor } from '../ui/coverColor'
 import { likes, useLikes } from '../state/likes'
@@ -19,6 +21,17 @@ import { keys, queryClient } from '../state/queries'
 
 const RECENT_SONGS = 6
 
+interface EffectiveNowPlaying {
+  songId?: string | null
+  title?: string
+  artist?: string
+  album?: string
+  albumId?: string
+  coverArt?: string
+  isPlaying: boolean
+  source?: string | null
+}
+
 export function HomeScreen() {
   const nav = useNav()
   const mixes = useMixes((s) => s.home)
@@ -26,6 +39,38 @@ export function HomeScreen() {
   const items = useActivity((s) => s.items)
   const recentSongs = useRecentSongs((s) => s.songs)
   const likedCount = useLikes((s) => s.songs.length)
+
+  const localPlayer = usePlayer()
+  const localItem = currentItem(localPlayer)
+  const devices = useDevices((s) => s.devices)
+  const activeDeviceId = useDevices((s) => s.activeDeviceId)
+  const currentDeviceId = useDevices((s) => s.currentDeviceId)
+
+  const remotePlaying = devices.find((d) => d.id === activeDeviceId && d.playing && d.id !== currentDeviceId)
+  const effectiveNowPlaying: EffectiveNowPlaying | null = remotePlaying
+    ? {
+        songId: remotePlaying.song?.id,
+        title: remotePlaying.song?.title,
+        artist: remotePlaying.song?.artist,
+        album: remotePlaying.song?.album,
+        albumId: remotePlaying.song?.albumId,
+        coverArt: remotePlaying.song?.coverArt,
+        isPlaying: remotePlaying.playing,
+        source: remotePlaying.source,
+      }
+    : localItem?.song
+    ? {
+        songId: localItem.song.id,
+        title: localItem.song.title,
+        artist: localItem.song.artist,
+        album: localItem.song.album,
+        albumId: localItem.song.albumId,
+        coverArt: localItem.song.coverArt,
+        isPlaying: localPlayer.isPlaying,
+        source: localItem.source,
+      }
+    : null
+
   const [hovered, setHovered] = useState<string | undefined>()
   const [tint, setTint] = useState('hsl(28 45% 30%)')
   useEffect(() => useMixes.getState().refresh(), [])
@@ -44,13 +89,27 @@ export function HomeScreen() {
     useMixes.getState().refresh(true)
   }
 
+  const sections = mixes?.sections ?? []
+  const knownMixes = useMemo(
+    () => new Map([...sections.flatMap((s) => s.mixes), ...followed].map((m) => [m.id, m])),
+    [sections, followed]
+  )
+
+  const playingFrom = useMemo(
+    () => getPlayingFrom(effectiveNowPlaying, items, knownMixes),
+    [effectiveNowPlaying?.songId, effectiveNowPlaying?.source, items, knownMixes]
+  )
+
   if (lists.loading && !lists.data) return <div className="page"><div className="skel" style={{ width: 260, height: 32, margin: '24px 16px 16px' }} /><CardsSkeleton rows={3} /></div>
   if (lists.error) return <ErrorBox message={lists.error} onRetry={lists.retry} />
   const d = { ...lists.data!, random: random.data ?? [] }
-  const sections = mixes?.sections ?? []
-  const knownMixes = new Map([...sections.flatMap((s) => s.mixes), ...followed].map((m) => [m.id, m]))
   const songs = recentSongs.slice(0, RECENT_SONGS).map(refToSong)
   const collections = items.filter((i) => i.kind !== 'Song')
+
+  const restCollections = collections.filter(
+    (c) => !(playingFrom && c.kind === playingFrom.kind && c.id === playingFrom.id)
+  )
+  const jumpBackItems = playingFrom ? [playingFrom, ...restCollections] : collections
 
   const quick = quickPicks(collections, likedCount, [...d.recent, ...d.newest], knownMixes, nav)
   const tintCover = hovered ?? quick.find((q) => q.coverArt)?.coverArt
@@ -81,19 +140,90 @@ export function HomeScreen() {
           <SectionTitle>Recently played</SectionTitle>
           <div style={{ padding: '0 8px' }}>
             {songs.map((s) => (
-              <SongRow key={s.id} song={s} showCover onOpenAlbum={nav.openAlbum} onClick={() => { activity.song(s); player.play([s]) }} />
+              <SongRow
+                key={s.id}
+                song={s}
+                isCurrent={s.id === effectiveNowPlaying?.songId}
+                showCover
+                onOpenAlbum={nav.openAlbum}
+                onClick={() => { activity.song(s); player.play([s]) }}
+              />
             ))}
           </div>
         </>
       )}
-      {collections.length > QUICK - 1 && <JumpBackIn items={collections.slice(QUICK - 1)} mixes={knownMixes} nav={nav} />}
-      {songs.length === 0 && collections.length === 0 && <AlbumRow title="Jump back in" albums={d.recent} nav={nav} />}
+      {jumpBackItems.length > 0 ? (
+        <JumpBackIn
+          items={jumpBackItems}
+          mixes={knownMixes}
+          nav={nav}
+          playingItem={playingFrom}
+          isPlaying={effectiveNowPlaying?.isPlaying ?? false}
+        />
+      ) : (
+        <AlbumRow title="Jump back in" albums={d.recent} nav={nav} />
+      )}
       <MixSections sections={sections.filter((s) => s.id !== 'made-for-you')} nav={nav} />
       <AlbumRow title="Most played" albums={d.frequent} nav={nav} />
       <AlbumRow title="Recently added" albums={d.newest} nav={nav} action={{ label: 'Show all', onClick: nav.openAlbums }} />
       <AlbumRow title="Random picks" albums={d.random} nav={nav} />
     </div>
   )
+}
+
+function getPlayingFrom(now: EffectiveNowPlaying | null, items: ActivityItem[], knownMixes: Map<string, Mix>): ActivityItem | null {
+  if (!now || !now.songId) return null
+  const source = now.source ?? ''
+  let from: { kind: ActivityKind; id: string } | null = null
+  if (source === 'liked') {
+    from = { kind: 'Liked', id: 'liked' }
+  } else if (source.startsWith('playlist:')) {
+    from = { kind: 'Playlist', id: source.slice('playlist:'.length) }
+  } else if (source.startsWith('album:')) {
+    from = { kind: 'Movie', id: source.slice('album:'.length) }
+  } else if (source.startsWith('mix:')) {
+    from = { kind: 'Mix', id: source.slice('mix:'.length) }
+  } else if (source.startsWith('composer:')) {
+    from = { kind: 'Composer', id: source.slice('composer:'.length) }
+  } else if (source.startsWith('singer:')) {
+    from = { kind: 'Artist', id: source.slice('singer:'.length) }
+  }
+
+  if (from) {
+    const existing = items.find((i) => i.kind === from!.kind && i.id === from!.id)
+    if (existing) return existing
+    const mix = from.kind === 'Mix' ? knownMixes.get(from.id) : undefined
+    const recentPlaylist = from.kind === 'Playlist' ? useRecentPlaylists.getState().playlists.find((p) => p.id === from!.id) : undefined
+    const title =
+      from.kind === 'Playlist' ? (recentPlaylist?.name || 'Playlist')
+      : from.kind === 'Liked' ? 'Liked songs'
+      : from.kind === 'Composer' ? 'Composer'
+      : from.kind === 'Artist' ? (now.artist || 'Artist')
+      : from.kind === 'Mix' ? (mix?.title || 'Mix')
+      : (now.album || now.title || 'Album')
+    return {
+      kind: from.kind,
+      id: from.id,
+      title,
+      coverArt: mix ? mix.covers[0] : (recentPlaylist?.coverArt || now.coverArt),
+      playedAt: Date.now(),
+    }
+  }
+
+  if (now.albumId) {
+    const existing = items.find((i) => i.kind === 'Movie' && i.id === now.albumId)
+    if (existing) return existing
+    return {
+      kind: 'Movie',
+      id: now.albumId,
+      title: now.album || now.title || 'Album',
+      subtitle: now.artist,
+      coverArt: now.coverArt,
+      playedAt: Date.now(),
+    }
+  }
+
+  return null
 }
 
 /** "Good morning" / "Good afternoon" / "Good evening", by the clock here. */
@@ -157,6 +287,12 @@ async function playPlaylist(id: string) {
 
 function openActivity(i: ActivityItem, nav: Nav) {
   switch (i.kind) {
+    case 'Song':
+      if (i.song) {
+        activity.song(refToSong(i.song))
+        player.play([refToSong(i.song)])
+      }
+      return
     case 'Movie': return nav.openAlbum(i.id)
     case 'Playlist': return nav.openPlaylist(i.id)
     case 'Composer': return nav.openArtist(i.id)
@@ -181,22 +317,58 @@ function AlbumRow({ title, albums, nav, action }: { title: string; albums: Album
 }
 
 /** Albums, playlists, mixes and Liked songs as squares; composers and singers as circles. */
-function JumpBackIn({ items, mixes, nav }: { items: ActivityItem[]; mixes: Map<string, Mix>; nav: Nav }) {
+function JumpBackIn({
+  items,
+  mixes,
+  nav,
+  playingItem,
+  isPlaying,
+}: {
+  items: ActivityItem[]
+  mixes: Map<string, Mix>
+  nav: Nav
+  playingItem?: ActivityItem | null
+  isPlaying?: boolean
+}) {
   const open = (i: ActivityItem) => openActivity(i, nav)
   return (
     <>
       <SectionTitle>Jump back in</SectionTitle>
       <div className="row-scroll">
         {items.map((i) => {
+          const isCurrent = Boolean(playingItem && i.kind === playingItem.kind && i.id === playingItem.id)
           const round = i.kind === 'Composer' || i.kind === 'Artist'
           const mix = i.kind === 'Mix' ? mixes.get(i.id) : undefined
+          const kindLabel = i.kind === 'Movie' ? 'Movie' : i.kind === 'Song' ? 'Song' : undefined
+          const subtitleText = isCurrent
+            ? (isPlaying ? 'Now playing' : 'Paused')
+            : [kindLabel, i.subtitle].filter(Boolean).join(' · ')
           return (
             <div key={`${i.kind}-${i.id}`} className="card tile" onClick={() => open(i)} data-testid="jump-back-in">
-              {i.kind === 'Liked' ? <LikedTile size={192} fill /> : mix ? <MixCover mix={mix} size={192} fill /> : (
-                <Cover coverArt={i.coverArt} round={round} style={{ width: '100%', aspectRatio: '1', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }} />
-              )}
-              <div className="name title-small ellipsis" style={{ textAlign: round ? 'center' : undefined }}>{i.title}</div>
-              <div className="body-small muted ellipsis" style={{ textAlign: round ? 'center' : undefined }}>{i.subtitle}</div>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: '1' }}>
+                {i.kind === 'Liked' ? (
+                  <LikedTile size={192} fill />
+                ) : mix ? (
+                  <MixCover mix={mix} size={192} fill />
+                ) : (
+                  <Cover coverArt={i.coverArt} round={round} style={{ width: '100%', aspectRatio: '1', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }} />
+                )}
+                {isCurrent && (
+                  <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
+                    <SpinningDisc spinning={Boolean(isPlaying)} size={48} />
+                  </div>
+                )}
+              </div>
+              <div className="name title-small ellipsis" style={{ textAlign: round ? 'center' : undefined, marginTop: 6 }}>{i.title}</div>
+              <div
+                className="body-small ellipsis"
+                style={{
+                  textAlign: round ? 'center' : undefined,
+                  color: isCurrent ? 'var(--primary)' : 'var(--muted)',
+                }}
+              >
+                {subtitleText}
+              </div>
             </div>
           )
         })}

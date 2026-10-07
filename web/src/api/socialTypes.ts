@@ -134,6 +134,7 @@ export interface DeviceInfo {
   positionMs: number
   volume: number
   lastSeen: number
+  source?: string | null
 }
 
 export interface DevicePlaybackState {

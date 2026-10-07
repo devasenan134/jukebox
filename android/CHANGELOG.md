@@ -8,6 +8,14 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Web Jump Back In Parity (0.14.5)
+
+**Fixed**
+*   Fixed the Web app hiding the "Jump back in" section when fewer than 8 collections are in history.
+*   Added live playback and remote device playback indicators (with spinning disc animation) to the "Jump back in" row on Web, matching the Android app.
+
+---
+
 ## Remote Playback Fixes (0.14.4)
 
 **Fixed**
