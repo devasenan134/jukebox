@@ -24,6 +24,7 @@ import { ImportScreen } from './screens/ImportScreen'
 import { startSocial, useFriendsBadge } from './social/social'
 import { startJamSync } from './social/jamSync'
 import { startNotifications } from './social/notifications'
+import { startDeviceSync } from './state/devices'
 import { LikedSongsScreen, MixScreen, PlaylistScreen } from './screens/PlaylistScreens'
 import { useLikes } from './state/likes'
 import { useMixes, useMyPlaylists } from './state/library'
@@ -71,6 +72,7 @@ function Main() {
     ready.then(() => {
       startSocial()
       startJamSync()
+      startDeviceSync()
       startNotifications()
       useLikes.getState().refresh()
       useMyPlaylists.getState().refresh()

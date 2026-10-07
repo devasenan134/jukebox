@@ -24,7 +24,7 @@ export function DevicePickerButton() {
     <>
       <IconButton
         icon={buttonIcon}
-        label={isRemotePlaying ? `Listening on ${remoteActive.name}` : 'Connect to a device'}
+        label={isRemotePlaying ? `Listening on ${remoteActive?.name || 'device'}` : 'Connect to a device'}
         onClick={() => setOpen(true)}
         color={activeColor}
         size={20}

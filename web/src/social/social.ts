@@ -7,6 +7,8 @@ import { session, useSession } from '../state/session'
 import { useListen, setListenSender } from './listen'
 import { onPlayback } from '../player/player'
 import { toast } from '../ui/kit'
+import { getDeviceId, getDeviceName, getClientType } from '../state/deviceIdentity'
+import { syncCurrentPlayback } from '../state/devices'
 
 /**
  * Everything friends-related the UI needs, kept up to date live (port of social/Social.kt).
@@ -164,8 +166,6 @@ async function refreshAll() {
   await refreshRequests()
   await refreshConversations()
 }
-
-import { getDeviceId, getDeviceName, getClientType, syncCurrentPlayback } from '../state/devices'
 
 /** Opens the WebSocket and resolves when it closes. */
 function runSocket(): Promise<void> {
