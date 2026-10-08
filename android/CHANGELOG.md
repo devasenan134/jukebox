@@ -8,6 +8,20 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Score Mix Segregation, Unified Terminology & Search Refinements (0.16.2)
+
+### New
+- **Separate BGM & Theme Music Mixes.** Dedicated score mixes ("Smell the Romantic rose", "Feel the Mass elevation", etc.) featuring only Original Background Scores and theme music.
+- **Pure Song Mixes.** Standard mixes (Romance Mix, Daily Mixes, Discover Weekly) strictly contain vocal songs without instrumental BGMs or score cues.
+- **Segregated Radio & Playlist Recommendations.** Radio stations and playlist recommendations preserve song vs score separation.
+
+### Improved
+- **Unified Terminology.** Aligned terminology consistently across Backend, Web, and Android to **Album**, **Composer**, and **Artist**.
+- **Artists & Composers Panels.** Removed avatar/placeholder photos of people and sorted artists/composers by most albums descending.
+- **Refined Search Results.** Removed the people section, prioritizing top matched songs or albums directly followed by library results and requests.
+
+---
+
 ## Streaming & Offline Download Quality Controls (0.16.1)
 
 App.
