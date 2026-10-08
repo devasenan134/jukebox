@@ -106,7 +106,8 @@ class JukeboxLibrary(
                 val albumRaw = rs.getString(6)
                 val title = rs.getString(2)
                 val isScoreRelease = relKind == "score"
-                val score = Names.isScore(relKind, albumRaw, title)
+                // ScoreSplitter has put background music named or sounding like it on the score release already.
+                val score = isScoreRelease
                 val roles = credits[id].orEmpty()
                 val singers = roles["singer"].orEmpty()
                 LibrarySong(

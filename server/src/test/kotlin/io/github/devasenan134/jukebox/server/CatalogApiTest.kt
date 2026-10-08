@@ -66,6 +66,19 @@ class CatalogApiTest {
             insert("INSERT INTO files (library_id, path, size, mtime, recording_id, track_id, format, duration_ms, scanned_at) VALUES (1, 'Roja/02.m4a', 1000, 1000, 'rec-kadhal-roja', 'trk-2', 'm4a', 302000, 1000)")
             insert("INSERT INTO files (library_id, path, size, mtime, recording_id, track_id, format, duration_ms, scanned_at) VALUES (1, 'Roja/03.m4a', 1000, 1000, 'rec-theme', 'trk-3', 'm4a', 180000, 1000)")
 
+            // Another composer's film: A.R. Rahman only sings one song, and a song credited to him turns up on it too.
+            insert("INSERT INTO people (id, name, sort_name, sound_key) VALUES ('p-nivas', 'Nivas K. Prasanna', 'Prasanna, Nivas K.', 'nivaskprasanna')")
+            insert("INSERT INTO albums (id, library_id, title, sort_title, year, kind, group_key, created_at, updated_at) VALUES ('alb-thaai', 1, 'Thaai Kizhavi', 'thaai kizhavi', 2026, 'film', 'thaai-2026', 1000, 1000)")
+            insert("INSERT INTO album_credits (album_id, person_id, role, position) VALUES ('alb-thaai', 'p-nivas', 'composer', 1)")
+            insert("INSERT INTO releases (id, album_id, title, kind, year, group_key) VALUES ('rel-thaai-ost', 'alb-thaai', 'Soundtrack', 'soundtrack', 2026, 'thaai-ost')")
+            insert("INSERT INTO recordings (id, song_id, title, title_key, version, duration_ms, created_at) VALUES ('rec-maati', null, 'Maatikitaan Minorkunju', 'maati', 'original', 200000, 1000)")
+            insert("INSERT INTO recording_credits (recording_id, person_id, role, position) VALUES ('rec-maati', 'p-arr', 'singer', 1)")
+            insert("INSERT INTO recording_credits (recording_id, person_id, role, position) VALUES ('rec-maati', 'p-nivas', 'composer', 1)")
+            insert("INSERT INTO tracks (id, release_id, recording_id, disc, number, title) VALUES ('trk-4', 'rel-thaai-ost', 'rec-maati', 1, 1, 'Maatikitaan Minorkunju')")
+            insert("INSERT INTO tracks (id, release_id, recording_id, disc, number, title) VALUES ('trk-5', 'rel-thaai-ost', 'rec-kadhal-roja', 1, 2, 'Kadhal Rojave')")
+            insert("INSERT INTO files (library_id, path, size, mtime, recording_id, track_id, format, duration_ms, scanned_at) VALUES (1, 'Thaai/01.m4a', 1000, 1000, 'rec-maati', 'trk-4', 'm4a', 200000, 1000)")
+            insert("INSERT INTO files (library_id, path, size, mtime, recording_id, track_id, format, duration_ms, scanned_at) VALUES (1, 'Thaai/02.m4a', 1000, 1000, 'rec-kadhal-roja', 'trk-5', 'm4a', 302000, 1000)")
+
             // Lyrics (both synced LRC and text)
             val lrc = """
                 [00:14.20]Chinna chinna aasai
@@ -95,7 +108,7 @@ class CatalogApiTest {
 
         // 1. List albums (movie album and score release are separate albums)
         val albumsResp = client.get("/api/v2/albums") { bearerAuth(token) }.body<AlbumsResponse>()
-        assertEquals(2, albumsResp.total)
+        assertEquals(3, albumsResp.total) // Roja, its score, Thaai Kizhavi
         val roja = albumsResp.albums.first { it.id == "alb-roja" }
         assertEquals("Roja", roja.title)
         assertEquals(1992, roja.year)
@@ -157,6 +170,14 @@ class CatalogApiTest {
         assertTrue(arrDetail.albums.any { it.id == "alb-roja" && it.title == "Roja" })
         assertTrue(arrDetail.albums.any { it.id == "rel-roja-score" && it.title == "Roja (Original Background Score)" })
         assertTrue(arrDetail.songs.any { it.id == "rec-chinna-orig" })
+        // Songs he sang, or that turn up on another composer's album, don't make that album his.
+        assertTrue(arrDetail.albums.none { it.id == "alb-thaai" })
+        assertTrue(arrDetail.songs.any { it.id == "rec-maati" })
+
+        // Artists come by songs, most first, with their pictures.
+        val artists = client.get("/api/v2/people?role=artist") { bearerAuth(token) }.body<PeopleResponse>()
+        assertEquals(artists.people.sortedByDescending { it.songCount }.map { it.songCount }, artists.people.map { it.songCount })
+        assertTrue(artists.people.all { it.coverArt == "ar-${it.id}" })
     }
 
     @Test

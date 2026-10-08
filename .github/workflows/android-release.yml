@@ -39,6 +39,13 @@ jobs:
 
       - name: Configure signing keystore
         run: |
+          # Releases must be signed with the app's own key, or installed apps can't update to them. Without the
+          # key (repository secrets ISAIPETTI_KEYSTORE_BASE64/_PASSWORD/_KEY_ALIAS) stop here and leave the release
+          # as it is: scripts/release-apk.sh builds and attaches the APK from a machine that has the key.
+          if [ -z "$ISAIPETTI_KEYSTORE_BASE64" ]; then
+            echo "::error::No signing key in this repository's secrets; attach the APK with scripts/release-apk.sh"
+            exit 1
+          fi
           if [ -n "$ISAIPETTI_KEYSTORE_BASE64" ]; then
             mkdir -p "$HOME/.gradle"
             echo "$ISAIPETTI_KEYSTORE_BASE64" | base64 -d > "$HOME/release.keystore"

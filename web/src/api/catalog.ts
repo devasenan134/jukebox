@@ -89,6 +89,7 @@ export interface PersonSummary {
   coverArt?: string
   songCount: number
   movieCount: number
+  hasPhoto?: boolean
 }
 
 export interface PeopleResponse {
@@ -103,6 +104,7 @@ export interface PersonDetail {
   coverArt?: string
   songCount: number
   movieCount: number
+  hasPhoto?: boolean
   albums: AlbumSummary[]
   songs: Recording[]
   movies: AlbumSummary[]

@@ -87,7 +87,10 @@ data class PersonSummaryDto(
     val coverArt: String? = null,
     val songCount: Int = 0,
     val movieCount: Int = 0,
-)
+    val hasPhoto: Boolean = false,
+) {
+    fun toArtist() = Artist(id, name, albumCount = movieCount, songCount = songCount, coverArt = coverArt, roles = roles)
+}
 
 @Serializable
 data class PeopleResponse(

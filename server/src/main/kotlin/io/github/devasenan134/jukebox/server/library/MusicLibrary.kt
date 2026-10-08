@@ -42,6 +42,7 @@ class MusicLibrary(
     saavnIdMap: File? = null,
     private val fingerprintsOn: Boolean = true,
     private val rescanEveryMinutes: Long = 60,
+    featuresDb: String? = null,
 ) {
     private val saavnIds: Map<String, String> = saavnIdMap?.takeIf { it.isFile }?.let(::readSaavnIds).orEmpty()
     val scanner = Scanner(db, tools, artworkDir, externalIds = { _, path -> saavnIds[path] }, threads = 3)
@@ -49,6 +50,9 @@ class MusicLibrary(
     /** One person, one entry: spellings folded together after each scan; `people-overrides.txt` next to the artwork corrects it. */
     val people = PeopleMerger(db, File(artworkDir.parentFile, "people-overrides.txt"))
     val covers = Covers(artworkDir, tools)
+    /** Background music in a song album goes to the film's score (`score-overrides.txt` next to the artwork corrects it). */
+    val scores = ScoreSplitter(db, featuresDb, artworkDir.parentFile)
+    val photos = PeoplePhotos(db, File(artworkDir.parentFile, "people-photos"), artworkDir)
     private val lock = Mutex()
     @Volatile private var scanning = false
     @Volatile private var roots: Map<Long, String> = emptyMap()
@@ -63,6 +67,8 @@ class MusicLibrary(
                 .also {
                     refreshRoots()
                     runCatching { people.run() }.onFailure { log.error("Merging people failed", it) }
+                    runCatching { scores.run() }.onFailure { log.error("Sorting out background score failed", it) }
+                    runCatching { photos.run() }.onFailure { log.warn("Reading people's photos failed", it) }
                     runCatching { covers.warm(db) }.onFailure { log.warn("Making small covers failed", it) }
                 }
         } finally {

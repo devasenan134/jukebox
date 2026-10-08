@@ -61,7 +61,7 @@ object Names {
 
     /** The people named in a tag, in order, without repeats: "A, B & C" → [A, B, C]. */
     fun people(tag: String?): List<String> =
-        tag.orEmpty().split(separators).map { person(it) }.filter { it.length > 1 && it.lowercase().replace(".", " ").trim() !in notPeople }
+        tag.orEmpty().split(separators).map { person(it) }.filter(::isPerson)
             .distinctBy { Fuzzy.key(it) }
 
     private val chorus = Regex("""\s+(chorus|group)$""", RegexOption.IGNORE_CASE)
@@ -73,8 +73,11 @@ object Names {
 
     private val notPeople = setOf(
         "various artists", "various artiste", "various", "unknown", "unknown artist", "[unknown artist]", "n a", "na",
-        "chorus", "kids", "group", "traditional", "others",
+        "chorus", "kids", "group", "traditional", "others", "instrumental",
     )
+
+    /** Whether a name from a tag is a person at all ("Chorus", "Instrumental" and "Various Artists" aren't). */
+    fun isPerson(name: String): Boolean = name.length > 1 && name.lowercase().replace(".", " ").trim() !in notPeople
 
     /** One key for a person however the name is spelled ("M.S. Viswanathan" = "M. S. Viswanathan"). */
     fun personKey(name: String) = Fuzzy.key(name.replace(".", " "))
@@ -94,20 +97,22 @@ object Names {
         return if (letters.isNotEmpty() && letters.count { it in '஀'..'௿' } * 2 > letters.length) "ta" else "en"
     }
 
+    /**
+     * Track titles that say the track is background music: "Title Music", "Theme Music", "Mass BGM", "Kodai Mazhai
+     * Title Score", "End Credits", "Music Bit 3", "Escape (Theme)". A "Theme Song" is sung, so it stays a song.
+     * Checked on every title in the library (2026-10-08): 43 hits outside the score albums, all of them music.
+     */
     private val bgmTitleWords = Regex(
-        """(^|\W)(bgm|theme|theme\s+music|theme\s+track|original\s+score|background\s+score|title\s+theme|interval\s+bgm|climax\s+bgm|love\s+theme|mass\s+theme|elevation\s+bgm)($|\W)""",
-        RegexOption.IGNORE_CASE,
-    )
-    private val scoreAlbumWords = Regex(
-        """\b(original\s+)?(background\s+score|bgm|score)\b""",
+        """\bbgms?\b|\bback\s*ground\s+(score|music)\b|\boriginal\s+score\b|\bscore\b|\binstrumental\b|\bend\s+credits?\b""" +
+            """|\b(title|theme|thema|theam|theame|theem|dance|chasing|chase|fight|love|sad|climax|interval|mass|entry|intro|opening|ending|end|pathos|comedy|suspense|bit)\s+music\b""" +
+            """|\bmusic\s+(bit|track|piece)\b|\b(themes?|theam|theame|theem)\b(?!\s*song)""",
         RegexOption.IGNORE_CASE,
     )
 
-    /** Whether a track is a background score / theme music / BGM from OBS albums or soundtrack themes. */
-    fun isScore(releaseKind: String? = null, albumTitle: String? = null, trackTitle: String? = null): Boolean {
-        if (releaseKind.equals("score", ignoreCase = true)) return true
-        if (albumTitle != null && (album(albumTitle).second || scoreAlbumWords.containsMatchIn(albumTitle))) return true
-        if (trackTitle != null && bgmTitleWords.containsMatchIn(trackTitle)) return true
-        return false
-    }
+    /** Whether a track's title says it's background music (see [bgmTitleWords]). */
+    fun isBgmTitle(title: String): Boolean = bgmTitleWords.containsMatchIn(title)
+
+    /** Whether a track is background score: on a score release, or named like one. */
+    fun isScore(releaseKind: String? = null, trackTitle: String? = null): Boolean =
+        releaseKind.equals("score", ignoreCase = true) || (trackTitle != null && isBgmTitle(trackTitle))
 }

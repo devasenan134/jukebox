@@ -54,20 +54,6 @@ class SubsonicApi(
         get("search3", mapOf("query" to query, "artistCount" to 10, "albumCount" to 20, "songCount" to 50))
             .decode<SearchResult>("searchResult3") ?: SearchResult()
 
-    /**
-     * Singers (artists with the "artist" role), a page at a time, A to Z. The app's artist list (getArtists)
-     * is for music directors, so this goes through search, which covers everyone.
-     */
-    suspend fun singers(offset: Int, count: Int = 200): List<Artist> =
-        (get("search3", mapOf("query" to "", "artistCount" to count, "artistOffset" to offset, "albumCount" to 0, "songCount" to 0))
-            .decode<SearchResult>("searchResult3") ?: SearchResult()).artist
-
-    /** A singer's songs: search by their name, then keep the songs they're actually credited on. */
-    suspend fun songsBy(artistId: String, name: String): List<Song> =
-        (get("search3", mapOf("query" to name, "artistCount" to 0, "albumCount" to 0, "songCount" to 500))
-            .decode<SearchResult>("searchResult3") ?: SearchResult()).song
-            .filter { song -> song.artists.any { it.id == artistId } }
-
     /** Makes a playlist with [name] (and optionally a first song). Returns it. */
     suspend fun createPlaylist(name: String, songId: String? = null): Playlist =
         get("createPlaylist", buildMap { put("name", name); songId?.let { put("songId", it) } })

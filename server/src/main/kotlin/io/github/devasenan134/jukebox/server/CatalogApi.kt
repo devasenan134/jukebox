@@ -107,6 +107,8 @@ data class PersonSummaryDto(
     val coverArt: String? = null,
     val songCount: Int = 0,
     val movieCount: Int = 0,
+    /** Whether [coverArt] is the person's own photo (else it's the cover of one of their albums). */
+    val hasPhoto: Boolean = false,
 )
 
 @Serializable
@@ -123,6 +125,7 @@ data class PersonDetailDto(
     val coverArt: String? = null,
     val songCount: Int = 0,
     val movieCount: Int = 0,
+    val hasPhoto: Boolean = false,
     val albums: List<AlbumSummaryDto> = emptyList(),
     val songs: List<RecordingDto> = emptyList(),
     val movies: List<AlbumSummaryDto> = emptyList(),
@@ -221,12 +224,15 @@ class CatalogService(
         return current
     }
 
-    /** Resolves audio file and content-type for a song (supports 'auto', 'mobile', 'original'). */
+    /**
+     * The audio file and its type for a song. "mobile" is the small Opus copy (made now if there isn't one yet);
+     * "auto" and "original" are the library's own file, as the Android app's Auto is (Subsonic stream without
+     * maxBitRate), and because Safari (the Mac app) can't play Ogg Opus everywhere.
+     */
     suspend fun audio(id: String, quality: String? = "auto"): Pair<File, String>? {
         val rid = db.read { resolveRecordingId(id) }
-        val q = quality?.lowercase() ?: "auto"
-        if (q == "mobile" || q == "auto") {
-            val mobile = transcoder?.find(rid) ?: if (q == "mobile") transcoder?.transcodeOne(rid) else null
+        if (quality?.lowercase() == "mobile") {
+            val mobile = transcoder?.find(rid) ?: transcoder?.transcodeOne(rid)
             if (mobile != null) return mobile to "audio/ogg; codecs=opus"
         }
         val fileInfo = db.read {
@@ -663,7 +669,9 @@ class CatalogService(
                       EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
                       EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'lyricist'),
                       (SELECT count(DISTINCT c.recording_id) FROM recording_credits c WHERE c.person_id = p.id),
-                      (SELECT count(DISTINCT rl.album_id) FROM recording_credits rc JOIN tracks t ON t.recording_id = rc.recording_id JOIN releases rl ON rl.id = t.release_id WHERE rc.person_id = p.id)
+                      (SELECT count(DISTINCT rl.album_id) FROM recording_credits rc JOIN tracks t ON t.recording_id = rc.recording_id JOIN releases rl ON rl.id = t.release_id WHERE rc.person_id = p.id),
+                      p.photo_id IS NOT NULL,
+                      (SELECT count(DISTINCT c.recording_id) FROM recording_credits c WHERE c.person_id = p.id AND c.role IN ('singer', 'lyricist'))
                FROM people p
                WHERE p.merged_into IS NULL"""
         ) { rs ->
@@ -687,8 +695,10 @@ class CatalogService(
                 name = name,
                 roles = roles,
                 coverArt = "ar-$id",
-                songCount = songs,
+                // As an artist, the songs they sing or write (a composer who sings a few isn't counted by what they composed).
+                songCount = if (role?.lowercase() in setOf("artist", "singer", "lyricist")) rs.getInt(10) else songs,
                 movieCount = albumCount,
+                hasPhoto = rs.getInt(9) == 1,
             )
         }.filter { p ->
             val matchesRole = when (role?.lowercase()) {
@@ -700,9 +710,14 @@ class CatalogService(
             }
             val matchesQuery = query.isNullOrBlank() || p.name.contains(query, ignoreCase = true)
             matchesRole && matchesQuery
-        }.sortedWith(compareByDescending<PersonSummaryDto> { it.movieCount }.thenBy { it.name.lowercase() })
+        }.sortedWith(
+            // Composers by how many albums they made; singers and lyricists by how many songs they're on.
+            if (role?.lowercase() == "composer") compareByDescending<PersonSummaryDto> { it.movieCount }.thenBy { it.name.lowercase() }
+            else compareByDescending<PersonSummaryDto> { it.songCount }.thenBy { it.name.lowercase() },
+        )
 
-        val paged = people.drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 500))
+        // The lists are small rows, and the apps filter them as you type: all of them in one go is fine.
+        val paged = people.drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 10_000))
         PeopleResponse(total = people.size, people = paged)
     }
 
@@ -722,37 +737,35 @@ class CatalogService(
                )""", pId, pId
         ) { it.getString(1) }
 
-        // Albums where this person is composer
-        val albumIds = query(
-            """SELECT DISTINCT album_id FROM album_credits WHERE person_id = ? AND role = 'composer'
-               UNION
-               SELECT DISTINCT rl.album_id FROM recording_credits c
-               JOIN tracks t ON t.recording_id = c.recording_id
-               JOIN releases rl ON rl.id = t.release_id
-               WHERE c.person_id = ? AND c.role = 'composer'""", pId, pId
-        ) { it.getString(1) }
+        // The albums they composed: the album's own credits, not songs that turn up on another film's album (a
+        // compilation, a re-release) or songs they only sang.
+        val albums = query(
+            """SELECT a.id, a.title, a.year, a.kind, a.cover_id,
+                      (SELECT count(DISTINCT t.recording_id) FROM releases rl JOIN tracks t ON t.release_id = rl.id
+                         JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL WHERE rl.album_id = a.id AND rl.kind != 'score')
+                 FROM album_credits c JOIN albums a ON a.id = c.album_id
+                WHERE c.person_id = ? AND c.role = 'composer'""", pId
+        ) {
+            AlbumSummaryDto(
+                id = it.getString(1),
+                title = it.getString(2),
+                year = (it.getObject(3) as Number?)?.toInt(),
+                kind = it.getString(4),
+                coverArt = it.getString(5)?.let { _ -> "al-${it.getString(1)}" },
+                composers = listOf(PersonRefDto(pId, name, "composer")),
+                songCount = it.getInt(6),
+            )
+        }.filter { it.songCount > 0 }
 
-        val albums = albumIds.mapNotNull { albId ->
-            queryOne("SELECT id, title, year, kind, cover_id FROM albums WHERE id = ?", albId) {
-                AlbumSummaryDto(
-                    id = it.getString(1),
-                    title = it.getString(2),
-                    year = (it.getObject(3) as Number?)?.toInt(),
-                    kind = it.getString(4),
-                    coverArt = it.getString(5)?.let { c -> "al-$albId" },
-                    composers = listOf(PersonRefDto(pId, name, "composer")),
-                )
-            }
-        }
-
-        // Score releases composed by this person
+        // And the background scores of those films.
         val scoreAlbums = query(
-            """SELECT DISTINCT rl.id, a.title, coalesce(rl.year, a.year), coalesce(rl.cover_id, a.cover_id)
-               FROM releases rl
-               JOIN albums a ON a.id = rl.album_id
-               JOIN tracks t ON t.release_id = rl.id
-               JOIN recording_credits c ON c.recording_id = t.recording_id
-               WHERE rl.kind = 'score' AND c.person_id = ? AND c.role = 'composer'""", pId
+            """SELECT rl.id, a.title, coalesce(rl.year, a.year), coalesce(rl.cover_id, a.cover_id),
+                      (SELECT count(DISTINCT t.recording_id) FROM tracks t JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+                        WHERE t.release_id = rl.id)
+               FROM album_credits c
+               JOIN albums a ON a.id = c.album_id
+               JOIN releases rl ON rl.album_id = a.id AND rl.kind = 'score'
+               WHERE c.person_id = ? AND c.role = 'composer'""", pId
         ) { rs ->
             val relId = rs.getString(1)
             val parentTitle = rs.getString(2)
@@ -763,8 +776,9 @@ class CatalogService(
                 kind = "score",
                 coverArt = rs.getString(4)?.let { "al-$relId" },
                 composers = listOf(PersonRefDto(pId, name, "composer")),
+                songCount = rs.getInt(5),
             )
-        }
+        }.filter { it.songCount > 0 }
 
         val allAlbums = (albums + scoreAlbums).sortedWith(compareByDescending<AlbumSummaryDto> { it.year }.thenBy { it.title })
 
@@ -794,7 +808,23 @@ class CatalogService(
                 durationMs = dur,
                 coverArt = cov?.let { "al-$albId" },
             )
-        }.distinctBy { it.id }
+        }.distinctBy { it.id }.let { list ->
+            // Who sang, composed and wrote each one, so the songs show their artists.
+            val credits = HashMap<String, MutableList<PersonRefDto>>()
+            query(
+                """SELECT c.recording_id, c.role, p.id, p.name FROM recording_credits c JOIN people p ON p.id = c.person_id
+                    WHERE c.recording_id IN (SELECT recording_id FROM recording_credits WHERE person_id = ?)
+                    ORDER BY c.recording_id, c.role, c.position""", pId,
+            ) { credits.getOrPut(it.getString(1)) { mutableListOf() } += PersonRefDto(it.getString(3), it.getString(4), it.getString(2)) }
+            list.map { r ->
+                val those = credits[r.id].orEmpty()
+                r.copy(
+                    singers = those.filter { it.role == "singer" },
+                    composers = those.filter { it.role == "composer" },
+                    lyricists = those.filter { it.role == "lyricist" },
+                )
+            }
+        }
 
         PersonDetailDto(
             id = pId,
@@ -803,6 +833,7 @@ class CatalogService(
             coverArt = "ar-$pId",
             songCount = songs.size,
             movieCount = allAlbums.size,
+            hasPhoto = queryOne("SELECT 1 FROM people WHERE id = ? AND photo_id IS NOT NULL", pId) { 1 } != null,
             albums = allAlbums,
             songs = songs,
             movies = allAlbums.filter { it.kind == "film" },

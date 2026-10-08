@@ -1,155 +1,34 @@
 package io.github.devasenan134.isaipetti.ui.library
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
-import io.github.devasenan134.isaipetti.data.Artist
-import io.github.devasenan134.isaipetti.data.SubsonicApi
 import io.github.devasenan134.isaipetti.ui.Nav
-import io.github.devasenan134.isaipetti.ui.components.Cover
-import io.github.devasenan134.isaipetti.ui.components.ErrorMessage
 import io.github.devasenan134.isaipetti.ui.components.LoadableContent
 import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
-import io.github.devasenan134.isaipetti.ui.components.rememberPageTint
-import kotlinx.coroutines.launch
 
-/** Loads singers a page at a time as you scroll (a big library has thousands). */
-class SingersViewModel(private val api: SubsonicApi) : ViewModel() {
-    val singers = mutableStateListOf<Artist>()
-    var loading by mutableStateOf(false)
-        private set
-    var error by mutableStateOf<String?>(null)
-        private set
-    private var offset = 0
-    private var endReached = false
-
-    init {
-        loadMore()
-    }
-
-    fun loadMore() {
-        if (loading || endReached) return
-        loading = true
-        error = null
-        viewModelScope.launch {
-            try {
-                val page = api.singers(offset, PAGE)
-                offset += page.size
-                endReached = page.size < PAGE
-                // Keep artists credited on songs, sorted by people with more albums first.
-                val filtered = page.filter { "artist" in it.roles && singers.none { s -> s.id == it.id } }
-                singers += filtered
-                singers.sortWith(compareByDescending<Artist> { it.albumCount }.thenBy { it.name.lowercase() })
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                error = e.message ?: "Couldn't load artists"
-            } finally {
-                loading = false
-            }
-        }
-    }
-
-    private companion object {
-        const val PAGE = 500
-    }
-}
-
-/** Artists: everyone credited as an artist on songs, sorted by people with more albums. */
+/** Artists: everyone credited as an artist on songs, the ones on the most songs first, with their photos. */
 @Composable
 fun SingersScreen(nav: Nav) {
     val app = LocalApp.current
-    val vm = viewModel { SingersViewModel(app.api) }
-    val listState = rememberLazyListState()
-    val nearEnd by remember {
-        derivedStateOf {
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 20
-        }
+    val loader = rememberLoader("artists-v2") {
+        app.social.api.peopleV2(role = "artist", limit = 10_000).people.map { it.toArtist() }.sortedByDescending { it.songCount }
     }
-    LaunchedEffect(nearEnd, vm.singers.size) { if (nearEnd) vm.loadMore() }
-
     Column {
         ScreenHeader("Artists", onBack = nav.back)
-        if (vm.singers.isEmpty() && vm.error != null) {
-            ErrorMessage(vm.error!!, onRetry = vm::loadMore)
-            return@Column
-        }
-        LazyColumn(state = listState) {
-            items(vm.singers, key = { it.id }) { singer ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { nav.openSinger(singer) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(singer.name, style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "${singer.albumCount} ${if (singer.albumCount == 1) "album" else "albums"}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+        LoadableContent(loader) { singers ->
+            LazyColumn {
+                items(singers, key = { it.id }) { singer ->
+                    PersonListRow(singer, if (singer.songCount == 1) "1 song" else "%,d songs".format(singer.songCount)) { nav.openSinger(singer) }
                 }
-            }
-            if (vm.loading) {
-                item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
             }
         }
     }
 }
 
-/** A singer: the songs they're credited on, with Play and Shuffle. */
+/** A singer: every song they're credited on (the person page, which loads them all from the server). */
 @Composable
-fun SingerScreen(id: String, name: String, coverArt: String?, nav: Nav) {
-    val app = LocalApp.current
-    val loader = rememberLoader("singer-$id") { app.api.songsBy(id, name).sortedBy { it.title.lowercase() } }
-    val tint = rememberPageTint(coverArt)
-    Column {
-        ScreenHeader("", onBack = nav.back, color = tint)
-        LoadableContent(loader) { songs ->
-            SongList(
-                tint = tint,
-                onPlay = {
-                    app.searches.picked(Artist(id, name, coverArt = coverArt, roles = listOf("artist")))
-                    app.activity.artist(id, name, coverArt)
-                },
-                coverArt = coverArt,
-                title = name,
-                subtitle = "Artist",
-                extraAction = { StationButton { nav.openMix("radio-singer-$id") } },
-                source = "singer:$id",
-                songs = songs,
-                onSubtitleClick = null,
-                showCovers = true,
-                nav = nav,
-            )
-        }
-    }
-}
+fun SingerScreen(id: String, name: String, coverArt: String?, nav: Nav) = PersonScreen(id, name, coverArt, nav)

@@ -306,12 +306,13 @@ class SubsonicLibrary(
         // An old id of a spelling that was merged leads to the person.
         val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", asked) { it.getString(1) } ?: return@read null
         val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@read null
-        // Their albums (credited on the album, or singing on it).
-        val albumIds = query(
-            """SELECT album_id FROM album_credits WHERE person_id = ?
-               UNION SELECT rl.album_id FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
-                     JOIN releases rl ON rl.id = t.release_id WHERE c.person_id = ?""", id, id,
-        ) { it.getString(1) }.toSet()
+        // A composer's albums are the ones they composed (not every film they sang a song in); anyone else's are
+        // the albums they sing on.
+        val albumIds = query("SELECT album_id FROM album_credits WHERE person_id = ? AND role = 'composer'", id) { it.getString(1) }.toSet()
+            .ifEmpty {
+                query("""SELECT DISTINCT rl.album_id FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
+                           JOIN releases rl ON rl.id = t.release_id WHERE c.person_id = ?""", id) { it.getString(1) }.toSet()
+            }
         person to albumIds
     }?.let { (person, albumIds) ->
         // Every view of those albums: the songs and, for films, the background score; newest first.
@@ -476,12 +477,14 @@ class SubsonicLibrary(
     }
 
     /**
-     * A person has no photo here, so their picture (a "This Is" mix, a station) is the cover of their newest
-     * album: one they're credited on as a whole (a composer's), else one they sing on.
+     * A person's photo (people-photos/), else the cover of their newest album: one they compose, else one they
+     * sing on (a "This Is" mix, a station).
      */
     private fun Connection.personCover(id: String): Pair<String, String>? {
         val person = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", id) { it.getString(1) } ?: return null
-        return queryOne(
+        return queryOne("SELECT w.hash, w.mime FROM people p JOIN artwork w ON w.id = p.photo_id WHERE p.id = ?", person) {
+            it.getString(1) to it.getString(2)
+        } ?: queryOne(
             """SELECT w.hash, w.mime FROM album_credits c JOIN albums a ON a.id = c.album_id JOIN artwork w ON w.id = a.cover_id
                 WHERE c.person_id = ? ORDER BY coalesce(a.year, 0) DESC LIMIT 1""", person,
         ) { it.getString(1) to it.getString(2) } ?: queryOne(

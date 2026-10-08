@@ -45,8 +45,9 @@ android {
         release {
             manifestPlaceholders["cleartext"] = "false"
             // Every release must be signed with the same key, or phones refuse the update.
-            // Fall back to debug signing when release keystore is absent so CI and local builds produce signed APKs.
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // Never fall back to the debug key: an APK signed with it can't update installed apps (Android refuses
+            // a different signature), and the in-app updater would offer it to everyone. No keystore, no signed release.
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

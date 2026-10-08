@@ -8,7 +8,29 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
-## Score Mix Segregation, Unified Terminology & Search Refinements (0.16.2)
+## Unreleased
+
+### New
+- **Photos of composers and artists.** Lists and person pages show each person's photo (from JioSaavn, else Wikimedia Commons), or their newest album's cover when there's no photo.
+
+### Improved
+- **Artists list counts songs.** Artists show how many songs they sing or write (it said "0 albums"), most first, and the whole list loads at once.
+- **Composers list from the catalog.** Only composers are listed (singers were mixed in), with their albums counted.
+- **An artist's page shows all their songs** from the server, not the first 500 search results.
+
+### Fixed
+- **A composer's albums are the ones they composed.** A film where they only sang a song (A.R. Rahman in Thaai Kizhavi) or where one of their songs turns up on another album no longer appears under them.
+- **Background music separated from songs.** Score tracks inside song albums (title music, BGM cues, themes) move to the film's Original Background Score album.
+- Release APKs are never signed with the debug key (the store-style update would fail); CI stops without the signing key.
+
+### Server
+- After each scan: background music in song albums goes to the score (by title, or by how it sounds when nothing says it's sung), listed in `data/score-split.csv`; `data/score-overrides.txt` corrects it. People's photos come from `data/people-photos/` (filled by `scripts/metadata/people_photos.py`).
+- `/api/v2/people`: `hasPhoto`; artists sorted and counted by songs sung or written; up to 10,000 per page. Person songs carry their singers, composers and lyricists.
+- Streaming "auto" plays the original file (as Android's Auto does); the Opus copy only for "mobile". The transcoder now works through the whole library (it stopped after the 200 most played) and evicts the least recently used copies.
+- A session token in the address (`?token=`) is only accepted on `/stream` routes.
+- Schema 25: `score_moves`, `people.photo_id`.
+
+, Unified Terminology & Search Refinements (0.16.2)
 
 ### New
 - **Separate BGM & Theme Music Mixes.** Dedicated score mixes ("Smell the Romantic rose", "Feel the Mass elevation", etc.) featuring only Original Background Scores and theme music.

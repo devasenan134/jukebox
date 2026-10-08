@@ -138,7 +138,7 @@ fun Application.jukeboxServer(
         MusicLibrary(
             db, defs, AudioTools(lowPriority = true),
             File(config.artworkDir ?: File(File(config.dbPath).absoluteFile.parentFile, "artwork").path),
-            config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes,
+            config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes, config.featuresDb,
         ).also { it.start(this) }
     }
     // Milestone 5: Ahead-of-time mobile audio copies (Opus 128 kbps)
@@ -246,11 +246,13 @@ fun Application.jukeboxServer(
                 val header = call.request.headers[HttpHeaders.Authorization]
                 if (header != null && header.startsWith("Bearer ", ignoreCase = true)) {
                     HttpAuthHeader.Single("Bearer", header.substring(7).trim())
-                } else {
+                } else if (call.request.path().endsWith("/stream")) {
+                    // An <audio> element can't send headers, so a song's stream may carry the token in its address.
+                    // Nowhere else: addresses end up in proxy and tunnel logs.
                     val qToken = call.request.queryParameters["token"]?.trim()
                     if (!qToken.isNullOrBlank()) HttpAuthHeader.Single("Bearer", qToken)
                     else null
-                }
+                } else null
             }
             authenticate { credential -> accounts.userForToken(credential.token) }
         }

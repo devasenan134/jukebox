@@ -66,6 +66,7 @@ export function SearchScreen() {
           roles: p.roles,
           coverArt: p.coverArt,
           albumCount: p.movieCount,
+          songCount: p.songCount,
         }))
         return { songs, people, albums, lyrics: u.lyrics }
       } catch {
@@ -267,7 +268,7 @@ function TopCard({ top, nav, onPicked }: { top: Top; nav: Nav; onPicked: () => v
 export function PersonCard({ artist, onClick, className = 'tile' }: { artist: Artist; onClick: () => void; className?: string }) {
   return (
     <div className={`card ${className}`} onClick={onClick}>
-      <PersonAvatar name={artist.name} fill />
+      <PersonAvatar name={artist.name} fill coverArt={artist.coverArt} />
       <div className="name title-small ellipsis" style={{ marginTop: 10 }}>{artist.name}</div>
       <div className="body-small muted">{isComposer(artist) ? 'Composer' : 'Artist'}</div>
     </div>

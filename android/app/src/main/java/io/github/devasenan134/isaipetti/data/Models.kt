@@ -44,13 +44,15 @@ data class Artist(
     val id: String,
     val name: String = "",
     val albumCount: Int = 0,
+    /** Songs they're credited on (the Artists list counts these). */
+    val songCount: Int = 0,
     val coverArt: String? = null,
     /** What they do in the library: "albumartist" (a composer here), "artist" (a singer), "composer", ... */
     val roles: List<String> = emptyList(),
     val album: List<Album> = emptyList(),
 ) {
-    /** Composers have movies of their own; singers only appear on songs. */
-    val isComposer get() = roles.isEmpty() || "albumartist" in roles
+    /** Composers have movies of their own; singers only appear on songs. ("albumartist" from Subsonic, "composer" from /api/v2.) */
+    val isComposer get() = roles.isEmpty() || "albumartist" in roles || "composer" in roles
 }
 
 @Serializable

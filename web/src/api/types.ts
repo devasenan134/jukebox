@@ -42,14 +42,16 @@ export interface Artist {
   id: string
   name: string
   albumCount?: number
+  /** Songs they're credited on (singers and lyricists are listed by this). */
+  songCount?: number
   coverArt?: string
   /** What they do in the library: "albumartist" (a composer here), "artist" (a singer), "composer", ... */
   roles?: string[]
   album?: Album[]
 }
 
-/** Composers have movies of their own; singers only appear on songs. */
-export const isComposer = (a: Artist) => !a.roles?.length || a.roles.includes('albumartist')
+/** Composers have movies of their own; singers only appear on songs. ("albumartist" from Subsonic, "composer" from /api/v2.) */
+export const isComposer = (a: Artist) => !a.roles?.length || a.roles.includes('albumartist') || a.roles.includes('composer')
 
 export interface Playlist {
   id: string

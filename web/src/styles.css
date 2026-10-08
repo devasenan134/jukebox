@@ -1029,7 +1029,7 @@ a.nav-item:hover {
     line-height: 1;
     margin: 6px 0 10px;
   }
-  .hero.round .art {
+  .hero.round-art .art {
     border-radius: 50%;
   }
   .hero-bar {

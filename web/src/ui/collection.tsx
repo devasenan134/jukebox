@@ -1,4 +1,5 @@
-import type { CSSProperties, ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { subsonic } from '../api/subsonic'
 import { Cover } from './components'
 import { NEUTRAL, useCoverColor } from './coverColor'
 import { IconButton } from './kit'
@@ -29,7 +30,7 @@ export function Collection({ coverArt, art, round, kind, title, meta, tint, chil
       <div className="hero-top" style={{ position: 'absolute', top: 0, left: 0, zIndex: 6, padding: 8 }}>
         <IconButton icon="arrow_back" label="Back" onClick={nav.back} style={{ background: 'rgba(0,0,0,0.45)', color: '#fff' }} />
       </div>
-      <div className={`hero${round ? ' round' : ''}`}>
+      <div className={`hero${round ? ' round-art' : ''}`}>
         {art ?? <Cover coverArt={coverArt} size={600} className="art" round={round} />}
         <div className="text">
           <div className="kind">{kind}</div>
@@ -124,7 +125,11 @@ export const heroArtStyle: CSSProperties = { width: 'min(240px, 62vw)' }
 const AVATAR_HUES = [12, 28, 45, 140, 168, 198, 220, 262, 290, 330]
 
 /** A person's picture: their initials on a colour picked from their name (there are no photos of people yet). */
-export function PersonAvatar({ name, size, fill }: { name: string; size?: number; fill?: boolean }) {
+/** A person's photo (or their newest album's cover) in a circle, over their initials, which show until it loads or if there's none. */
+export function PersonAvatar({ name, size, fill, coverArt }: { name: string; size?: number; fill?: boolean; coverArt?: string | null }) {
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [coverArt])
+  const src = coverArt && !failed ? subsonic.coverUrl(coverArt, (size ?? 300) > 160 || fill ? 600 : 150) : undefined
   let h = 0
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0
   const hue = AVATAR_HUES[h % AVATAR_HUES.length]
@@ -145,9 +150,20 @@ export function PersonAvatar({ name, size, fill }: { name: string; size?: number
         background: `linear-gradient(135deg, hsl(${hue} 55% 46%), hsl(${(hue + 40) % 360} 50% 24%))`,
         color: 'rgba(255,255,255,0.92)', fontFamily: 'var(--display)', fontWeight: 800, letterSpacing: '-0.02em',
         fontSize: fill ? 'clamp(28px, 30cqi, 72px)' : (size ?? 48) * 0.38, containerType: 'inline-size', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+        position: 'relative', overflow: 'hidden',
       }}
     >
       {initials}
+      {src && (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          onError={() => setFailed(true)}
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      )}
     </div>
   )
 }

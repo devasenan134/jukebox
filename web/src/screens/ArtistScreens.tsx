@@ -14,7 +14,7 @@ export function ArtistsScreen() {
   const nav = useNav()
   const [filter, setFilter] = useState('')
   const data = useLoad(['artists-v2'], async () => {
-    const res = await catalog.people({ role: 'composer', limit: 300 })
+    const res = await catalog.people({ role: 'composer', limit: 10000 })
     return res.people.map((p) => ({
       id: p.id,
       name: p.name,
@@ -51,9 +51,10 @@ export function ArtistsScreen() {
             key={a.id}
             className="list-row"
             onClick={() => nav.openArtist(a.id)}
-            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 8 }}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, padding: '8px 16px', borderRadius: 8 }}
           >
-            <div style={{ minWidth: 0 }}>
+            <PersonAvatar name={a.name} size={52} coverArt={a.coverArt} />
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div className="body-large ellipsis" style={{ fontWeight: 600 }}>{a.name}</div>
               <div className="body-small muted">{a.albumCount ?? 0} {(a.albumCount ?? 0) === 1 ? 'album' : 'albums'}</div>
             </div>
@@ -68,9 +69,10 @@ export function ArtistsScreen() {
 export function PersonRow({ artist, onClick }: { artist: Artist; onClick: () => void }) {
   return (
     <div className="list-row" onClick={onClick} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px' }}>
+      <PersonAvatar name={artist.name} size={44} coverArt={artist.coverArt} />
       <div style={{ minWidth: 0 }}>
         <div className="body-large ellipsis">{artist.name}</div>
-        <div className="body-small muted">{isComposer(artist) ? `${artist.albumCount ?? 0} albums` : 'Artist'}</div>
+        <div className="body-small muted">{isComposer(artist) ? `${artist.albumCount ?? 0} albums` : songCount(artist.songCount ?? 0)}</div>
       </div>
     </div>
   )
@@ -102,7 +104,8 @@ export function ArtistScreen() {
 
   return (
     <Collection
-      art={<PersonAvatar name={person.name} size={232} />}
+      art={<PersonAvatar name={person.name} size={232} coverArt={person.coverArt} />}
+      coverArt={person.coverArt}
       round
       kind={kind}
       title={person.name}

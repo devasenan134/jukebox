@@ -32,10 +32,10 @@ class Transcoder(
         transcodeDir.mkdirs()
     }
 
-    /** Find an existing transcoded mobile copy of [recordingId] if available. */
+    /** Find an existing transcoded mobile copy of [recordingId] if available. Marks it used, for [enforceQuota]. */
     fun find(recordingId: String): File? {
         val file = File(transcodeDir, "$recordingId.opus")
-        return file.takeIf { it.isFile && it.length() > 0 }
+        return file.takeIf { it.isFile && it.length() > 0 }?.also { it.setLastModified(System.currentTimeMillis()) }
     }
 
     private fun Connection.resolveRecordingId(id: String): String {
@@ -86,8 +86,14 @@ class Transcoder(
         }
     }
 
-    /** Transcodes a batch of un-transcoded recordings, prioritized by play counts and recency. */
+    /**
+     * Transcodes a batch of un-transcoded recordings, most played and newest first. All recordings are looked at
+     * (skipping the ones with a copy), so the work goes on past the first few hundred; once the quota is full, it
+     * stops instead of making copies that [enforceQuota] would delete again.
+     */
     suspend fun processBatch(batchSize: Int = 10): Int {
+        if (usedBytes() >= maxBytes * 95 / 100) return 0
+        val done = transcodeDir.listFiles()?.filter { it.extension == "opus" }?.map { it.nameWithoutExtension }?.toHashSet().orEmpty()
         val candidates = db.read {
             query(
                 """SELECT r.id FROM recordings r
@@ -95,16 +101,13 @@ class Transcoder(
                    LEFT JOIN play_counts p ON p.recording_id = r.id
                    WHERE r.merged_into IS NULL
                    GROUP BY r.id
-                   ORDER BY coalesce(sum(p.count), 0) DESC, r.created_at DESC
-                   LIMIT 200"""
+                   ORDER BY coalesce(sum(p.count), 0) DESC, r.created_at DESC"""
             ) { it.getString(1) }
-        }
+        }.filter { it !in done }
 
         var count = 0
         for (recId in candidates) {
             val target = File(transcodeDir, "$recId.opus")
-            if (target.isFile && target.length() > 0) continue
-
             val source = resolveSource(recId) ?: continue
             val ok = audioTools.transcodeToOpus(source.first, target)
             if (ok) {
@@ -118,9 +121,12 @@ class Transcoder(
         return count
     }
 
-    /** Evicts least recently modified files if cache exceeds [maxCacheGigabytes]. */
+    private val maxBytes get() = maxCacheGigabytes * 1024L * 1024L * 1024L
+
+    private fun usedBytes() = transcodeDir.listFiles()?.filter { it.isFile && it.extension == "opus" }?.sumOf { it.length() } ?: 0L
+
+    /** Evicts the least recently used copies ([find] marks a copy used) if the cache exceeds [maxCacheGigabytes]. */
     fun enforceQuota() {
-        val maxBytes = maxCacheGigabytes * 1024L * 1024L * 1024L
         val files = transcodeDir.listFiles()?.filter { it.isFile && it.extension == "opus" } ?: return
         var totalSize = files.sumOf { it.length() }
         if (totalSize <= maxBytes) return

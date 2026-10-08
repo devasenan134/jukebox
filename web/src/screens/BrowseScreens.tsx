@@ -1,24 +1,24 @@
 import { useMemo, useState } from 'react'
 import { catalog } from '../api/catalog'
 import { subsonic } from '../api/subsonic'
-import { PlaylistCard, ScreenHeader, useLoad } from '../ui/components'
-import { CardsSkeleton } from '../ui/collection'
+import { PlaylistCard, ScreenHeader, songCount, useLoad } from '../ui/components'
+import { CardsSkeleton, PersonAvatar } from '../ui/collection'
 import { ErrorBox, Icon } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
 // Browsing artists and playlists on the server.
 
-/** Artists, sorted by people with more albums, with a filter box. Uses native /api/v2/people. */
+/** Artists (singers and lyricists), the ones on the most songs first, with a filter box. Uses native /api/v2/people. */
 export function SingersScreen() {
   const nav = useNav()
   const [filter, setFilter] = useState('')
   const data = useLoad(['artists-panel-v2'], async () => {
-    const res = await catalog.people({ role: 'artist', limit: 500 })
+    const res = await catalog.people({ role: 'artist', limit: 10000 })
     return res.people.map((p) => ({
       id: p.id,
       name: p.name,
       roles: p.roles,
-      albumCount: p.movieCount,
+      songCount: p.songCount,
       coverArt: p.coverArt,
     }))
   })
@@ -27,7 +27,7 @@ export function SingersScreen() {
     () =>
       (data.data ?? [])
         .slice()
-        .sort((a, b) => (b.albumCount ?? 0) - (a.albumCount ?? 0) || a.name.localeCompare(b.name))
+        .sort((a, b) => (b.songCount ?? 0) - (a.songCount ?? 0) || a.name.localeCompare(b.name))
         .filter((a) => a.name.toLowerCase().includes(filter.trim().toLowerCase())),
     [data.data, filter],
   )
@@ -50,11 +50,12 @@ export function SingersScreen() {
             key={a.id}
             className="list-row"
             onClick={() => nav.openSinger(a)}
-            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 8 }}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, padding: '8px 16px', borderRadius: 8 }}
           >
-            <div style={{ minWidth: 0 }}>
+            <PersonAvatar name={a.name} size={52} coverArt={a.coverArt} />
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div className="body-large ellipsis" style={{ fontWeight: 600 }}>{a.name}</div>
-              <div className="body-small muted">{a.albumCount ?? 0} {(a.albumCount ?? 0) === 1 ? 'album' : 'albums'}</div>
+              <div className="body-small muted">{songCount(a.songCount ?? 0)}</div>
             </div>
             <Icon name="chevron_right" size={20} className="muted" />
           </div>
