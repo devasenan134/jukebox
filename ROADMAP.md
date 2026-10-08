@@ -8,7 +8,7 @@ Milestones in the order they're built. Each one leaves the app working.
 | 1 | Catalog and library ([plan](docs/milestone-1.md)) | Scanner (folders, tags, cover art), the catalog (albums, releases, tracks, recordings, versions, people and roles), stable recording ids, streaming with range requests, the Subsonic API subset the app uses. Runs beside Navidrome | Done (fingerprint merges running) |
 | 2 | Own the listening data ([plan](docs/milestone-2.md)) | Users and sign-in without Navidrome, likes, playlists, plays, lyrics, the event log; a one-time import from Navidrome | Done (switched over 2026-10-04) |
 | 3 | Realtime gateway ([plan](docs/milestone-3.md)) | One WebSocket per device: presence, playback state across devices, jam, notifications; the social module behind a setting | Done (0.14.0) |
-| 4 | Jukebox API v2 | Albums with film details, people, lyrics search in the API; the app and web app move to it | |
+| 4 | Jukebox API v2 ([plan](docs/milestone-4.md)) | Albums with film details, people, lyrics search in the API; the app and web app move to it | Done (0.15.0) |
 | 5 | Data plane | Mobile-quality copies made ahead of time, prefetch, offline downloads | |
 | 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, APK releases (the Android app and web app are in this repo already) | |
 | – | Engine | The recommendation engine in its own repository, following the event stream | Later |

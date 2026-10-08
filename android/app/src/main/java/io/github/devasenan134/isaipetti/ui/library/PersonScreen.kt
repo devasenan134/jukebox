@@ -25,7 +25,43 @@ import io.github.devasenan134.isaipetti.ui.components.UiSize
 @Composable
 fun PersonScreen(id: String, name: String, coverArt: String?, nav: Nav) {
     val app = LocalApp.current
-    val loader = rememberLoader("person-$id") { app.social.api.person(id) }
+    val loader = rememberLoader("person-$id") {
+        try {
+            val p2 = app.social.api.personV2(id)
+            io.github.devasenan134.isaipetti.data.PersonPage(
+                person = io.github.devasenan134.isaipetti.data.PersonHit(
+                    id = p2.id,
+                    name = p2.name,
+                    roles = p2.roles,
+                    coverArt = p2.coverArt,
+                    songCount = p2.songCount,
+                    movieCount = p2.movieCount,
+                ),
+                movies = p2.movies.map {
+                    io.github.devasenan134.isaipetti.data.MovieHit(
+                        id = it.id,
+                        name = it.title,
+                        year = it.year,
+                        composer = it.composers.firstOrNull()?.name,
+                        coverArt = it.coverArt,
+                        songCount = it.songCount,
+                    )
+                },
+                songs = p2.songs.map { r ->
+                    io.github.devasenan134.isaipetti.data.MixSong(
+                        id = r.id,
+                        title = r.title,
+                        duration = maxOf(1, (r.durationMs / 1000).toInt()),
+                        coverArt = r.coverArt,
+                        artists = r.singers.map { it.name },
+                        starred = r.starred != null,
+                    )
+                },
+            )
+        } catch (_: Exception) {
+            app.social.api.person(id)
+        }
+    }
     val tint = rememberPageTint(coverArt)
     Column {
         ScreenHeader("", onBack = nav.back, color = tint)

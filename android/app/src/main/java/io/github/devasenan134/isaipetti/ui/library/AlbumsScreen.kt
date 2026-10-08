@@ -55,7 +55,11 @@ enum class AlbumSort(val label: String, val type: String, val extra: Map<String,
 }
 
 /** Loads one sort's album grid one page at a time as you scroll, so big libraries stay fast. */
-class AlbumsViewModel(private val api: SubsonicApi, val sort: AlbumSort) : ViewModel() {
+class AlbumsViewModel(
+    private val api: SubsonicApi,
+    val sort: AlbumSort,
+    private val socialApi: io.github.devasenan134.isaipetti.data.SocialApi? = null,
+) : ViewModel() {
     val albums = mutableStateListOf<Album>()
     var loading by mutableStateOf(false)
         private set
@@ -73,7 +77,20 @@ class AlbumsViewModel(private val api: SubsonicApi, val sort: AlbumSort) : ViewM
         error = null
         viewModelScope.launch {
             try {
-                val page = api.albumList(sort.type, PAGE_SIZE, albums.size, sort.extra)
+                val page = try {
+                    val v2Sort = when (sort) {
+                        AlbumSort.Name -> "name"
+                        AlbumSort.Newest -> "byYear"
+                        AlbumSort.Oldest -> "byYear"
+                        AlbumSort.Added -> "newest"
+                    }
+                    val fromY = if (sort == AlbumSort.Newest) 2100 else if (sort == AlbumSort.Oldest) 1900 else null
+                    val toY = if (sort == AlbumSort.Newest) 1900 else if (sort == AlbumSort.Oldest) 2100 else null
+                    socialApi?.albumsV2(sort = v2Sort, fromYear = fromY, toYear = toY, offset = albums.size, limit = PAGE_SIZE)?.albums?.map { it.toAlbum() }
+                        ?: api.albumList(sort.type, PAGE_SIZE, albums.size, sort.extra)
+                } catch (_: Exception) {
+                    api.albumList(sort.type, PAGE_SIZE, albums.size, sort.extra)
+                }
                 albums += page
                 endReached = page.size < PAGE_SIZE
             } catch (e: Exception) {
@@ -125,7 +142,7 @@ fun AlbumsScreen(nav: Nav) {
 @Composable
 private fun AlbumGrid(sort: AlbumSort, nav: Nav) {
     val app = LocalApp.current
-    val vm = viewModel(key = "albums-${sort.name}") { AlbumsViewModel(app.api, sort) }
+    val vm = viewModel(key = "albums-${sort.name}") { AlbumsViewModel(app.api, sort, app.social.api) }
     val gridState = rememberLazyGridState()
 
     // When the last few cards come into view, fetch the next page.

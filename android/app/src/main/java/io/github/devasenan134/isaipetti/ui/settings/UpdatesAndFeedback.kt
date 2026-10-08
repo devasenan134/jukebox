@@ -132,12 +132,12 @@ fun UpdateDialog(update: AppUpdate, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = { if (progress == null) onDismiss() },
-        title = { Text("Isaipetti ${update.version} is available") },
+        title = { Text("Jukebox ${update.version} is available") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 when {
                     needsPermission -> Text(
-                        "To install updates, allow Isaipetti to install apps. Turn on \"Allow from this source\", " +
+                        "To install updates, allow Jukebox to install apps. Turn on \"Allow from this source\", " +
                             "come back, and tap Update again.",
                     )
                     progress != null -> {
@@ -214,7 +214,7 @@ private fun FeedbackDialog(type: Feedback, onDismiss: () -> Unit) {
     var includeDevice by rememberSaveable { mutableStateOf(type.includeDeviceByDefault) }
     var sending by remember { mutableStateOf(false) }
     var sent by remember { mutableStateOf<BugReport?>(null) }
-    val deviceInfo = "Isaipetti ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · " +
+    val deviceInfo = "Jukebox ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · " +
         "${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
 
     sent?.let { issue ->

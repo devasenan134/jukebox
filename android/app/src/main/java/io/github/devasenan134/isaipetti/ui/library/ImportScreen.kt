@@ -125,7 +125,7 @@ fun ImportScreen(nav: Nav, sharedLink: String? = null) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("From a link", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "A public playlist on Spotify, Apple Music, YouTube or YouTube Music. In that app: Share › Copy link, or share it straight to Isaipetti.",
+                        "A public playlist on Spotify, Apple Music, YouTube or YouTube Music. In that app: Share › Copy link, or share it straight to Jukebox.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

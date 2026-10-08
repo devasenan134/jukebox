@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Album, Playlist, Song } from '../api/types'
+import { catalog, albumDetailToAlbum, type AlbumDetail } from '../api/catalog'
 import { subsonic } from '../api/subsonic'
 import { social } from '../api/social'
 import { mixSource, mixSongToSong } from '../api/types'
@@ -86,7 +87,8 @@ export function AlbumCard({ album, onClick, className }: { album: Album; onClick
 /** Plays an album from the start (from a card, without opening it). */
 export async function playAlbum(id: string) {
   try {
-    const album = await queryClient.fetchQuery({ queryKey: keys.album(id), queryFn: () => subsonic.album(id) })
+    const raw = await queryClient.fetchQuery({ queryKey: keys.album(id), queryFn: () => catalog.album(id) })
+    const album = 'releases' in (raw as unknown as object) ? albumDetailToAlbum(raw as unknown as AlbumDetail) : (raw as unknown as Album)
     activity.movie(album)
     player.play(album.song ?? [], 0, false, `album:${album.id}`)
   } catch (e) {

@@ -15,7 +15,9 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import io.github.devasenan134.isaipetti.data.toAlbum
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -64,16 +66,33 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-/** A movie: its songs with Play and Shuffle. */
+/** A movie/album: its releases and songs with Play and Shuffle. */
 @Composable
 fun AlbumScreen(id: String, nav: Nav) {
     val app = LocalApp.current
-    val loader = rememberLoader("album-$id") { app.api.album(id) }
+    val loader = rememberLoader("album-$id") {
+        try {
+            val detail = app.social.api.albumV2(id)
+            detail to detail.toAlbum()
+        } catch (_: Exception) {
+            val alb = app.api.album(id)
+            null to alb
+        }
+    }
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
-    val tint = rememberPageTint((loader.state as? Loadable.Ready)?.value?.coverArt)
+    val tint = rememberPageTint((loader.state as? Loadable.Ready)?.value?.second?.coverArt)
     Column {
         ScreenHeader("", onBack = nav.back, color = tint)
-        LoadableContent(loader) { album ->
+        LoadableContent(loader) { (detail, album) ->
+            val details = mutableListOf<String>()
+            if (detail != null) {
+                if (detail.directors.isNotEmpty()) {
+                    details.add("Directed by ${detail.directors.joinToString(", ")}")
+                }
+                if (detail.releases.size > 1) {
+                    details.add("${detail.releases.size} releases (OST & Score)")
+                }
+            }
             SongList(
                 tint = tint,
                 liked = likedAlbums.any { it.id == album.id },
@@ -89,10 +108,42 @@ fun AlbumScreen(id: String, nav: Nav) {
                 coverArt = album.coverArt,
                 title = album.name,
                 subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+                details = details,
                 songs = album.song,
                 onSubtitleClick = album.artistId?.let { artistId -> { nav.openArtist(artistId) } },
                 showCovers = false,
                 nav = nav,
+                aboveSongs = if (detail?.cast?.isNotEmpty() == true) {
+                    {
+                        item {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                Text(
+                                    "Starring",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                androidx.compose.foundation.lazy.LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
+                                ) {
+                                    items(detail.cast) { actor ->
+                                        androidx.compose.material3.AssistChip(
+                                            onClick = { nav.openSearch() },
+                                            label = { Text(actor.name) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Filled.Person,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else null,
             )
         }
     }

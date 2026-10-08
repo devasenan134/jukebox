@@ -151,7 +151,7 @@ fun SettingsScreen(nav: Nav) {
             ) { Text("Log out") }
 
             Text(
-                "Isaipetti ${BuildConfig.VERSION_NAME}",
+                "Jukebox ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 24.dp),
@@ -330,7 +330,7 @@ private fun LockScreenCard() {
             )
             if (lyrics && !allowed) {
                 Text(
-                    "Android needs to allow Isaipetti's notifications, including full-screen ones, to show the lyrics over the lock screen.",
+                    "Android needs to allow Jukebox's notifications, including full-screen ones, to show the lyrics over the lock screen.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )

@@ -1,11 +1,16 @@
 import { subsonic } from '../api/subsonic'
+import { catalog } from '../api/catalog'
 import { credited, type SongDetails } from '../api/types'
 import { formatDuration, useLoad } from '../ui/components'
 
-/** "About this song", below the full player (ui/player/SongDetails.kt): who made it, where it's from, the file itself. */
+/** "About this song", below the full player: who made it, where it's from, versions, audio metadata. */
 export function SongDetailsSection({ songId, onOpenAlbum }: { songId: string; onOpenAlbum: (id: string) => void }) {
   const details = useLoad(['song-details', songId], () => subsonic.songDetails(songId))
+  const native = useLoad(['song-v2', songId], () => catalog.song(songId).catch(() => null))
+
   const song = details.data
+  const v2 = native.data
+
   return (
     <section className="song-details">
       <div className="title-large" style={{ fontWeight: 800, marginBottom: 12 }}>About this song</div>
@@ -20,7 +25,26 @@ export function SongDetailsSection({ songId, onOpenAlbum }: { songId: string; on
             <Detail label="Movie" value={song.album} onClick={song.albumId ? () => onOpenAlbum(song.albumId!) : undefined} />
             <Detail label="Year" value={song.year?.toString()} />
             <Detail label="Genre" value={(song.genres?.map((g) => g.name) ?? []).join(', ') || song.genre} />
+            {v2?.version && v2.version !== 'original' && (
+              <Detail label="Version" value={v2.version.toUpperCase()} />
+            )}
           </div>
+
+          {v2?.versions && v2.versions.length > 0 && (
+            <div className="details-card">
+              <div className="label-large" style={{ fontWeight: 700, marginBottom: 8, color: 'var(--primary)' }}>
+                Other versions
+              </div>
+              {v2.versions.map((ver) => (
+                <Detail
+                  key={ver.id}
+                  label={ver.version.charAt(0).toUpperCase() + ver.version.slice(1)}
+                  value={ver.title}
+                />
+              ))}
+            </div>
+          )}
+
           <div className="details-card">
             <Detail
               label="Track"

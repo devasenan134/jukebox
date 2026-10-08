@@ -1,116 +1,95 @@
 package io.github.devasenan134.isaipetti.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
+import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.ui.platform.LocalContext
-import android.os.Build
-import io.github.devasenan134.isaipetti.data.ThemeMode
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import io.github.devasenan134.isaipetti.data.ThemeMode
 
-// Brand palette: "Graphite & mango" — a soft graphite grey with a ripe mango accent. The grey is
-// neutral on purpose, so album covers bring the colour.
-private val Graphite = Color(0xFF202026)
-private val Slate = Color(0xFF2A2A32)
-private val Stone = Color(0xFF35353F)
+// Jukebox dark palette matching web/src/styles.css
+private val AppBackground = Color(0xFF121212)
 private val Mango = Color(0xFFFFB547)
-private val DeepMango = Color(0xFF9A5C00)
-private val Snow = Color(0xFFFFFFFF)
-private val Silver = Color(0xFFDCDCE4)
-private val Ink = Color(0xFF141418)
+private val OnMango = Color(0xFF1D1300)
+private val MangoContainer = Color(0xFF4A3412)
+private val OnMangoContainer = Color(0xFFFFE0B0)
+private val TertiaryMint = Color(0xFF8FD3C1)
+private val OnTertiary = Color(0xFF00382D)
+private val White = Color(0xFFFFFFFF)
+private val MutedText = Color(0xFFA7A7A7)
+private val DarkSurfaceLowest = Color(0xFF0A0A0A)
+private val DarkSurfaceLow = Color(0xFF181818)
+private val DarkSurface = Color(0xFF1F1F1F)
+private val DarkSurfaceHigh = Color(0xFF282828)
+private val DarkSurfaceHighest = Color(0xFF333333)
+private val DarkSurfaceVariant = Color(0xFF2A2A2A)
+private val OutlineGrey = Color(0xFF727272)
+private val OutlineVariantGrey = Color(0xFF2E2E2E)
+private val ErrorRed = Color(0xFFF3727F)
 
-private val DarkColors = darkColorScheme(
+private val JukeboxDarkColors = darkColorScheme(
     primary = Mango,
-    onPrimary = Color(0xFF3D2600),
-    primaryContainer = Color(0xFF6B4B12),
-    onPrimaryContainer = Color(0xFFFFE0B0),
-    inversePrimary = DeepMango,
-    secondary = Silver,
-    onSecondary = Graphite,
-    secondaryContainer = Color(0xFF3E3E49),
-    onSecondaryContainer = Snow,
-    tertiary = Color(0xFF8FD3C1),
-    onTertiary = Color(0xFF00382D),
+    onPrimary = OnMango,
+    primaryContainer = MangoContainer,
+    onPrimaryContainer = OnMangoContainer,
+    inversePrimary = Color(0xFF9A5C00),
+    secondary = MutedText,
+    onSecondary = AppBackground,
+    secondaryContainer = DarkSurfaceVariant,
+    onSecondaryContainer = White,
+    tertiary = TertiaryMint,
+    onTertiary = OnTertiary,
     tertiaryContainer = Color(0xFF1F5145),
     onTertiaryContainer = Color(0xFFABF0DC),
-    background = Graphite,
-    onBackground = Snow,
-    surface = Graphite,
-    onSurface = Snow,
-    surfaceVariant = Stone,
-    onSurfaceVariant = Silver,
+    background = AppBackground,
+    onBackground = White,
+    surface = AppBackground,
+    onSurface = White,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = MutedText,
     surfaceTint = Mango,
-    surfaceDim = Color(0xFF1A1A1F),
-    surfaceBright = Color(0xFF3E3E49),
-    surfaceContainerLowest = Color(0xFF18181C),
-    surfaceContainerLow = Color(0xFF25252B),
-    surfaceContainer = Slate,
-    surfaceContainerHigh = Stone,
-    surfaceContainerHighest = Color(0xFF3E3E49),
-    inverseSurface = Snow,
-    inverseOnSurface = Ink,
-    outline = Color(0xFF5C5C69),
-    outlineVariant = Color(0xFF4A4A56),
+    surfaceDim = DarkSurfaceLow,
+    surfaceBright = DarkSurfaceHighest,
+    surfaceContainerLowest = DarkSurfaceLowest,
+    surfaceContainerLow = DarkSurfaceLow,
+    surfaceContainer = DarkSurface,
+    surfaceContainerHigh = DarkSurfaceHigh,
+    surfaceContainerHighest = DarkSurfaceHighest,
+    inverseSurface = White,
+    inverseOnSurface = AppBackground,
+    outline = OutlineGrey,
+    outlineVariant = OutlineVariantGrey,
+    error = ErrorRed,
 )
 
-private val LightColors = lightColorScheme(
-    primary = DeepMango,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFE0B0),
-    onPrimaryContainer = Color(0xFF3D2600),
-    inversePrimary = Mango,
-    secondary = Color(0xFF4C4C57),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFEAEAEE),
-    onSecondaryContainer = Ink,
-    tertiary = Color(0xFF006B58),
-    onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFABF0DC),
-    onTertiaryContainer = Color(0xFF002019),
-    background = Color.White,
-    onBackground = Ink,
-    surface = Color.White,
-    onSurface = Ink,
-    surfaceVariant = Color(0xFFEAEAEE),
-    onSurfaceVariant = Color(0xFF4C4C57),
-    surfaceTint = DeepMango,
-    surfaceDim = Color(0xFFDDDDE3),
-    surfaceBright = Color.White,
-    surfaceContainerLowest = Color.White,
-    surfaceContainerLow = Color(0xFFF8F8FA),
-    surfaceContainer = Color(0xFFF5F5F7),
-    surfaceContainerHigh = Color(0xFFEFEFF2),
-    surfaceContainerHighest = Color(0xFFEAEAEE),
-    inverseSurface = Slate,
-    inverseOnSurface = Snow,
-    outline = Color(0xFF7C7C88),
-    outlineVariant = Color(0xFFD6D6DE),
-)
-
-/** Whether the app is showing dark colours right now (the Settings choice, or the phone's). */
+/** Whether the app is showing dark colours (Jukebox is designed as a dark music app). */
 @Composable
-fun isAppInDarkTheme(mode: ThemeMode): Boolean = when (mode) {
-    ThemeMode.System -> isSystemInDarkTheme()
-    ThemeMode.Light -> false
-    ThemeMode.Dark -> true
-}
+fun isAppInDarkTheme(mode: ThemeMode): Boolean = true
 
 /**
- * Graphite & mango, light or dark as chosen in Settings (or as the phone is set). With [wallpaper] on
- * Android 12+, Android's colours from the wallpaper ("Material You") instead.
+ * Jukebox dark theme (matching the web app styling).
+ * With [wallpaper] on Android 12+, dynamic Material You dark colors can be used if enabled.
  */
 @Composable
-fun IsaipettiTheme(mode: ThemeMode = ThemeMode.System, wallpaper: Boolean = false, content: @Composable () -> Unit) {
-    val dark = isAppInDarkTheme(mode)
+fun IsaipettiTheme(
+    mode: ThemeMode = ThemeMode.Dark,
+    wallpaper: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     val context = LocalContext.current
     val colors = when {
-        wallpaper && Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> DarkColors
-        else -> LightColors
+        wallpaper && Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(context)
+        else -> JukeboxDarkColors
     }
     MaterialTheme(colorScheme = colors, typography = IsaipettiTypography, content = content)
 }
+
+/** Official JukeboxTheme alias */
+@Composable
+fun JukeboxTheme(
+    mode: ThemeMode = ThemeMode.Dark,
+    wallpaper: Boolean = false,
+    content: @Composable () -> Unit,
+) = IsaipettiTheme(mode, wallpaper, content)

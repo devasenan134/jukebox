@@ -100,7 +100,7 @@ fun LoginScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text("இசைப்பெட்டி", fontSize = 34.sp, color = MaterialTheme.colorScheme.primary)
-            Text(if (signingUp) "Join your friends on Isaipetti" else "Isaipetti", style = MaterialTheme.typography.titleMedium)
+            Text(if (signingUp) "Join your friends on Jukebox" else "Jukebox", style = MaterialTheme.typography.titleMedium)
             val reason by app.session.logoutReason.collectAsStateWithLifecycle()
             reason?.let { Text(it, color = MaterialTheme.colorScheme.tertiary, textAlign = TextAlign.Center) }
 

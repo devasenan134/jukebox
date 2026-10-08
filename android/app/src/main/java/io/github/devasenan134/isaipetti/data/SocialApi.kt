@@ -77,6 +77,51 @@ class SocialApi(
     /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
     suspend fun search(query: String): LibrarySearchResults = get("/search?q=${enc(query)}")
     suspend fun person(id: String): PersonPage = get("/search/people/${enc(id)}")
+
+    // Jukebox API v2: Native Catalog Endpoints
+    suspend fun albumsV2(
+        sort: String = "name",
+        kind: String? = null,
+        fromYear: Int? = null,
+        toYear: Int? = null,
+        offset: Int = 0,
+        limit: Int = 50,
+    ): AlbumsResponse {
+        val q = buildString {
+            append("?sort=${enc(sort)}")
+            if (kind != null) append("&kind=${enc(kind)}")
+            if (fromYear != null) append("&fromYear=$fromYear")
+            if (toYear != null) append("&toYear=$toYear")
+            append("&offset=$offset&limit=$limit")
+        }
+        return get("/api/v2/albums$q")
+    }
+
+    suspend fun albumV2(id: String): AlbumDetailDto = get("/api/v2/albums/${enc(id)}")
+
+    suspend fun peopleV2(
+        role: String = "all",
+        query: String? = null,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): PeopleResponse {
+        val q = buildString {
+            append("?role=${enc(role)}")
+            if (query != null) append("&q=${enc(query)}")
+            append("&offset=$offset&limit=$limit")
+        }
+        return get("/api/v2/people$q")
+    }
+
+    suspend fun personV2(id: String): PersonDetailDto = get("/api/v2/people/${enc(id)}")
+
+    suspend fun songV2(id: String): SongDetailDto = get("/api/v2/songs/${enc(id)}")
+
+    suspend fun searchLyricsV2(query: String, limit: Int = 30): LyricsSearchResponse =
+        get("/api/v2/search/lyrics?q=${enc(query)}&limit=$limit")
+
+    suspend fun searchUnifiedV2(query: String): UnifiedSearchResponse =
+        get("/api/v2/search?q=${enc(query)}")
     /** Songs and movies from the music catalog that aren't in the library, to ask for. */
     suspend fun catalog(query: String): CatalogResults = get("/search/catalog?q=${enc(query)}")
     /** Your requests for music, waiting ones first. */

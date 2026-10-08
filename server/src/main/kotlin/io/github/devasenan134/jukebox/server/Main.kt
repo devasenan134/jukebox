@@ -128,7 +128,9 @@ fun Application.jukeboxServer(
     val stats = Stats(db, music, defaultZone = config.timeZone)
     val mixes = music?.let { MixService(db, it, java.time.ZoneId.of(config.timeZone)) }?.also { it.warm() }
     // Without a cast file next to the database, search just has no actors.
-    val search = music?.let { LibrarySearch(it, File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)) }
+    val castFile = File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)
+    val search = music?.let { LibrarySearch(it, castFile) }
+    val catalogService = CatalogService(db, castFile)
     // Asking for music the library doesn't have (it needs the library, to know what's missing).
     val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds) }
     // Jukebox's own library (docs/milestone-1.md): scanned in the background, served through the Subsonic API.
@@ -562,6 +564,9 @@ fun Application.jukeboxServer(
                     call.respond(HttpStatusCode.NoContent)
                 }
             }
+
+            // Milestone 4: Jukebox API v2 (albums with releases & cast, people, songs, lyrics search)
+            catalogService.routes(this, search)
         }
     }
     log.info("jukebox ready on port ${config.port}, library ${if (musicLibrary == null) "off" else "on"}, push ${if (pushSender is NoPush || pushConfig == null) "off" else "on"}, feedback ${if (issueTracker == null) "off" else "on"}, mixes ${if (mixes == null) "off" else "on"}")

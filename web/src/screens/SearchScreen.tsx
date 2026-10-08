@@ -1,23 +1,32 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import type { Album, Artist, SearchResult, Song } from '../api/types'
+import type { Album, Artist, Song } from '../api/types'
 import { isComposer, refToSong } from '../api/types'
+import { catalog, type LyricsMatch } from '../api/catalog'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
-import { AlbumCard, CardPlay, Cover, playAlbum, SectionTitle, SongRow, useLoad } from '../ui/components'
+import { AlbumCard, CardPlay, Cover, formatDuration, playAlbum, SectionTitle, SongRow, useLoad } from '../ui/components'
 import { PersonAvatar } from '../ui/collection'
 import { ErrorBox, Icon, IconButton, Spinner } from '../ui/kit'
 import { useNav, type Nav } from '../ui/nav'
 import { useSearchHistory } from '../state/history'
 import { CatalogResults } from './RequestsScreen'
 
-/** Search songs, albums, music directors and singers. Spelling is forgiven by the server; the query is in the URL. */
+interface CombinedSearchResults {
+  songs: Song[]
+  people: Artist[]
+  albums: Album[]
+  lyrics: LyricsMatch[]
+}
+
+/** Search songs, albums, music directors, singers and lyrics lines. Unified native search. */
 export function SearchScreen() {
   const nav = useNav()
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState(params.get('q') ?? '')
   const [typed, setTyped] = useState(query.trim())
+
   useEffect(() => {
     const q = query.trim()
     setParams(q ? { q } : {}, { replace: true })
@@ -25,26 +34,65 @@ export function SearchScreen() {
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
-  // Results stay cached: coming back to a search shows them at once; while typing, the last results stay up.
-  const search = useQuery({
-    queryKey: ['search', typed],
-    queryFn: () => subsonic.search(typed),
+
+  const search = useQuery<CombinedSearchResults>({
+    queryKey: ['search-v2', typed],
+    queryFn: async () => {
+      try {
+        const u = await catalog.search(typed)
+        const songs: Song[] = u.songs.map((s) => ({
+          id: s.id,
+          title: s.title,
+          album: s.albumTitle,
+          albumId: s.albumId,
+          duration: Math.max(1, Math.round(s.durationMs / 1000)),
+          coverArt: s.coverArt,
+          artist: s.singers.map((a) => a.name).join(', ') || s.composers.map((c) => c.name).join(', '),
+          artists: s.singers.map((a) => ({ id: a.id, name: a.name })),
+        }))
+        const albums: Album[] = u.movies.map((m) => ({
+          id: m.id,
+          name: m.title,
+          year: m.year,
+          coverArt: m.coverArt,
+          artist: m.composers.map((c) => c.name).join(', '),
+          artistId: m.composers[0]?.id,
+          songCount: m.songCount,
+          duration: 0,
+        }))
+        const people: Artist[] = u.people.map((p) => ({
+          id: p.id,
+          name: p.name,
+          roles: p.roles,
+          coverArt: p.coverArt,
+          albumCount: p.movieCount,
+        }))
+        return { songs, people, albums, lyrics: u.lyrics }
+      } catch {
+        // Fallback to Subsonic search3
+        const r = await subsonic.search(typed)
+        return { songs: r.song, people: r.artist, albums: r.album, lyrics: [] }
+      }
+    },
     enabled: typed.length >= 2,
     placeholderData: keepPreviousData,
   })
-  const result: SearchResult | null = query.trim().length >= 2 ? (search.data ?? null) : null
+
+  const result: CombinedSearchResults | null = query.trim().length >= 2 ? (search.data ?? null) : null
   const error = search.error?.message
   const busy = search.isFetching
 
-  const songs = result?.song ?? []
-  const people = result?.artist ?? []
-  const albums = result?.album ?? []
+  const songs = result?.songs ?? []
+  const people = result?.people ?? []
+  const albums = result?.albums ?? []
+  const lyrics = result?.lyrics ?? []
   const top = result ? topResult(query.trim(), people, albums, songs) : null
-  // A search counts for the history once you use it: press Enter, or open a result.
+
   const history = useSearchHistory()
   const used = () => history.add(query)
   const q = query.trim().toLowerCase()
   const past = q ? history.queries.filter((h) => h.toLowerCase().includes(q) && h.toLowerCase() !== q).slice(0, 3) : []
+
   return (
     <div className="page">
       <div style={{ padding: '16px 16px 8px', position: 'sticky', top: 0, background: 'color-mix(in srgb, var(--background) 92%, transparent)', backdropFilter: 'blur(12px)', zIndex: 4 }}>
@@ -68,7 +116,7 @@ export function SearchScreen() {
       </div>
       {error && <ErrorBox message={error} />}
       {!query.trim() && <Browse nav={nav} onPick={setQuery} />}
-      {result && !songs.length && !people.length && !albums.length && <div className="center-box muted">Nothing found for “{query.trim()}”</div>}
+      {result && !songs.length && !people.length && !albums.length && !lyrics.length && <div className="center-box muted">Nothing found for “{query.trim()}”</div>}
       {(top || songs.length > 0) && (
         <div className="search-top" style={{ display: 'grid', gap: 8, padding: '0 8px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))' }}>
           {top && (
@@ -86,6 +134,61 @@ export function SearchScreen() {
             </div>
           )}
         </div>
+      )}
+      {lyrics.length > 0 && (
+        <>
+          <SectionTitle>Lyrics matches</SectionTitle>
+          <div className="lyrics-results" style={{ padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {lyrics.map((m) => {
+              const matchedSong: Song = {
+                id: m.recordingId,
+                title: m.songTitle,
+                album: m.albumTitle,
+                albumId: m.albumId,
+                duration: 0,
+                coverArt: m.coverArt,
+              }
+              return (
+                <div
+                  key={`${m.recordingId}-${m.startMs}`}
+                  className="list-row"
+                  style={{
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 14,
+                    padding: '10px 14px',
+                    borderRadius: 10,
+                    background: 'var(--surface-container-low)',
+                  }}
+                  onClick={() => {
+                    used()
+                    player.play([matchedSong], 0, false, 'search:lyrics')
+                    if (m.startMs > 0) {
+                      setTimeout(() => player.seekTo(m.startMs), 200)
+                    }
+                  }}
+                >
+                  <Cover coverArt={m.coverArt} size={100} style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 6 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="body-medium" style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                      “{m.matchedLine}”
+                    </div>
+                    <div className="body-small muted ellipsis" style={{ marginTop: 2 }}>
+                      {m.songTitle} • {m.albumTitle}
+                    </div>
+                  </div>
+                  {m.startMs > 0 && (
+                    <span className="chip" style={{ fontSize: 11, padding: '2px 8px', height: 22 }}>
+                      {formatDuration(Math.round(m.startMs / 1000))}
+                    </span>
+                  )}
+                  <Icon name="play_arrow" size={20} />
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
       {people.length > 0 && (
         <>

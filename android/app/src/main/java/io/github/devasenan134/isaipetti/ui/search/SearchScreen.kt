@@ -68,6 +68,9 @@ import io.github.devasenan134.isaipetti.data.Album
 import io.github.devasenan134.isaipetti.data.CatalogResults
 import io.github.devasenan134.isaipetti.data.LibrarySearchResults
 import io.github.devasenan134.isaipetti.data.Song
+import io.github.devasenan134.isaipetti.data.LyricsMatchDto
+import io.github.devasenan134.isaipetti.ui.components.formatTotalDuration
+import androidx.compose.material.icons.filled.PlayArrow
 import io.github.devasenan134.isaipetti.ui.Nav
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -89,6 +92,7 @@ fun SearchScreen(nav: Nav) {
     var result by remember { mutableStateOf(SearchResult()) }
     // From the friends server when it has search: forgives spelling, and finds lyricists and actors.
     var smart by remember { mutableStateOf<LibrarySearchResults?>(null) }
+    var lyricsMatches by remember { mutableStateOf<List<LyricsMatchDto>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     // Songs and movies that aren't in the library, to request.
     var catalog by remember { mutableStateOf<CatalogResults?>(null) }
@@ -107,10 +111,19 @@ fun SearchScreen(nav: Nav) {
         if (query.isBlank()) {
             result = SearchResult()
             smart = null
+            lyricsMatches = emptyList()
             return@LaunchedEffect
         }
         delay(200)
         coroutineScope {
+            val unified = async {
+                try {
+                    app.social.api.searchUnifiedV2(query.trim())
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    null
+                }
+            }
             val better = async {
                 try { app.social.api.search(query.trim()) } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -123,6 +136,10 @@ fun SearchScreen(nav: Nav) {
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 error = e.message
+            }
+            val uni = unified.await()
+            if (uni != null) {
+                lyricsMatches = uni.lyrics
             }
             smart = better.await()
             if (smart != null) error = null
@@ -185,6 +202,9 @@ fun SearchScreen(nav: Nav) {
                         smartResults(found, nowPlaying.songId, nav, onPicked = saveSearch)
                     } else {
                         basicResults(result, nowPlaying.songId, nav, onPicked = saveSearch)
+                    }
+                    if (lyricsMatches.isNotEmpty()) {
+                        lyricsResults(lyricsMatches, nav, onPicked = saveSearch)
                     }
                     catalog?.let { catalogResults(it.movies, it.songs, requestMusic, cancelRequest) }
                 }
@@ -347,6 +367,67 @@ private fun LazyListScope.smartResults(found: LibrarySearchResults, playing: Str
         found.songs.mapNotNull { hit -> hit.reason?.let { hit.song.id to listOfNotNull(it, hit.song.album).joinToString(" · ") } }.toMap(),
         playing, nav, onPicked,
     )
+}
+
+private fun LazyListScope.lyricsResults(matches: List<LyricsMatchDto>, nav: Nav, onPicked: () -> Unit) {
+    if (matches.isEmpty()) return
+    item { SectionTitle("Lyrics matches") }
+    items(matches, key = { "lyrics-${it.recordingId}-${it.startMs}" }) { match ->
+        val app = LocalApp.current
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    onPicked()
+                    val song = Song(
+                        id = match.recordingId,
+                        title = match.songTitle,
+                        album = match.albumTitle,
+                        albumId = match.albumId,
+                        coverArt = match.coverArt,
+                    )
+                    app.searches.picked(song)
+                    app.activity.song(song)
+                    app.player.play(listOf(song), 0)
+                    if (match.startMs > 0) {
+                        app.player.seekTo(match.startMs)
+                    }
+                }
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Cover(match.coverArt, Modifier.size(UiSize.SongThumb), size = 120, corner = 8.dp)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 12.dp),
+            ) {
+                Text(
+                    "“${match.matchedLine}”",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "${match.songTitle} · ${match.albumTitle}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (match.startMs > 0) {
+                Text(
+                    formatTotalDuration((match.startMs / 1000).toInt()),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+            }
+            Icon(Icons.Filled.PlayArrow, contentDescription = "Play", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }
 
 private fun LazyListScope.movieResults(movies: List<Album>, nav: Nav, onPicked: () -> Unit) {
