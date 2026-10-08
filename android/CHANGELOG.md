@@ -8,6 +8,23 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Jukebox API v2 & Redesign (0.15.0)
+
+App, website, Mac app and server.
+
+### New
+- **Jukebox API v2.** Native film-first catalog API (`/api/v2/albums`, `/api/v2/people`, `/api/v2/songs`, `/api/v2/search`).
+- **Films with full details.** Albums present releases (Soundtrack, Background Score, Singles) with director credits and cast chips.
+- **People profiles.** Composers, singers, lyricists, and actors with discographies and filmographies.
+- **Lyrics search.** Search inside synced and plain text lyrics across the entire library with direct timestamp seek.
+- **Version tracking.** Songs show versions (karaoke, instrumental, remixes) and link to alternative recordings.
+
+### Improved
+- **Dark theme & rebranding.** Redesigned the Android app with the dark theme matching the web app, and rebranded user-facing name to Jukebox.
+- **Web & Android migrated.** Web app and Android app now talk directly to Jukebox API v2 while preserving Subsonic playback fallback.
+
+---
+
 ## Web Jump Back In Parity (0.14.5)
 
 **Fixed**
