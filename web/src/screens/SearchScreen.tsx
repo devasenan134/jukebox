@@ -83,10 +83,9 @@ export function SearchScreen() {
   const busy = search.isFetching
 
   const songs = result?.songs ?? []
-  const people = result?.people ?? []
   const albums = result?.albums ?? []
   const lyrics = result?.lyrics ?? []
-  const top = result ? topResult(query.trim(), people, albums, songs) : null
+  const top = result ? topResult(query.trim(), albums, songs) : null
 
   const history = useSearchHistory()
   const used = () => history.add(query)
@@ -116,7 +115,7 @@ export function SearchScreen() {
       </div>
       {error && <ErrorBox message={error} />}
       {!query.trim() && <Browse nav={nav} onPick={setQuery} />}
-      {result && !songs.length && !people.length && !albums.length && !lyrics.length && <div className="center-box muted">Nothing found for “{query.trim()}”</div>}
+      {result && !songs.length && !albums.length && !lyrics.length && <div className="center-box muted">Nothing found for “{query.trim()}”</div>}
       {(top || songs.length > 0) && (
         <div className="search-top" style={{ display: 'grid', gap: 8, padding: '0 8px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))' }}>
           {top && (
@@ -190,16 +189,6 @@ export function SearchScreen() {
           </div>
         </>
       )}
-      {people.length > 0 && (
-        <>
-          <SectionTitle>People</SectionTitle>
-          <div className="row-scroll">
-            {people.slice(0, 12).map((a) => (
-              <PersonCard key={a.id} artist={a} onClick={() => { used(); history.pickedArtist(a); if (isComposer(a)) nav.openArtist(a.id); else nav.openSinger(a) }} />
-            ))}
-          </div>
-        </>
-      )}
       {albums.length > 0 && (
         <>
           <SectionTitle>Albums</SectionTitle>
@@ -225,20 +214,30 @@ export function SearchScreen() {
   )
 }
 
-type Top = { kind: 'person'; artist: Artist } | { kind: 'album'; album: Album } | { kind: 'song'; song: Song; all: Song[] }
+type Top = { kind: 'album'; album: Album } | { kind: 'song'; song: Song; all: Song[] }
 
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
 
-/** What the search most likely meant: a name that starts with the words typed, people first, then albums, then songs. */
-function topResult(q: string, people: Artist[], albums: Album[], songs: Song[]): Top | null {
+/** What the search most likely meant: either the song or the strongly matched album (movie) at the top. Never people. */
+function topResult(q: string, albums: Album[], songs: Song[]): Top | null {
   const n = norm(q)
-  const person = people.find((p) => norm(p.name).startsWith(n))
-  if (person) return { kind: 'person', artist: person }
-  const album = albums.find((a) => norm(a.name).startsWith(n))
-  if (album) return { kind: 'album', album }
+  if (!n) return null
+  const exactAlbum = albums.find((a) => norm(a.name) === n)
+  const exactSong = songs.find((s) => norm(s.title) === n)
+  if (exactAlbum && !exactSong) return { kind: 'album', album: exactAlbum }
+  if (exactSong && !exactAlbum) return { kind: 'song', song: exactSong, all: songs }
+
+  const startsAlbum = albums.find((a) => norm(a.name).startsWith(n))
+  const startsSong = songs.find((s) => norm(s.title).startsWith(n))
+  if (startsAlbum && (!startsSong || norm(startsAlbum.name).length <= norm(startsSong.title).length)) {
+    return { kind: 'album', album: startsAlbum }
+  }
+  if (startsSong) return { kind: 'song', song: startsSong, all: songs }
+  if (startsAlbum) return { kind: 'album', album: startsAlbum }
+
   if (songs[0]) return { kind: 'song', song: songs[0], all: songs }
   if (albums[0]) return { kind: 'album', album: albums[0] }
-  return people[0] ? { kind: 'person', artist: people[0] } : null
+  return null
 }
 
 function TopCard({ top, nav, onPicked }: { top: Top; nav: Nav; onPicked: () => void }) {
@@ -250,10 +249,6 @@ function TopCard({ top, nav, onPicked }: { top: Top; nav: Nav; onPicked: () => v
       {play && <CardPlay label={`Play ${title}`} play={play} />}
     </div>
   )
-  if (top.kind === 'person') {
-    const a = top.artist
-    return box(<PersonAvatar name={a.name} size={96} />, a.name, isComposer(a) ? 'Music director' : 'Singer', () => (isComposer(a) ? nav.openArtist(a.id) : nav.openSinger(a)))
-  }
   if (top.kind === 'album') {
     const a = top.album
     return box(
@@ -268,21 +263,21 @@ function TopCard({ top, nav, onPicked }: { top: Top; nav: Nav; onPicked: () => v
   )
 }
 
-/** A person as a round card (search, a list of music directors). */
+/** A person as a round card (search, a list of composers). */
 export function PersonCard({ artist, onClick, className = 'tile' }: { artist: Artist; onClick: () => void; className?: string }) {
   return (
     <div className={`card ${className}`} onClick={onClick}>
       <PersonAvatar name={artist.name} fill />
       <div className="name title-small ellipsis" style={{ marginTop: 10 }}>{artist.name}</div>
-      <div className="body-small muted">{isComposer(artist) ? 'Music director' : 'Singer'}</div>
+      <div className="body-small muted">{isComposer(artist) ? 'Composer' : 'Artist'}</div>
     </div>
   )
 }
 
 const TILES = [
   { label: 'Albums', color: 'hsl(330 70% 42%)', go: (n: Nav) => n.openAlbums() },
-  { label: 'Music directors', color: 'hsl(205 70% 38%)', go: (n: Nav) => n.openArtists() },
-  { label: 'Singers', color: 'hsl(20 75% 42%)', go: (n: Nav) => n.openSingers() },
+  { label: 'Composers', color: 'hsl(205 70% 38%)', go: (n: Nav) => n.openArtists() },
+  { label: 'Artists', color: 'hsl(20 75% 42%)', go: (n: Nav) => n.openSingers() },
   { label: 'Playlists', color: 'hsl(180 55% 30%)', go: (n: Nav) => n.openPlaylists() },
   { label: 'Liked songs', color: 'hsl(255 50% 46%)', go: (n: Nav) => n.openLikedSongs() },
   { label: 'Your Library', color: 'hsl(150 55% 30%)', go: (n: Nav) => n.openLibrary() },

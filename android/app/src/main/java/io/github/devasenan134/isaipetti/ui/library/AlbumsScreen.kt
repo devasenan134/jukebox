@@ -50,8 +50,8 @@ import kotlinx.coroutines.launch
 
 enum class AlbumSort(val label: String, val type: String, val extra: Map<String, Any> = emptyMap()) {
     Name("A–Z", "alphabeticalByName"),
-    Newest("Newest movies", "byYear", mapOf("fromYear" to 2100, "toYear" to 1900)),
-    Oldest("Oldest movies", "byYear", mapOf("fromYear" to 1900, "toYear" to 2100)),
+    Newest("Newest albums", "byYear", mapOf("fromYear" to 2100, "toYear" to 1900)),
+    Oldest("Oldest albums", "byYear", mapOf("fromYear" to 1900, "toYear" to 2100)),
     Added("Recently added", "newest"),
 }
 
@@ -96,7 +96,7 @@ class AlbumsViewModel(
                 endReached = page.size < PAGE_SIZE
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                error = e.message ?: "Couldn't load movies"
+                error = e.message ?: "Couldn't load albums"
             } finally {
                 loading = false
             }
@@ -108,7 +108,7 @@ class AlbumsViewModel(
     }
 }
 
-/** All movies, in four orders (A–Z, newest, oldest, recently added): swipe sideways between them, or tap a chip. */
+/** All albums, in four orders (A–Z, newest, oldest, recently added): swipe sideways between them, or tap a chip. */
 @Composable
 fun AlbumsScreen(nav: Nav) {
     val scope = rememberCoroutineScope()
@@ -120,7 +120,7 @@ fun AlbumsScreen(nav: Nav) {
     LaunchedEffect(pager.targetPage) { chips.animateScrollToItem(pager.targetPage) }
 
     Column {
-        ScreenHeader("Movies", onBack = nav.back)
+        ScreenHeader("Albums", onBack = nav.back)
         LazyRow(
             state = chips,
             contentPadding = PaddingValues(horizontal = 16.dp),

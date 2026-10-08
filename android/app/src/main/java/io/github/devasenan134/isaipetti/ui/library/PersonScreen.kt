@@ -78,7 +78,7 @@ fun PersonScreen(id: String, name: String, coverArt: String?, nav: Nav) {
                 showCovers = true,
                 nav = nav,
                 aboveSongs = if (page.movies.isEmpty()) null else ({
-                    item { SectionTitle("Movies") }
+                    item { SectionTitle("Albums") }
                     item {
                         LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                             items(page.movies, key = { it.id }) { movie ->

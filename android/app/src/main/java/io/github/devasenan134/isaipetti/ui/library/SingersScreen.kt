@@ -64,8 +64,10 @@ class SingersViewModel(private val api: SubsonicApi) : ViewModel() {
                 val page = api.singers(offset, PAGE)
                 offset += page.size
                 endReached = page.size < PAGE
-                // Search returns every kind of artist; keep the ones credited on songs.
-                singers += page.filter { "artist" in it.roles && singers.none { s -> s.id == it.id } }
+                // Keep artists credited on songs, sorted by people with more albums first.
+                val filtered = page.filter { "artist" in it.roles && singers.none { s -> s.id == it.id } }
+                singers += filtered
+                singers.sortWith(compareByDescending<Artist> { it.albumCount }.thenBy { it.name.lowercase() })
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 error = e.message ?: "Couldn't load artists"
@@ -76,11 +78,11 @@ class SingersViewModel(private val api: SubsonicApi) : ViewModel() {
     }
 
     private companion object {
-        const val PAGE = 200
+        const val PAGE = 500
     }
 }
 
-/** Singers: everyone credited as an artist on songs, A to Z. */
+/** Artists: everyone credited as an artist on songs, sorted by people with more albums. */
 @Composable
 fun SingersScreen(nav: Nav) {
     val app = LocalApp.current
@@ -103,11 +105,17 @@ fun SingersScreen(nav: Nav) {
         LazyColumn(state = listState) {
             items(vm.singers, key = { it.id }) { singer ->
                 Row(
-                    Modifier.fillMaxWidth().clickable { nav.openSinger(singer) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().clickable { nav.openSinger(singer) }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Cover(singer.coverArt, Modifier.size(52.dp).clip(CircleShape), size = 150, corner = 26.dp)
-                    Text(singer.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(singer.name, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "${singer.albumCount} ${if (singer.albumCount == 1) "album" else "albums"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             if (vm.loading) {

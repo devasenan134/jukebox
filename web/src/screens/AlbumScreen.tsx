@@ -79,7 +79,7 @@ export function AlbumScreen() {
           items={[
             { label: 'Start album radio', onClick: () => void startStation('album', album.id) },
             {
-              label: 'Go to music director',
+              label: 'Go to composer',
               onClick: () => primaryComposer && nav.openArtist(primaryComposer.id),
               hidden: !primaryComposer,
             },

@@ -93,4 +93,21 @@ object Names {
         val letters = text.filter(Char::isLetter)
         return if (letters.isNotEmpty() && letters.count { it in '஀'..'௿' } * 2 > letters.length) "ta" else "en"
     }
+
+    private val bgmTitleWords = Regex(
+        """(^|\W)(bgm|theme|theme\s+music|theme\s+track|original\s+score|background\s+score|title\s+theme|interval\s+bgm|climax\s+bgm|love\s+theme|mass\s+theme|elevation\s+bgm)($|\W)""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val scoreAlbumWords = Regex(
+        """\b(original\s+)?(background\s+score|bgm|score)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Whether a track is a background score / theme music / BGM from OBS albums or soundtrack themes. */
+    fun isScore(releaseKind: String? = null, albumTitle: String? = null, trackTitle: String? = null): Boolean {
+        if (releaseKind.equals("score", ignoreCase = true)) return true
+        if (albumTitle != null && (album(albumTitle).second || scoreAlbumWords.containsMatchIn(albumTitle))) return true
+        if (trackTitle != null && bgmTitleWords.containsMatchIn(trackTitle)) return true
+        return false
+    }
 }

@@ -238,7 +238,7 @@ fun SearchScreen(nav: Nav) {
                     item {
                         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                BrowseBox("Movies", painterResource(R.drawable.ic_album), MaterialTheme.colorScheme.primaryContainer, nav.openAlbums, Modifier.weight(1f))
+                                BrowseBox("Albums", painterResource(R.drawable.ic_album), MaterialTheme.colorScheme.primaryContainer, nav.openAlbums, Modifier.weight(1f))
                                 BrowseBox(
                                     "Composers",
                                     rememberVectorPainter(Icons.Filled.Person),
@@ -268,7 +268,7 @@ fun SearchScreen(nav: Nav) {
                             Column(Modifier.padding(start = 16.dp)) {
                                 Text("Your requests", style = MaterialTheme.typography.bodyLarge)
                                 Text(
-                                    "Songs and movies you asked to be added",
+                                    "Songs and albums you asked to be added",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -289,7 +289,7 @@ fun SearchScreen(nav: Nav) {
                         }
                     }
                     if (searchedAlbums.isNotEmpty()) {
-                        item { SectionTitle("Your recent movies") }
+                        item { SectionTitle("Your recent albums") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
                                 items(searchedAlbums, key = { "searched-album-${it.id}" }) { album ->
@@ -326,41 +326,12 @@ fun SearchScreen(nav: Nav) {
 
 /** Results from the Subsonic search (exact spelling only). */
 private fun LazyListScope.basicResults(result: SearchResult, playing: String?, nav: Nav, onPicked: () -> Unit) {
-    val composers = result.artist.filter { it.isComposer }
-    val singers = result.artist.filter { !it.isComposer }
-    if (composers.isNotEmpty()) {
-        item { SectionTitle("Composers") }
-        items(composers, key = { "artist-${it.id}" }) { artist ->
-            val app = LocalApp.current
-            ArtistResult(artist) { onPicked(); app.searches.picked(artist); nav.openArtist(artist.id) }
-        }
-    }
-    if (singers.isNotEmpty()) {
-        item { SectionTitle("Artists") }
-        items(singers, key = { "singer-${it.id}" }) { artist ->
-            val app = LocalApp.current
-            ArtistResult(artist) { onPicked(); app.searches.picked(artist); nav.openSinger(artist) }
-        }
-    }
     movieResults(result.album, nav, onPicked)
     songResults(result.song, emptyMap(), playing, nav, onPicked)
 }
 
-/** Results from the friends server's search: people (with what they do), movies (with why), songs. */
+/** Results from the friends server's search: albums (with why), songs. */
 private fun LazyListScope.smartResults(found: LibrarySearchResults, playing: String?, nav: Nav, onPicked: () -> Unit) {
-    if (found.people.isNotEmpty()) {
-        item { SectionTitle("People") }
-        items(found.people, key = { "person-${it.id}" }) { person ->
-            val app = LocalApp.current
-            val artist = person.toArtist()
-            ArtistResult(artist, person.description) {
-                onPicked()
-                app.searches.picked(artist)
-                // Composers open their movies; everyone else their songs (lyricists and actors: their own page).
-                if ("composer" in person.roles) nav.openArtist(person.id) else nav.openSinger(artist)
-            }
-        }
-    }
     movieResults(found.movies.map { it.toAlbum() }, nav, onPicked)
     songResults(
         found.songs.map { it.song.toSong() },
@@ -432,7 +403,7 @@ private fun LazyListScope.lyricsResults(matches: List<LyricsMatchDto>, nav: Nav,
 
 private fun LazyListScope.movieResults(movies: List<Album>, nav: Nav, onPicked: () -> Unit) {
     if (movies.isEmpty()) return
-    item { SectionTitle("Movies") }
+    item { SectionTitle("Albums") }
     item {
         val app = LocalApp.current
         LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {

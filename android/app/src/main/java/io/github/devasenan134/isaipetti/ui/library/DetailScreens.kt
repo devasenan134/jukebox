@@ -237,7 +237,7 @@ fun ArtistScreen(id: String, nav: Nav) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${albums.size} movies",
+                            "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
                             modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

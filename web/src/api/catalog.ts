@@ -374,7 +374,7 @@ export const catalog = {
   },
 
   people: async (o: {
-    role?: 'composer' | 'singer' | 'lyricist' | 'actor' | 'all'
+    role?: 'composer' | 'singer' | 'lyricist' | 'actor' | 'artist' | 'all'
     q?: string
     offset?: number
     limit?: number

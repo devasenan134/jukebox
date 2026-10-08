@@ -218,6 +218,75 @@ class MixMakerTest {
         assertTrue(daily.first().songs.count { style(it.id) == 0 } > daily.first().songs.size / 2)
         assertTrue(maker.home().none { it.id == "moods" })
     }
+
+    @Test
+    fun `songs and score tracks are generated separately in mixes, stations, and recommendations`() {
+        val scoreTracks = (0 until 20).map { i ->
+            val isRomantic = i % 2 == 0
+            val title = if (isRomantic) "Romantic Love Theme $i" else "Mass Elevation BGM $i"
+            LibrarySong(
+                id = "score$i",
+                title = title,
+                album = "Movie ${i / 2} (Original Background Score)",
+                albumId = "obs${i / 2}",
+                artist = "",
+                singers = emptyList(),
+                composer = Person("composer0", "Composer 0"),
+                year = 2020,
+                duration = 90,
+                genre = "Tamil",
+                score = true,
+            ) to Pretend.sound(0)
+        }
+        val lib = Pretend.library(extra = scoreTracks)
+        val maker = maker(lib)
+
+        // 1. Daily mixes have ONLY songs, NEVER score tracks
+        val daily = maker.dailyMixes()
+        assertTrue(daily.isNotEmpty())
+        for (m in daily) {
+            assertTrue(m.songs.none { it.id.startsWith("score") }, "daily mix must contain only songs, no bgms")
+        }
+
+        // 2. Score mixes exist, have unique names, and contain ONLY score tracks
+        val scoreMixes = maker.scoreMixes()
+        assertTrue(scoreMixes.isNotEmpty(), "score mixes should be generated when library has score tracks")
+        val romanticRose = scoreMixes.firstOrNull { it.id == "score-romantic-rose" }
+        assertNotNull(romanticRose, "Smell the Romantic rose mix must exist")
+        assertEquals("Smell the Romantic rose", romanticRose.title)
+        assertTrue(romanticRose.songs.all { it.id.startsWith("score") }, "Romantic rose mix must contain ONLY score/bgm tracks")
+
+        val massElevation = scoreMixes.firstOrNull { it.id == "score-mass-elevation" }
+        assertNotNull(massElevation, "Feel the Mass elevation mix must exist")
+        assertEquals("Feel the Mass elevation", massElevation.title)
+        assertTrue(massElevation.songs.all { it.id.startsWith("score") }, "Mass elevation mix must contain ONLY score/bgm tracks")
+
+        // 3. Stations: song station has only songs, score station has only scores
+        val songStation = assertNotNull(maker.radio("radio-song-song5", emptySet(), 20, Random(1)))
+        assertTrue(songStation.songs.none { it.id.startsWith("score") }, "song station must only play songs")
+
+        val scoreStation = assertNotNull(maker.radio("radio-song-score0", emptySet(), 10, Random(1)))
+        assertTrue(scoreStation.songs.all { it.id.startsWith("score") }, "score station must only play scores/bgms")
+
+        // 4. Playlist recommendations: song playlist recommends songs, score playlist recommends scores
+        val songRecs = maker.recommend(listOf("song1", "song2"), 5, 0)
+        assertTrue(songRecs.all { !it.id.startsWith("score") }, "recommendations for songs must only be songs")
+
+        val scoreRecs = maker.recommend(listOf("score0", "score1"), 5, 0)
+        assertTrue(scoreRecs.all { it.id.startsWith("score") }, "recommendations for score playlist must only be scores")
+
+        // 5. When user listens to BGMs, score mixes are featured in Made for You
+        val bgmFanHistory = History(
+            playCount = mapOf(lib.index.getValue("score0") to 10, lib.index.getValue("score1") to 8),
+            lastPlayed = mapOf(lib.index.getValue("score0") to now, lib.index.getValue("score1") to now),
+            plays = listOf(lib.index.getValue("score0") to now, lib.index.getValue("score1") to now),
+            starred = emptySet(), starredAlbums = emptySet(), starredArtists = emptySet(), rating = emptyMap(),
+        )
+        val bgmMaker = maker(lib, history = bgmFanHistory)
+        val home = bgmMaker.home()
+        val madeForYou = home.first { it.id == "made-for-you" }
+        assertTrue(madeForYou.mixes.any { it.id.startsWith("score-") }, "BGM fan gets score mixes in Made for You")
+    }
 }
 
 /** A pretend library and play history for the API test. */

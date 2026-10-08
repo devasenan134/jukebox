@@ -102,14 +102,18 @@ class JukeboxLibrary(
                     ORDER BY r.id, CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'score' THEN 1 ELSE 2 END, coalesce(f.bitrate, 0) DESC""",
             ) { rs ->
                 val id = rs.getString(1)
-                val score = rs.getString(8) == "score"
+                val relKind = rs.getString(8)
+                val albumRaw = rs.getString(6)
+                val title = rs.getString(2)
+                val isScoreRelease = relKind == "score"
+                val score = Names.isScore(relKind, albumRaw, title)
                 val roles = credits[id].orEmpty()
                 val singers = roles["singer"].orEmpty()
                 LibrarySong(
                     id = id,
-                    title = rs.getString(2),
-                    album = if (score) rs.getString(6) + " (Original Background Score)" else rs.getString(6),
-                    albumId = if (score) rs.getString(9) else rs.getString(7),
+                    title = title,
+                    album = if (isScoreRelease) albumRaw + " (Original Background Score)" else albumRaw,
+                    albumId = if (isScoreRelease) rs.getString(9) else rs.getString(7),
                     artist = singers.joinToString(" • ") { it.name },
                     singers = singers,
                     composer = roles["composer"]?.firstOrNull(),
@@ -119,6 +123,7 @@ class JukeboxLibrary(
                     addedAt = rs.getLong(5),
                     karaoke = rs.getString(3) == "karaoke",
                     lyricists = roles["lyricist"].orEmpty(),
+                    score = score,
                 )
             }.distinctBy { it.id }
         }

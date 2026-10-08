@@ -1,54 +1,65 @@
-import { useEffect, useRef, useState } from 'react'
-import { useInfiniteQuery } from '@tanstack/react-query'
-import type { Artist } from '../api/types'
+import { useMemo, useState } from 'react'
+import { catalog } from '../api/catalog'
 import { subsonic } from '../api/subsonic'
 import { PlaylistCard, ScreenHeader, useLoad } from '../ui/components'
 import { CardsSkeleton } from '../ui/collection'
-import { ErrorBox, Icon, Loading } from '../ui/kit'
+import { ErrorBox, Icon } from '../ui/kit'
 import { useNav } from '../ui/nav'
-import { PersonCard } from './SearchScreen'
 
-// Browsing everyone who sings and every playlist on the server (ui/library/SingersScreen.kt, PlaylistsScreen.kt).
+// Browsing artists and playlists on the server.
 
-const PAGE = 200
-
-/** Every singer, A to Z, a page at a time as you scroll, with a filter box for the ones loaded. */
+/** Artists, sorted by people with more albums, with a filter box. Uses native /api/v2/people. */
 export function SingersScreen() {
   const nav = useNav()
   const [filter, setFilter] = useState('')
-  const end = useRef<HTMLDivElement>(null)
-  const q = useInfiniteQuery({
-    queryKey: ['singers'],
-    queryFn: ({ pageParam }) => subsonic.singers(pageParam, PAGE),
-    initialPageParam: 0,
-    getNextPageParam: (last: Artist[], pages) => (last.length < PAGE ? undefined : pages.length * PAGE),
+  const data = useLoad(['artists-panel-v2'], async () => {
+    const res = await catalog.people({ role: 'artist', limit: 500 })
+    return res.people.map((p) => ({
+      id: p.id,
+      name: p.name,
+      roles: p.roles,
+      albumCount: p.movieCount,
+      coverArt: p.coverArt,
+    }))
   })
-  const f = filter.trim().toLowerCase()
-  const singers = (q.data?.pages.flat() ?? []).filter((a) => !f || a.name.toLowerCase().includes(f))
-  const done = !q.hasNextPage && !q.isPending
-  useEffect(() => {
-    const el = end.current
-    if (!el || done) return
-    const io = new IntersectionObserver((e) => e[0].isIntersecting && !q.isFetching && void q.fetchNextPage())
-    io.observe(el)
-    return () => io.disconnect()
-  })
+
+  const artists = useMemo(
+    () =>
+      (data.data ?? [])
+        .slice()
+        .sort((a, b) => (b.albumCount ?? 0) - (a.albumCount ?? 0) || a.name.localeCompare(b.name))
+        .filter((a) => a.name.toLowerCase().includes(filter.trim().toLowerCase())),
+    [data.data, filter],
+  )
+
+  if (data.loading && !data.data) return <div className="page"><CardsSkeleton rows={3} /></div>
+  if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
+
   return (
     <div className="page">
-      <ScreenHeader title="Singers" onBack={nav.back} />
+      <ScreenHeader title="Artists" onBack={nav.back} />
       <div style={{ padding: '0 16px 12px' }}>
         <div className="search-box">
           <Icon name="filter_list" />
-          <input value={filter} placeholder="Find a singer" onChange={(e) => setFilter(e.target.value)} aria-label="Find a singer" />
+          <input value={filter} placeholder="Find an artist" onChange={(e) => setFilter(e.target.value)} aria-label="Find an artist" />
         </div>
       </div>
-      {q.error && <ErrorBox message={q.error.message} onRetry={() => void q.refetch()} />}
-      {q.isPending ? <CardsSkeleton rows={3} /> : (
-        <div className="grid">
-          {singers.map((a) => <PersonCard key={a.id} artist={a} className="" onClick={() => nav.openSinger(a)} />)}
-        </div>
-      )}
-      {!done && <div ref={end}><Loading /></div>}
+      <div className="list" style={{ padding: '0 16px' }}>
+        {artists.map((a) => (
+          <div
+            key={a.id}
+            className="list-row"
+            onClick={() => nav.openSinger(a)}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 8 }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div className="body-large ellipsis" style={{ fontWeight: 600 }}>{a.name}</div>
+              <div className="body-small muted">{a.albumCount ?? 0} {(a.albumCount ?? 0) === 1 ? 'album' : 'albums'}</div>
+            </div>
+            <Icon name="chevron_right" size={20} className="muted" />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

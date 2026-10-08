@@ -388,11 +388,11 @@ data class PersonHit(
     val songCount: Int = 0,
     val movieCount: Int = 0,
 ) {
-    /** "Actor · Lyricist · 45 movies" */
+    /** "Artist · 45 albums" */
     val description get() = (
-        roles.map { when (it) { "composer" -> "Composer"; "singer" -> "Artist"; "lyricist" -> "Lyricist"; else -> "Actor" } } +
+        roles.map { when (it) { "composer" -> "Composer"; else -> "Artist" } }.distinct() +
             listOfNotNull(
-                if ("actor" in roles || "composer" in roles) movieCount.takeIf { it > 0 }?.let { if (it == 1) "1 movie" else "$it movies" }
+                if ("composer" in roles || "artist" in roles || "singer" in roles || "lyricist" in roles) movieCount.takeIf { it > 0 }?.let { if (it == 1) "1 album" else "$it albums" }
                 else songCount.takeIf { it > 0 }?.let { if (it == 1) "1 song" else "$it songs" },
             )
         ).joinToString(" · ")

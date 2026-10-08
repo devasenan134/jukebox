@@ -171,7 +171,7 @@ export function RequestsScreen() {
         <Loading />
       ) : list.data.length === 0 ? (
         <div className="body-medium muted" style={{ padding: 16 }}>
-          {everyone ? 'No requests right now.' : "Nothing requested yet. Search for a song or movie; ones that aren't in the library have a Request button."}
+          {everyone ? 'No requests right now.' : "Nothing requested yet. Search for a song or album; ones that aren't in the library have a Request button."}
         </div>
       ) : (
         <div style={{ padding: '0 8px' }}>

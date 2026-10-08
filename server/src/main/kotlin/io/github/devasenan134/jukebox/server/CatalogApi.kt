@@ -662,10 +662,10 @@ class CatalogService(
                       EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'singer'),
                       EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
                       EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'lyricist'),
-                      (SELECT count(DISTINCT c.recording_id) FROM recording_credits c WHERE c.person_id = p.id)
+                      (SELECT count(DISTINCT c.recording_id) FROM recording_credits c WHERE c.person_id = p.id),
+                      (SELECT count(DISTINCT rl.album_id) FROM recording_credits rc JOIN tracks t ON t.recording_id = rc.recording_id JOIN releases rl ON rl.id = t.release_id WHERE rc.person_id = p.id)
                FROM people p
-               WHERE p.merged_into IS NULL
-               ORDER BY p.name COLLATE NOCASE"""
+               WHERE p.merged_into IS NULL"""
         ) { rs ->
             val id = rs.getString(1)
             val name = rs.getString(2)
@@ -674,30 +674,33 @@ class CatalogService(
             val isComposer = rs.getInt(5) == 1 || composerAlbums > 0
             val isLyricist = rs.getInt(6) == 1
             val songs = rs.getInt(7)
+            val singerAlbums = rs.getInt(8)
 
             val roles = buildList {
                 if (isComposer) add("composer")
                 if (isSinger) add("singer")
                 if (isLyricist) add("lyricist")
             }
+            val albumCount = if (isComposer && composerAlbums > 0) composerAlbums else singerAlbums
             PersonSummaryDto(
                 id = id,
                 name = name,
                 roles = roles,
                 coverArt = "ar-$id",
                 songCount = songs,
-                movieCount = composerAlbums,
+                movieCount = albumCount,
             )
         }.filter { p ->
             val matchesRole = when (role?.lowercase()) {
                 "composer" -> p.roles.contains("composer")
                 "singer" -> p.roles.contains("singer")
                 "lyricist" -> p.roles.contains("lyricist")
+                "artist" -> p.roles.contains("singer") || p.roles.contains("lyricist") || !p.roles.contains("composer")
                 else -> p.roles.isNotEmpty()
             }
             val matchesQuery = query.isNullOrBlank() || p.name.contains(query, ignoreCase = true)
             matchesRole && matchesQuery
-        }
+        }.sortedWith(compareByDescending<PersonSummaryDto> { it.movieCount }.thenBy { it.name.lowercase() })
 
         val paged = people.drop(offset.coerceAtLeast(0)).take(limit.coerceIn(1, 500))
         PeopleResponse(total = people.size, people = paged)

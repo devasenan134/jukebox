@@ -123,7 +123,8 @@ export function HomeScreen() {
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '6px 16px 16px' }}>
         <button className="chip" onClick={nav.openAlbums}>Albums</button>
-        <button className="chip" onClick={nav.openArtists}>Music directors</button>
+        <button className="chip" onClick={nav.openArtists}>Composers</button>
+        <button className="chip" onClick={nav.openSingers}>Artists</button>
       </div>
       <div className="quick-grid" onMouseLeave={() => setHovered(undefined)}>
         {quick.map((q) => (

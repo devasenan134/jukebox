@@ -94,7 +94,9 @@ class MixMaker(
     /** Songs this person keeps skipping: left out of their mixes. */
     private val avoid: Set<Int> = skips.filter { (_, s) -> s.skips >= 2 && s.skips >= 2 * s.listens }.keys
 
-    private fun eligible(i: Int) = !songs[i].karaoke && songs[i].duration >= 60 && i !in avoid
+    private fun eligible(i: Int) = !songs[i].karaoke && i !in avoid
+    private fun eligibleSong(i: Int) = eligible(i) && songs[i].duration >= 60 && !songs[i].score
+    private fun eligibleScore(i: Int) = eligible(i) && songs[i].duration >= 20 && songs[i].score
 
     private val heard: Set<Int> = history.playCount.keys + history.plays.map { it.first }
 
@@ -123,10 +125,16 @@ class MixMaker(
     private val liked: List<Int> = weights.filter { it.value > 0.3 && !songs[it.key].karaoke }.entries
         .sortedByDescending { it.value }.map { it.key }.take(400)
 
-    val hasTaste get() = liked.size >= 3
+    val likedSongs: List<Int> by lazy { liked.filter { !songs[it].score } }
+    val likedScores: List<Int> by lazy { liked.filter { songs[it].score } }
+    val hasScoreListening: Boolean by lazy {
+        likedScores.isNotEmpty() || history.playCount.any { (i, count) -> count > 0 && songs[i].score }
+    }
+
+    val hasTaste get() = likedSongs.size >= 3
 
     /** This person's taste as one sound (the average of what they like), if the songs were analyzed. */
-    private val profile: FloatArray? = if (!lib.hasSound) null else centroid(liked, weights)
+    private val profile: FloatArray? = if (!lib.hasSound) null else centroid(likedSongs.ifEmpty { liked }, weights)
 
     private val composerLove: Map<String, Double> = share(liked) { i -> listOfNotNull(songs[i].composer?.id) }
     private val singerLove: Map<String, Double> = share(liked) { i -> songs[i].singers.map { it.id } }
@@ -186,21 +194,22 @@ class MixMaker(
     private fun pickBlend(
         scores: Map<Int, Float>, count: Int, random: Random, pool: Int, blend: Map<String, Double>,
         exclude: Set<Int> = emptySet(), maxPerAlbum: Int = 2, maxPerPerson: Int = 20,
+        scoreOnly: Boolean = false,
     ): List<Int> {
-        if (blend.size <= 1) return pick(scores, count, random, pool, exclude, maxPerAlbum, maxPerPerson, blend.keys)
+        if (blend.size <= 1) return pick(scores, count, random, pool, exclude, maxPerAlbum, maxPerPerson, blend.keys, scoreOnly = scoreOnly)
         val main = blend.maxBy { it.value }.key
         val taken = exclude.toMutableSet()
         val parts = blend.entries.sortedByDescending { it.value }.map { (language, share) ->
             // Songs whose language is unknown only fill in for the main language.
             val mine = scores.filterKeys { lib.language[it] == language || (language == main && lib.language[it] == null) }
             val want = (count * share).roundToInt().coerceAtLeast(1)
-            val list = pick(mine, want, random, (pool * share).roundToInt().coerceAtLeast(want), taken, maxPerAlbum, maxPerPerson)
+            val list = pick(mine, want, random, (pool * share).roundToInt().coerceAtLeast(want), taken, maxPerAlbum, maxPerPerson, scoreOnly = scoreOnly)
             taken += list
             list to share
         }.toMutableList()
         val short = count - parts.sumOf { it.first.size }
         if (short > 0) {
-            val more = pick(scores, short, random, pool, taken, maxPerAlbum, maxPerPerson, setOf(main))
+            val more = pick(scores, short, random, pool, taken, maxPerAlbum, maxPerPerson, setOf(main), scoreOnly = scoreOnly)
             parts[0] = (parts[0].first + more) to parts[0].second
         }
         // Take from whichever language is furthest behind its share so far.
@@ -224,12 +233,16 @@ class MixMaker(
      * app); the rest showcase the library, its composers and singers, and are the same for everyone.
      */
     fun home(): List<MixSection> {
+        val scores = scoreMixes()
         val madeForYou = buildList {
             addAll(dailyMixes())
             discover()?.let(::add)
             onRepeat()?.let(::add)
             friendsMix()?.let(::add)
             rewind()?.let(::add)
+            if (hasScoreListening) {
+                addAll(scores.take(2).map { it.copy(personal = true) })
+            }
         }
         val charts = listOfNotNull(popular(), newArrivals())
         val composers = topPeople(composer = true)
@@ -238,6 +251,7 @@ class MixMaker(
         return listOf(
             MixSection("made-for-you", "Made for you", madeForYou.map(::personalized)),
             MixSection("your-stations", "Your stations", yourStations().map { it.copy(personal = true) }),
+            MixSection("scores", "Themes and background scores", scores),
             MixSection("composers", "This is: composers", composers.mapNotNull { personMix(it, composer = true) }),
             MixSection("singers", "This is: artists", singers.mapNotNull { personMix(it, composer = false) }),
             MixSection("moods", "Moods and vibes", MOODS.mapNotNull { mood(it) }),
@@ -255,7 +269,7 @@ class MixMaker(
      * Rewind. Showcases (moods, decades, composers, singers, charts, their stations) are the same for everyone.
      */
     private fun personalized(mix: MixDto): MixDto = mix.copy(
-        personal = mix.kind in PERSONAL_KINDS,
+        personal = mix.personal || mix.kind in PERSONAL_KINDS,
     )
 
     private fun findById(id: String): MixDto? {
@@ -269,6 +283,7 @@ class MixMaker(
             "friends" -> friendsMix()
             "popular" -> popular()
             "mood" -> MOODS.firstOrNull { it.key == parts.getOrNull(1) }?.let { mood(it) }
+            "score" -> scoreMixes().firstOrNull { it.id == id }
             "decade" -> parts.getOrNull(1)?.toIntOrNull()?.let { decade(it) }
             "composer" -> parts.getOrNull(1)?.let { lib.people[it] }?.let { personMix(it, composer = true) }
             "singer" -> parts.getOrNull(1)?.let { lib.people[it] }?.let { personMix(it, composer = false) }
@@ -285,12 +300,13 @@ class MixMaker(
      * get an English mix of their own), and then by sound.
      */
     fun dailyMixes(): List<MixDto> {
-        if (liked.size < 4) return emptyList()
+        val songLikes = likedSongs
+        if (songLikes.size < 4) return emptyList()
         // Favourites whose language is unknown go with your main language.
-        val byLanguage = liked.groupBy { lib.language[it] ?: homeLanguage }
+        val byLanguage = songLikes.groupBy { lib.language[it] ?: homeLanguage }
             .filter { it.value.size >= 4 }.entries
             .sortedByDescending { (_, items) -> items.sumOf { weights[it] ?: 0.0 } }
-            .ifEmpty { listOf(java.util.AbstractMap.SimpleEntry(homeLanguage, liked)) }
+            .ifEmpty { listOf(java.util.AbstractMap.SimpleEntry(homeLanguage, songLikes)) }
         val perLanguage = byLanguage.map { (language, items) ->
             val groups = if (lib.hasSound) {
                 val analyzed = items.filter { lib.sound[it] != null }
@@ -309,10 +325,10 @@ class MixMaker(
         val used = mutableSetOf<Int>()
         return groups.mapIndexed { number, (language, group) ->
             val random = Random(personSeed * 31 + today.toEpochDay() * 7 + number)
-            val favourites = pick(group.associateWith { (weights[it] ?: 0.0).toFloat() }, 15, random, pool = 40)
+            val favourites = pick(group.associateWith { (weights[it] ?: 0.0).toFloat() }, 15, random, pool = 40, scoreOnly = false)
             val scores = similarTo(group, language)
             for (i in 0 until n) scores[i] += 0.3f * affinity[i]
-            val fresh = pick(scores, 50 - favourites.size, random, pool = 150, exclude = favourites.toSet() + used + group, languages = setOfNotNull(language))
+            val fresh = pick(scores, 50 - favourites.size, random, pool = 150, exclude = favourites.toSet() + used + group, languages = setOfNotNull(language), scoreOnly = false)
             used += fresh
             val list = interleave(favourites, fresh)
             val inLanguage = if (several && language != null) "$language songs you love" else "Songs you love"
@@ -326,12 +342,12 @@ class MixMaker(
 
     /** 30 songs you haven't heard yet, picked for how you listen. Changes on Mondays. */
     fun discover(): MixDto? {
-        if (liked.size < 3) return null
-        val scores = similarTo(liked.take(60), languages = yourLanguages.keys)
+        if (likedSongs.size < 3) return null
+        val scores = similarTo(likedSongs.take(60), languages = yourLanguages.keys)
         for (i in 0 until n) scores[i] += 0.3f * affinity[i] + 0.4f * ln(1.0 + (friendsPlays[i] ?: 0)).toFloat()
         val list = pickBlend(
             scores.indices.associateWith { scores[it] }, 30, weekRandom, pool = 150, blend = yourLanguages,
-            exclude = heard + history.starred, maxPerAlbum = 1, maxPerPerson = 5,
+            exclude = heard + history.starred, maxPerAlbum = 1, maxPerPerson = 5, scoreOnly = false,
         )
         if (list.size < 10) return null
         return mix(
@@ -346,7 +362,7 @@ class MixMaker(
         val counts = history.plays.filter { it.second > since }.groupingBy { it.first }.eachCount().ifEmpty {
             history.lastPlayed.filter { it.value > since }.mapValues { history.playCount[it.key] ?: 1 }
         }
-        val list = counts.entries.filter { !songs[it.key].karaoke && it.key !in avoid }
+        val list = counts.entries.filter { eligibleSong(it.key) }
             .sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenByDescending { history.lastPlayed[it.key] ?: 0 })
             .map { it.key }.take(30)
         if (list.size < 5) return null
@@ -360,7 +376,7 @@ class MixMaker(
     fun rewind(): MixDto? {
         val cutoff = now - 45 * DAY
         val list = (history.playCount.filter { it.value >= 2 }.keys + history.starred)
-            .filter { eligible(it) && (history.lastPlayed[it] ?: 0) < cutoff }
+            .filter { eligibleSong(it) && (history.lastPlayed[it] ?: 0) < cutoff }
             .sortedByDescending { weights[it] ?: 0.0 }.take(40)
         if (list.size < 8) return null
         return mix(
@@ -371,7 +387,7 @@ class MixMaker(
 
     /** Songs added to the library lately, the ones that fit you first. New songs join as soon as they're added. */
     fun newArrivals(): MixDto? {
-        val added = songs.indices.filter { eligible(it) && songs[it].addedAt > 0 }
+        val added = songs.indices.filter { eligibleSong(it) && songs[it].addedAt > 0 }
         if (added.isEmpty()) return null
         // The first big import isn't "new": only songs added after most of the library count.
         val importedAt = added.map { songs[it].addedAt }.sorted()[added.size / 2]
@@ -386,8 +402,8 @@ class MixMaker(
 
     /** What your friends have been playing, with the songs that suit you first. */
     fun friendsMix(): MixDto? {
-        val scores = friendsPlays.filterKeys { eligible(it) }.mapValues { (i, plays) -> ln(1.0 + plays).toFloat() + 0.3f * affinity[i] }
-        val list = pick(scores, 40, dayRandom, pool = 80, languages = yourLanguages.keys)
+        val scores = friendsPlays.filterKeys { eligibleSong(it) }.mapValues { (i, plays) -> ln(1.0 + plays).toFloat() + 0.3f * affinity[i] }
+        val list = pick(scores, 40, dayRandom, pool = 80, languages = yourLanguages.keys, scoreOnly = false)
         if (list.size < 8) return null
         return mix(
             "friends", "friends", "Friends Mix", list, refresh = "daily", subtitle = "What your friends are playing",
@@ -397,7 +413,7 @@ class MixMaker(
 
     /** The most played songs by everyone on this server. */
     fun popular(): MixDto? {
-        val list = popularity.entries.filter { eligible(it.key) && speaks(it.key, yourLanguages.keys) }.sortedByDescending { it.value }.map { it.key }.take(50)
+        val list = popularity.entries.filter { eligibleSong(it.key) && speaks(it.key, yourLanguages.keys) }.sortedByDescending { it.value }.map { it.key }.take(50)
         if (list.size < 10) return null
         return mix(
             "popular", "popular", "Top 50", list, refresh = "live", subtitle = "Most played by everyone",
@@ -442,9 +458,9 @@ class MixMaker(
         val random = Random(today.toEpochDay() * 13 + mood.key.hashCode())
         // A music culture (Kuthu, Kollywood Mass, Carnatic) stays in its language; a feeling (Sad, Chill) blends yours.
         val list = when {
-            mood.language != null -> pick(members, 50, random, pool = 200, maxPerAlbum = 2, languages = setOf(mood.language))
-            mood.oneLanguage -> pick(members, 50, random, pool = 200, maxPerAlbum = 2, languages = setOfNotNull(homeLanguage))
-            else -> pickBlend(members, 50, random, pool = 200, blend = yourLanguages, maxPerAlbum = 2)
+            mood.language != null -> pick(members, 50, random, pool = 200, maxPerAlbum = 2, languages = setOf(mood.language), scoreOnly = false)
+            mood.oneLanguage -> pick(members, 50, random, pool = 200, maxPerAlbum = 2, languages = setOfNotNull(homeLanguage), scoreOnly = false)
+            else -> pickBlend(members, 50, random, pool = 200, blend = yourLanguages, maxPerAlbum = 2, scoreOnly = false)
         }
         if (list.size < 20) return null
         return mix(
@@ -458,7 +474,7 @@ class MixMaker(
 
     /** How well each song fits [mood] (NaN if it can't be in it at all), before the cut-off. */
     private fun moodFit(mood: Mood, i: Int): Float {
-        if (!eligible(i) || lib.sound[i] == null) return Float.NaN
+        if (!eligibleSong(i) || lib.sound[i] == null) return Float.NaN
         if (mood.requires.any { (key, min) -> (lib.moods[key]?.get(i) ?: Float.NaN).let { it.isNaN() || it < min } }) return Float.NaN
         if (mood.vetoes.any { (key, max) -> (lib.moods[key]?.get(i) ?: 0f) > max }) return Float.NaN
         if (mood.indianSound) {
@@ -492,15 +508,15 @@ class MixMaker(
     }
 
     fun decades(): List<MixDto> {
-        val years = songs.indices.filter { eligible(it) && songs[it].year > 1900 && speaks(it, yourLanguages.keys) }.groupBy { songs[it].year / 10 * 10 }
+        val years = songs.indices.filter { eligibleSong(it) && songs[it].year > 1900 && speaks(it, yourLanguages.keys) }.groupBy { songs[it].year / 10 * 10 }
         return years.filter { it.value.size >= 20 }.keys.sortedDescending().mapNotNull { decade(it) }
     }
 
     fun decade(start: Int): MixDto? {
-        val members = songs.indices.filter { eligible(it) && songs[it].year in start until start + 10 && speaks(it, yourLanguages.keys) }
+        val members = songs.indices.filter { eligibleSong(it) && songs[it].year in start until start + 10 && speaks(it, yourLanguages.keys) }
         if (members.size < 20) return null
         val scores = members.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() }
-        val list = pickBlend(scores, 50, Random(today.toEpochDay() * 7 + start), pool = 250, blend = yourLanguages)
+        val list = pickBlend(scores, 50, Random(today.toEpochDay() * 7 + start), pool = 250, blend = yourLanguages, scoreOnly = false)
         val name = if (start >= 2000) "${start}s" else "${start % 100}s"
         return mix(
             "decade-$start", "decade", "$name Mix", list, refresh = "daily", subtitle = namesIn(list), color = DECADE_COLORS[(start / 10) % DECADE_COLORS.size],
@@ -521,12 +537,12 @@ class MixMaker(
      * (Music that sounds like theirs is what their station is for.)
      */
     fun personMix(person: Person, composer: Boolean): MixDto? {
-        val theirs = (if (composer) lib.byComposer[person.id] else lib.bySinger[person.id]).orEmpty().filter(::eligible)
+        val theirs = (if (composer) lib.byComposer[person.id] else lib.bySinger[person.id]).orEmpty().filter(::eligibleSong)
         if (theirs.size < 5) return null
         val random = Random(today.toEpochDay() * 5 + person.id.hashCode())
         val scores = theirs.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() }
         // Someone who works in several languages: their main one here.
-        val list = pick(scores, 50, random, pool = 120, maxPerAlbum = 3, maxPerPerson = 50, languages = setOfNotNull(mainLanguage(theirs)))
+        val list = pick(scores, 50, random, pool = 120, maxPerAlbum = 3, maxPerPerson = 50, languages = setOfNotNull(mainLanguage(theirs)), scoreOnly = false)
         return mix(
             "${if (composer) "composer" else "singer"}-${person.id}", if (composer) "composer" else "singer", "This Is ${person.name}", list,
             refresh = "daily", subtitle = namesIn(list, first = person.name), covers = listOf("ar-${person.id}"), round = true,
@@ -539,7 +555,7 @@ class MixMaker(
 
     /** Stations from the songs this person plays most (none until they've played some). */
     fun yourStations(): List<MixDto> =
-        if (!hasTaste) emptyList() else liked.filter(::eligible).take(6).map { stationSummary("radio-song-${songs[it].id}") }
+        if (!hasTaste && !hasScoreListening) emptyList() else liked.filter { eligibleSong(it) || eligibleScore(it) }.take(6).map { stationSummary("radio-song-${songs[it].id}") }
 
     /** Stations for the library's biggest composers and singers, the same for everyone. */
     fun artistStations(): List<MixDto> {
@@ -591,6 +607,11 @@ class MixMaker(
             "composer" -> lib.byComposer[key].orEmpty()
             else -> lib.bySinger[key].orEmpty()
         }
+        val isScoreStation = when (kind) {
+            "song" -> songs[seeds.first()].score
+            "album" -> seeds.isNotEmpty() && seeds.count { songs[it].score } > seeds.size / 2
+            else -> false
+        }
         // A station stays in its seed's language (a composer's or singer's: their main one).
         val language = mainLanguage(seeds)
         val scores = similarTo(seeds, language)
@@ -598,7 +619,13 @@ class MixMaker(
         val skip = exclude.mapNotNull { lib.index[it] }.toMutableSet()
         val first = if (kind == "song" && exclude.isEmpty()) seeds else emptyList()
         // A composer's or singer's own songs come up often, but not only them.
-        val list = first + pick(scores, count - first.size, random, pool = 120, exclude = skip + first, maxPerAlbum = 2, maxPerPerson = if (kind == "composer" || kind == "singer") count else 6, languages = setOfNotNull(language))
+        val list = first + pick(
+            scores, count - first.size, random, pool = 120,
+            exclude = skip + first, maxPerAlbum = 2,
+            maxPerPerson = if (kind == "composer" || kind == "singer") count else 6,
+            languages = setOfNotNull(language),
+            scoreOnly = isScoreStation,
+        )
         return stationSummary(id).copy(songs = list.map(::song), songCount = list.size)
     }
 
@@ -606,12 +633,16 @@ class MixMaker(
     fun recommend(songIds: List<String>, count: Int, page: Int): List<MixSong> {
         val seeds = songIds.mapNotNull { lib.index[it] }
         if (seeds.isEmpty()) return emptyList()
+        val isScorePlaylist = seeds.count { songs[it].score } > seeds.size / 2
         // A playlist can be in more than one language on purpose: suggest in each one it has plenty of.
         val known = seeds.mapNotNull { lib.language[it] }
         val languages = known.groupingBy { it }.eachCount().filter { it.value >= 0.25 * known.size }.keys
         val scores = similarTo(seeds, languages = languages)
         for (i in 0 until n) scores[i] += 0.2f * affinity[i]
-        val ranked = pick(scores, count * (page + 1), Random(0), pool = count * (page + 1), exclude = seeds.toSet(), maxPerAlbum = 2)
+        val ranked = pick(
+            scores, count * (page + 1), Random(0), pool = count * (page + 1),
+            exclude = seeds.toSet(), maxPerAlbum = 2, scoreOnly = isScorePlaylist,
+        )
         return ranked.drop(count * page).map(::song)
     }
 
@@ -697,9 +728,14 @@ class MixMaker(
         exclude: Set<Int> = emptySet(), maxPerAlbum: Int = 2, maxPerPerson: Int = 20,
         /** Only songs in these languages (and ones whose language is unknown); any if null. */
         languages: Set<String>? = null,
+        scoreOnly: Boolean = false,
     ): List<Int> {
-        val ranked = scores.entries.filter { it.key !in exclude && eligible(it.key) && !it.value.isNaN() && speaks(it.key, languages) }
-            .sortedByDescending { it.value }.map { it.key }
+        val ranked = scores.entries.filter { (key, value) ->
+            key !in exclude &&
+                !value.isNaN() &&
+                speaks(key, languages) &&
+                if (scoreOnly) eligibleScore(key) else eligibleSong(key)
+        }.sortedByDescending { it.value }.map { it.key }
         val chosen = mutableListOf<Int>()
         val titles = exclude.mapTo(mutableSetOf()) { sameSong(it) }
         val perAlbum = mutableMapOf<String, Int>()
@@ -727,12 +763,14 @@ class MixMaker(
 
     /** The same song, whichever movie folder or version it's in: "Mersalaayitten (Remix)" = "Mersalaayitten". */
     private fun sameSong(i: Int): String =
-        songs[i].title.substringBefore('(').substringBefore(" - ").lowercase().filter { it.isLetterOrDigit() } + "/" + (songs[i].composer?.id ?: "")
+        if (songs[i].score) songs[i].title.lowercase().filter { it.isLetterOrDigit() } + "/" + songs[i].albumId
+        else songs[i].title.substringBefore('(').substringBefore(" - ").lowercase().filter { it.isLetterOrDigit() } + "/" + (songs[i].composer?.id ?: "")
 
     private fun pick(
         scores: FloatArray, count: Int, random: Random, pool: Int, exclude: Set<Int> = emptySet(),
         maxPerAlbum: Int = 2, maxPerPerson: Int = 20, languages: Set<String>? = null,
-    ) = pick(scores.indices.associateWith { scores[it] }, count, random, pool, exclude, maxPerAlbum, maxPerPerson, languages)
+        scoreOnly: Boolean = false,
+    ) = pick(scores.indices.associateWith { scores[it] }, count, random, pool, exclude, maxPerAlbum, maxPerPerson, languages, scoreOnly)
 
     /** Reorders so that two songs from the same movie don't play back to back (when possible). */
     fun spread(list: List<Int>): List<Int> {
@@ -794,11 +832,131 @@ class MixMaker(
         )
     }
 
+    data class ScoreVibe(
+        val key: String,
+        val title: String,
+        val subtitle: String,
+        val description: String,
+        val color: String,
+        val moodKey: String,
+        val titleKeywords: Set<String>,
+    )
+
+    fun scoreMix(vibe: ScoreVibe): MixDto? {
+        val scoreIndices = lib.songs.indices.filter { eligibleScore(it) }
+        if (scoreIndices.isEmpty()) return null
+        val scores = mutableMapOf<Int, Float>()
+        for (i in scoreIndices) {
+            val s = songs[i]
+            var fit = 0f
+            if (lib.hasSound) {
+                val m = lib.moods[vibe.moodKey]?.get(i) ?: Float.NaN
+                if (!m.isNaN()) fit += m
+            }
+            val titleWords = s.title.lowercase().split(Regex("""\W+""")).filter { it.isNotBlank() }
+            val albumWords = s.album.lowercase().split(Regex("""\W+""")).filter { it.isNotBlank() }
+            val matches = (titleWords + albumWords).count { it in vibe.titleKeywords }
+            fit += matches * 2.0f
+
+            fit += 0.5f * (weights[i] ?: 0.0).toFloat()
+            s.composer?.let { c -> fit += 0.8f * (composerLove[c.id] ?: 0.0).toFloat() }
+            fit += 0.2f * ln(1.0 + (popularity[i] ?: 0)).toFloat()
+
+            if (fit > -1.0f) {
+                scores[i] = fit
+            }
+        }
+        if (scores.isEmpty()) {
+            for (i in scoreIndices) {
+                scores[i] = ln(1.0 + (popularity[i] ?: 0)).toFloat()
+            }
+        }
+        if (scores.isEmpty()) return null
+
+        val random = Random(today.toEpochDay() * 11 + vibe.key.hashCode())
+        val count = minOf(30, scoreIndices.size)
+        val list = pick(
+            scores, count, random, pool = 80,
+            maxPerAlbum = 4, maxPerPerson = 20,
+            scoreOnly = true,
+        )
+        if (list.isEmpty()) return null
+        return mix(
+            id = "score-${vibe.key}",
+            kind = "score",
+            title = vibe.title,
+            subtitle = vibe.subtitle,
+            description = "${vibe.description} Background scores and theme music only. Updates every day.",
+            color = vibe.color,
+            refresh = "daily",
+            list = list,
+        )
+    }
+
+    fun scoreMixes(): List<MixDto> = SCORE_VIBES.mapNotNull { scoreMix(it) }
+
     companion object {
         const val DAY = 24 * 60 * 60 * 1000L
 
         /** Mixes made from someone's own listening; everything else is a showcase, the same for everyone. */
         val PERSONAL_KINDS = setOf("daily", "discover", "repeat", "rewind", "friends")
+
+        val SCORE_VIBES = listOf(
+            ScoreVibe(
+                key = "romantic-rose",
+                title = "Smell the Romantic rose",
+                subtitle = "Romantic themes & background scores",
+                description = "Soft, intimate themes and background scores from original soundtracks. Immerse yourself in the fragrance of romance.",
+                color = "#B03A5B",
+                moodKey = "romantic",
+                titleKeywords = setOf("romantic", "romance", "love", "heart", "kadhal", "prema", "rose", "kiss", "feel", "melody", "soul", "flute", "soft", "sweet"),
+            ),
+            ScoreVibe(
+                key = "mass-elevation",
+                title = "Feel the Mass elevation",
+                subtitle = "Hero intros & elevation background scores",
+                description = "High-voltage elevation themes and roaring beats. Feel the cinematic rush and adrenaline of the ultimate mass moments.",
+                color = "#A3271F",
+                moodKey = "heroic",
+                titleKeywords = setOf("mass", "elevation", "hero", "intro", "roar", "action", "entry", "badass", "fight", "beast", "rage", "climax", "power", "rule", "don", "king", "punch", "fire", "sword", "hunter"),
+            ),
+            ScoreVibe(
+                key = "tears-solitude",
+                title = "Echoes of the Broken Soul",
+                subtitle = "Emotional & pathos background scores",
+                description = "Melancholic violins and poignant themes from emotional movie scenes. For the reflective and quiet hours.",
+                color = "#4A5A7A",
+                moodKey = "sad",
+                titleKeywords = setOf("sad", "pain", "loss", "tears", "broken", "pathos", "tragedy", "separation", "death", "lonely", "sorrow", "emotional", "crying", "agony"),
+            ),
+            ScoreVibe(
+                key = "breeze-serenity",
+                title = "Whispering Wind of Peace",
+                subtitle = "Calm, acoustic & soothing themes",
+                description = "Gentle acoustic flutes, soft strings and calming scores. A serene soundscape to unwind and breathe.",
+                color = "#3B6E8F",
+                moodKey = "chill",
+                titleKeywords = setOf("chill", "peace", "calm", "serenity", "breeze", "morning", "silence", "gentle", "flute", "acoustic", "rain", "solitude", "sleep", "soothing"),
+            ),
+            ScoreVibe(
+                key = "dark-suspense",
+                title = "Shadows of Dark Suspense",
+                subtitle = "Thrilling & mystery background scores",
+                description = "Ominous basses, ticking clocks and gripping suspense cues. On the edge of your seat.",
+                color = "#28335C",
+                moodKey = "instrumental",
+                titleKeywords = setOf("dark", "suspense", "thrill", "chase", "mystery", "shadow", "horror", "fear", "tension", "crime", "secret", "hunt", "danger", "investigation"),
+            ),
+            ScoreVibe(
+                key = "grandeur-symphony",
+                title = "Grandeur of the Symphony",
+                subtitle = "Majestic orchestral & classical scores",
+                description = "Orchestral sweeps, classical ragas and grandeur. The timeless musical craftsmanship of cinema.",
+                color = "#6D4C8F",
+                moodKey = "classical",
+                titleKeywords = setOf("symphony", "classical", "grand", "theme", "carnatic", "raga", "orchestra", "royal", "destiny", "magic", "title", "overture", "epic", "legend"),
+            ),
+        )
 
         val MOODS = listOf(
             Mood(

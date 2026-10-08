@@ -14,10 +14,12 @@ data class LibrarySong(
     val duration: Int,
     /** The language here ("Tamil", "Telugu"...), or "" if unknown. */
     val genre: String,
-    val addedAt: Long,
-    val karaoke: Boolean,
+    val addedAt: Long = 0,
+    val karaoke: Boolean = false,
     /** Who wrote the words. */
     val lyricists: List<Person> = emptyList(),
+    /** Whether this track is a background score, theme music or BGM (from OBS or soundtrack). */
+    val score: Boolean = false,
 ) {
     val coverArt get() = "al-$albumId"
 }

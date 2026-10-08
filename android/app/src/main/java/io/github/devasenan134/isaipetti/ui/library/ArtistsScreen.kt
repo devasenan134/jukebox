@@ -23,7 +23,7 @@ import io.github.devasenan134.isaipetti.ui.components.LocalApp
 import io.github.devasenan134.isaipetti.ui.components.ScreenHeader
 import io.github.devasenan134.isaipetti.ui.components.rememberLoader
 
-/** Music directors (album artists), biggest catalogue first. */
+/** Composers, biggest catalogue first. */
 @Composable
 fun ArtistsScreen(nav: Nav) {
     val app = LocalApp.current
@@ -34,14 +34,13 @@ fun ArtistsScreen(nav: Nav) {
             LazyColumn {
                 items(artists, key = { it.id }) { artist ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { nav.openArtist(artist.id) }.padding(horizontal = 16.dp, vertical = 8.dp),
+                        Modifier.fillMaxWidth().clickable { nav.openArtist(artist.id) }.padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Cover(artist.coverArt, Modifier.size(52.dp).clip(CircleShape), size = 150, corner = 26.dp)
-                        Column(Modifier.padding(start = 16.dp)) {
+                        Column(Modifier.weight(1f)) {
                             Text(artist.name, style = MaterialTheme.typography.bodyLarge)
                             Text(
-                                "${artist.albumCount} movies",
+                                "${artist.albumCount} ${if (artist.albumCount == 1) "album" else "albums"}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

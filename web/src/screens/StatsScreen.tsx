@@ -102,7 +102,7 @@ function PersonRow({ user, stats, share, open, onClick }: { user: UserStats; sta
           {stats.plays === 0 ? <div className="body-medium muted">Nothing played in this range.</div> : (
             <>
               <TopList title="Top songs" items={stats.topSongs} covers />
-              <TopList title="Top movies" items={stats.topMovies} covers />
+              <TopList title="Top albums" items={stats.topMovies} covers />
               <TopList title="Top composers" items={stats.topComposers} />
             </>
           )}

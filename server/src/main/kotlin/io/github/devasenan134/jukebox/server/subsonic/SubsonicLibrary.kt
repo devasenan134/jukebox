@@ -271,16 +271,19 @@ class SubsonicLibrary(
         """SELECT p.id, p.name, p.sort_name,
                   (SELECT count(DISTINCT c.album_id) FROM album_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
                   EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'singer'),
-                  EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer')
+                  EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
+                  (SELECT count(DISTINCT rl.album_id) FROM recording_credits rc JOIN tracks t ON t.recording_id = rc.recording_id JOIN releases rl ON rl.id = t.release_id WHERE rc.person_id = p.id)
              FROM people p ${if (where.isBlank()) "WHERE" else "$where AND"} p.merged_into IS NULL""", *args,
     ) {
-        val albums = it.getInt(4)
+        val composerAlbums = it.getInt(4)
+        val singerAlbums = it.getInt(7)
+        val albums = maxOf(composerAlbums, singerAlbums)
         buildJsonObject {
             put("id", it.getString(1))
             put("name", it.getString(2))
             put("albumCount", albums)
             putJsonArray("roles") {
-                if (albums > 0) add("albumartist")
+                if (composerAlbums > 0) add("albumartist")
                 if (it.getInt(6) == 1) add("composer")
                 if (it.getInt(5) == 1) add("artist")
             }

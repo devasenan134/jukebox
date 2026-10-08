@@ -196,7 +196,7 @@ private fun PersonRow(user: UserStats, stats: RangeStats, fraction: Float, expan
             } else {
                 Column(Modifier.padding(start = 52.dp, top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TopList("Top songs", stats.topSongs, showCovers = true)
-                    TopList("Top movies", stats.topMovies, showCovers = true)
+                    TopList("Top albums", stats.topMovies, showCovers = true)
                     TopList("Top composers", stats.topComposers, showCovers = false)
                 }
             }

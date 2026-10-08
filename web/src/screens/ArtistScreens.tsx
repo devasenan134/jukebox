@@ -6,11 +6,10 @@ import { catalog, albumSummaryToAlbum, recordingToSong } from '../api/catalog'
 import * as player from '../player/player'
 import { AlbumCard, PlayShuffleRow, ScreenHeader, SectionTitle, songCount, SongRow, startStation, useLoad } from '../ui/components'
 import { CardsSkeleton, Collection, Meta, PageSkeleton, PersonAvatar, TrackHead } from '../ui/collection'
-import { PersonCard } from './SearchScreen'
 import { ErrorBox, Icon, MoreMenu } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
-/** Music directors, A to Z, with a filter box. Uses native /api/v2/people. */
+/** Composers, sorted by people with more albums, with a filter box. Uses native /api/v2/people. */
 export function ArtistsScreen() {
   const nav = useNav()
   const [filter, setFilter] = useState('')
@@ -26,7 +25,11 @@ export function ArtistsScreen() {
   })
 
   const composers = useMemo(
-    () => (data.data ?? []).filter((a) => a.name.toLowerCase().includes(filter.trim().toLowerCase())),
+    () =>
+      (data.data ?? [])
+        .slice()
+        .sort((a, b) => (b.albumCount ?? 0) - (a.albumCount ?? 0) || a.name.localeCompare(b.name))
+        .filter((a) => a.name.toLowerCase().includes(filter.trim().toLowerCase())),
     [data.data, filter],
   )
 
@@ -35,16 +38,27 @@ export function ArtistsScreen() {
 
   return (
     <div className="page">
-      <ScreenHeader title="Music directors" onBack={nav.back} />
+      <ScreenHeader title="Composers" onBack={nav.back} />
       <div style={{ padding: '0 16px 12px' }}>
         <div className="search-box">
           <Icon name="filter_list" />
-          <input value={filter} placeholder="Find a music director" onChange={(e) => setFilter(e.target.value)} />
+          <input value={filter} placeholder="Find a composer" onChange={(e) => setFilter(e.target.value)} />
         </div>
       </div>
-      <div className="grid">
+      <div className="list" style={{ padding: '0 16px' }}>
         {composers.map((a) => (
-          <PersonCard key={a.id} artist={a} className="" onClick={() => nav.openArtist(a.id)} />
+          <div
+            key={a.id}
+            className="list-row"
+            onClick={() => nav.openArtist(a.id)}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderRadius: 8 }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div className="body-large ellipsis" style={{ fontWeight: 600 }}>{a.name}</div>
+              <div className="body-small muted">{a.albumCount ?? 0} {(a.albumCount ?? 0) === 1 ? 'album' : 'albums'}</div>
+            </div>
+            <Icon name="chevron_right" size={20} className="muted" />
+          </div>
         ))}
       </div>
     </div>
@@ -54,27 +68,20 @@ export function ArtistsScreen() {
 export function PersonRow({ artist, onClick }: { artist: Artist; onClick: () => void }) {
   return (
     <div className="list-row" onClick={onClick} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px' }}>
-      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--secondary-container)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Icon name={isComposer(artist) ? 'piano' : 'mic'} />
-      </div>
       <div style={{ minWidth: 0 }}>
         <div className="body-large ellipsis">{artist.name}</div>
-        <div className="body-small muted">{isComposer(artist) ? `${artist.albumCount ?? 0} albums` : 'Singer'}</div>
+        <div className="body-small muted">{isComposer(artist) ? `${artist.albumCount ?? 0} albums` : 'Artist'}</div>
       </div>
     </div>
   )
 }
 
 function roleLabel(roles: string[]): string {
-  if (roles.includes('composer')) return 'Music director'
-  if (roles.includes('singer')) return 'Singer'
-  if (roles.includes('lyricist')) return 'Lyricist'
-  if (roles.includes('actor')) return 'Actor'
-  if (roles.includes('director')) return 'Director'
+  if (roles.includes('composer')) return 'Composer'
   return 'Artist'
 }
 
-/** Unified Person view for music directors, singers, lyricists, and actors using /api/v2/people/{id}. */
+/** Unified Person view for composers and artists using /api/v2/people/{id}. */
 export function ArtistScreen() {
   const { id = '' } = useParams()
   const nav = useNav()
@@ -85,14 +92,12 @@ export function ArtistScreen() {
 
   const person = data.data!
   const albums = person.albums.map(albumSummaryToAlbum)
-  const movies = person.movies.map(albumSummaryToAlbum)
   const songs: Song[] = person.songs.map((s) => recordingToSong(s))
   const source = `person:${person.id}`
   const kind = roleLabel(person.roles)
 
   const metaParts: (string | false | null | undefined)[] = []
-  if (albums.length > 0) metaParts.push(`${albums.length} albums`)
-  if (movies.length > 0 && movies.length !== albums.length) metaParts.push(`${movies.length} films`)
+  if (albums.length > 0) metaParts.push(`${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`)
   if (songs.length > 0) metaParts.push(songCount(songs.length))
 
   return (
@@ -128,17 +133,6 @@ export function ArtistScreen() {
           <div className="grid">
             {albums.map((a) => (
               <AlbumCard key={a.id} album={a} onClick={() => nav.openAlbum(a.id)} />
-            ))}
-          </div>
-        </>
-      )}
-
-      {movies.length > 0 && (
-        <>
-          <SectionTitle>Filmography</SectionTitle>
-          <div className="row-scroll">
-            {movies.map((m) => (
-              <AlbumCard key={m.id} album={m} onClick={() => nav.openAlbum(m.id)} className="tile" />
             ))}
           </div>
         </>
