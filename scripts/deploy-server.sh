@@ -7,7 +7,7 @@ REMOTE_HOST="craftingtable"
 REMOTE_DIR="/mnt/ugreen/jukebox"
 
 echo "Syncing $ROOT to $REMOTE_HOST:$REMOTE_DIR..."
-rsync -avz \
+rsync -avz --delete \
   --exclude='.git' \
   --exclude='android' \
   --exclude='node_modules' \
@@ -16,7 +16,7 @@ rsync -avz \
   --exclude='data' \
   "$ROOT/" "$REMOTE_HOST:$REMOTE_DIR/"
 
-echo "Rebuilding and restarting container on $REMOTE_HOST..."
-ssh "$REMOTE_HOST" "cd $REMOTE_DIR && docker compose build && docker compose up -d --force-recreate"
+echo "Rebuilding and restarting container on $REMOTE_HOST (with --no-cache)..."
+ssh "$REMOTE_HOST" "cd $REMOTE_DIR && docker compose build --no-cache && docker compose up -d --force-recreate && docker ps --filter name=jukebox"
 
 echo "Done! Jukebox server redeployed successfully."
