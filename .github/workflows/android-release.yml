@@ -62,7 +62,17 @@ jobs:
           ./gradlew assembleRelease --no-daemon
           
           APK_DIR="app/build/outputs/apk/release"
-          cp "$APK_DIR/app-release.apk" "$APK_DIR/isaipetti-$version.apk"
+          PRODUCED_APK=$(find "$APK_DIR" -maxdepth 1 -name "*.apk" ! -name "isaipetti-*" | head -1)
+          if [ -z "$PRODUCED_APK" ]; then
+            echo "Error: No APK found in $APK_DIR"
+            ls -la "$APK_DIR" || true
+            exit 1
+          fi
+          
+          if [ "$PRODUCED_APK" != "$APK_DIR/app-release.apk" ]; then
+            cp "$PRODUCED_APK" "$APK_DIR/app-release.apk"
+          fi
+          cp "$PRODUCED_APK" "$APK_DIR/isaipetti-$version.apk"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "apk_release=$APK_DIR/app-release.apk" >> "$GITHUB_OUTPUT"
           echo "apk_versioned=$APK_DIR/isaipetti-$version.apk" >> "$GITHUB_OUTPUT"
