@@ -8,6 +8,15 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Movie Title Prefix on Background Scores (0.15.2)
+
+App, website, Mac app and server.
+
+### Fixed
+- **Score album titles.** Format background score albums as `{Movie title} (Original Background Score)` across catalog, artist discographies, and song views instead of just "Background Score".
+
+---
+
 ## Separate Movie Albums and Scores (0.15.1)
 
 App, website, Mac app and server.

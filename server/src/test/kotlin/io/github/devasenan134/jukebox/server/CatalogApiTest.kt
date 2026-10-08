@@ -40,7 +40,7 @@ class CatalogApiTest {
 
             // Releases (Soundtrack & Background score)
             insert("INSERT INTO releases (id, album_id, title, kind, year, group_key) VALUES ('rel-roja-ost', 'alb-roja', 'Roja (Original Motion Picture Soundtrack)', 'soundtrack', 1992, 'roja-ost')")
-            insert("INSERT INTO releases (id, album_id, title, kind, year, group_key) VALUES ('rel-roja-score', 'alb-roja', 'Roja (Original Background Score)', 'score', 1992, 'roja-score')")
+            insert("INSERT INTO releases (id, album_id, title, kind, year, group_key) VALUES ('rel-roja-score', 'alb-roja', 'Background Score', 'score', 1992, 'roja-score')")
 
             // Songs (grouping) & Recordings
             insert("INSERT INTO songs (id, title, song_key) VALUES ('song-chinna', 'Chinna Chinna Aasai', 'chinnachinnaaasai')")
@@ -154,7 +154,8 @@ class CatalogApiTest {
         val arrDetail = client.get("/api/v2/people/p-arr") { bearerAuth(token) }.body<PersonDetailDto>()
         assertEquals("p-arr", arrDetail.id)
         assertEquals("A.R. Rahman", arrDetail.name)
-        assertTrue(arrDetail.albums.any { it.id == "alb-roja" })
+        assertTrue(arrDetail.albums.any { it.id == "alb-roja" && it.title == "Roja" })
+        assertTrue(arrDetail.albums.any { it.id == "rel-roja-score" && it.title == "Roja (Original Background Score)" })
         assertTrue(arrDetail.songs.any { it.id == "rec-chinna-orig" })
     }
 
@@ -178,6 +179,14 @@ class CatalogApiTest {
         assertEquals("Chinna Chinna Aasai", song.title)
         assertEquals("Vairamuthu", song.lyricists.first().name)
         assertEquals("A.R. Rahman", song.composers.first().name)
+        assertEquals("alb-roja", song.albumId)
+        assertEquals("Roja", song.albumTitle)
+
+        // Score track has score albumId and title
+        val scoreTrack = client.get("/api/v2/songs/rec-theme") { bearerAuth(token) }.body<SongDetailDto>()
+        assertEquals("rec-theme", scoreTrack.id)
+        assertEquals("rel-roja-score", scoreTrack.albumId)
+        assertEquals("Roja (Original Background Score)", scoreTrack.albumTitle)
 
         // Versions
         assertEquals(1, song.versions.size)

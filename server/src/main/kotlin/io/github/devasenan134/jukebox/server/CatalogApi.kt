@@ -322,11 +322,7 @@ class CatalogService(
                 val relId = rs.getString(1)
                 val albumTitle = rs.getString(2)
                 val relTitle = rs.getString(3)
-                val scoreTitle = if (relTitle.contains("score", ignoreCase = true) || relTitle.contains("bgm", ignoreCase = true)) {
-                    relTitle
-                } else {
-                    "$albumTitle (Original Background Score)"
-                }
+                val scoreTitle = "$albumTitle (Original Background Score)"
                 val year = (rs.getObject(4) as Number?)?.toInt()
                 val coverId = rs.getString(5)
                 val createdAt = rs.getLong(6)
@@ -513,11 +509,7 @@ class CatalogService(
             val year = (it.getObject(4) as Number?)?.toInt()
             val coverId = it.getString(5)
             val parentAlbumId = it.getString(6)
-            val scoreTitle = if (relTitle.contains("score", ignoreCase = true) || relTitle.contains("bgm", ignoreCase = true)) {
-                relTitle
-            } else {
-                "$parentTitle (Original Background Score)"
-            }
+            val scoreTitle = "$parentTitle (Original Background Score)"
             Triple(relId, scoreTitle, year) to (coverId to (parentAlbumId to parentTitle))
         } ?: return@read null
 
@@ -722,7 +714,30 @@ class CatalogService(
                     composers = listOf(PersonRefDto(pId, name, "composer")),
                 )
             }
-        }.sortedWith(compareByDescending<AlbumSummaryDto> { it.year }.thenBy { it.title })
+        }
+
+        // Score releases composed by this person
+        val scoreAlbums = query(
+            """SELECT DISTINCT rl.id, a.title, coalesce(rl.year, a.year), coalesce(rl.cover_id, a.cover_id)
+               FROM releases rl
+               JOIN albums a ON a.id = rl.album_id
+               JOIN tracks t ON t.release_id = rl.id
+               JOIN recording_credits c ON c.recording_id = t.recording_id
+               WHERE rl.kind = 'score' AND c.person_id = ? AND c.role = 'composer'""", pId
+        ) { rs ->
+            val relId = rs.getString(1)
+            val parentTitle = rs.getString(2)
+            AlbumSummaryDto(
+                id = relId,
+                title = "$parentTitle (Original Background Score)",
+                year = (rs.getObject(3) as Number?)?.toInt(),
+                kind = "score",
+                coverArt = rs.getString(4)?.let { "al-$relId" },
+                composers = listOf(PersonRefDto(pId, name, "composer")),
+            )
+        }
+
+        val allAlbums = (albums + scoreAlbums).sortedWith(compareByDescending<AlbumSummaryDto> { it.year }.thenBy { it.title })
 
         // Songs where this person is credited (singer, lyricist, composer)
         val songs = query(
@@ -758,17 +773,17 @@ class CatalogService(
             roles = roles,
             coverArt = "ar-$pId",
             songCount = songs.size,
-            movieCount = albums.size,
-            albums = albums,
+            movieCount = allAlbums.size,
+            albums = allAlbums,
             songs = songs,
-            movies = albums.filter { it.kind == "film" },
+            movies = allAlbums.filter { it.kind == "film" },
         )
     }
 
     suspend fun song(user: UserDto, id: String): SongDetailDto? = db.read {
         val rid = resolveRecordingId(id)
         val base = queryOne(
-            """SELECT r.id, r.title, r.version, r.duration_ms, a.id, a.title, coalesce(f.cover_id, rl.cover_id, a.cover_id), r.song_id
+            """SELECT r.id, r.title, r.version, r.duration_ms, a.id, a.title, coalesce(f.cover_id, rl.cover_id, a.cover_id), r.song_id, rl.kind, rl.id
                FROM recordings r
                JOIN tracks t ON t.recording_id = r.id
                JOIN releases rl ON rl.id = t.release_id
@@ -776,14 +791,17 @@ class CatalogService(
                LEFT JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
                WHERE r.id = ? LIMIT 1""", rid
         ) { rs ->
+            val isScore = rs.getString(9) == "score"
+            val effectiveAlbumId = if (isScore) rs.getString(10) else rs.getString(5)
+            val effectiveAlbumTitle = if (isScore) "${rs.getString(6)} (Original Background Score)" else rs.getString(6)
             SongDetailDto(
                 id = rs.getString(1),
                 title = rs.getString(2),
                 version = rs.getString(3),
                 durationMs = rs.getLong(4),
-                albumId = rs.getString(5),
-                albumTitle = rs.getString(6),
-                coverArt = rs.getString(7)?.let { "al-${rs.getString(5)}" },
+                albumId = effectiveAlbumId,
+                albumTitle = effectiveAlbumTitle,
+                coverArt = rs.getString(7)?.let { "al-$effectiveAlbumId" },
             ) to rs.getString(8)
         } ?: return@read null
 
@@ -841,7 +859,7 @@ class CatalogService(
         if (q.length < 2) return@read LyricsSearchResponse(query, 0, emptyList())
         val pattern = "%$q%"
         val matches = query(
-            """SELECT l.recording_id, l.synced, l.text, r.title, a.id, a.title, coalesce(f.cover_id, rl.cover_id, a.cover_id)
+            """SELECT l.recording_id, l.synced, l.text, r.title, a.id, a.title, coalesce(f.cover_id, rl.cover_id, a.cover_id), rl.kind, rl.id
                FROM lyrics l
                JOIN recordings r ON r.id = l.recording_id
                JOIN tracks t ON t.recording_id = r.id
@@ -856,8 +874,9 @@ class CatalogService(
             val synced = rs.getInt(2) == 1
             val text = rs.getString(3)
             val songTitle = rs.getString(4)
-            val albumId = rs.getString(5)
-            val albumTitle = rs.getString(6)
+            val isScore = rs.getString(8) == "score"
+            val albumId = if (isScore) rs.getString(9) else rs.getString(5)
+            val albumTitle = if (isScore) "${rs.getString(6)} (Original Background Score)" else rs.getString(6)
             val coverId = rs.getString(7)
 
             val (matchedLine, startMs) = if (synced) {
