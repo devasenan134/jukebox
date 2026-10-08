@@ -20,6 +20,7 @@ stations, and (optionally) lets friends chat, share songs and listen together.
 | [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) | Complete guide to running and maintaining Jukebox |
 | [`docs/DESIGN.md`](docs/DESIGN.md) | How it's designed and why |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | How it works today: the catalog, the analyzer, how mixes are made |
+| [`docs/ANALYZER_MIXES_AND_STORAGE.md`](docs/ANALYZER_MIXES_AND_STORAGE.md) | Deep dive into the analyzer, mix generation, playlists, and auxiliary files |
 | [`docs/web-parity.md`](docs/web-parity.md) | What the website does compared with the app |
 | [`ROADMAP.md`](ROADMAP.md) | Milestones, and what comes next |
 
