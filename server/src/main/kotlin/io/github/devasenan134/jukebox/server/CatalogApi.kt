@@ -1,10 +1,14 @@
 package io.github.devasenan134.jukebox.server
 
+import io.github.devasenan134.jukebox.server.library.Transcoder
 import io.github.devasenan134.jukebox.server.subsonic.SubsonicLibrary
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.auth.principal
+import io.ktor.server.http.content.LocalFileContent
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -194,6 +198,8 @@ data class UnifiedSearchResponse(
 class CatalogService(
     private val db: Db,
     private val castFile: File? = null,
+    private val transcoder: Transcoder? = null,
+    private val roots: (() -> Map<Long, String>)? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -213,6 +219,26 @@ class CatalogService(
             current = queryOne("SELECT merged_into FROM recordings WHERE id = ?", current) { it.getString(1) } ?: return current
         }
         return current
+    }
+
+    /** Resolves audio file and content-type for a song (supports 'auto', 'mobile', 'original'). */
+    suspend fun audio(id: String, quality: String? = "auto"): Pair<File, String>? {
+        val rid = db.read { resolveRecordingId(id) }
+        val q = quality?.lowercase() ?: "auto"
+        if (q == "mobile" || q == "auto") {
+            val mobile = transcoder?.find(rid) ?: if (q == "mobile") transcoder?.transcodeOne(rid) else null
+            if (mobile != null) return mobile to "audio/ogg; codecs=opus"
+        }
+        val fileInfo = db.read {
+            queryOne(
+                """SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
+                   ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid
+            ) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
+        } ?: return null
+
+        val rootPath = roots?.invoke()?.get(fileInfo.first) ?: return null
+        val file = File(rootPath, fileInfo.second).takeIf { it.isFile } ?: return null
+        return file to SubsonicLibrary.contentType(fileInfo.third)
     }
 
     suspend fun albums(
@@ -967,6 +993,13 @@ class CatalogService(
                 val id = call.parameters["id"].orEmpty()
                 val song = song(call.me(), id) ?: throw ApiError(HttpStatusCode.NotFound, "Song not found")
                 call.respond(song)
+            }
+            get("/{id}/stream") {
+                val id = call.parameters["id"].orEmpty()
+                val quality = call.request.queryParameters["quality"] ?: "auto"
+                val (file, type) = audio(id, quality) ?: throw ApiError(HttpStatusCode.NotFound, "Audio file not found")
+                call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=86400")
+                call.respond(LocalFileContent(file, ContentType.parse(type)))
             }
         }
 

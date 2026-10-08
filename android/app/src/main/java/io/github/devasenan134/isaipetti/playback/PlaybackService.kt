@@ -11,11 +11,13 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import io.github.devasenan134.isaipetti.IsaipettiApp
+import io.github.devasenan134.isaipetti.data.OfflineDownloads
 import io.github.devasenan134.isaipetti.data.SongRef
 import io.github.devasenan134.isaipetti.lockscreen.LockScreenLyrics
 import io.github.devasenan134.isaipetti.MainActivity
@@ -43,12 +45,27 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        // Turn "isaipetti://song/<id>" into a stream URL with the current login, right when it's needed.
-        val dataSource = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
-            if (spec.uri.scheme == SONG_SCHEME) spec.withUri(api.streamUrl(spec.uri.lastPathSegment!!).toUri()) else spec
+        // Turn "isaipetti://song/<id>" into a stream URL (or local offline copy), cached with Media3 CacheDataSource.
+        val offlineDownloads = OfflineDownloads.getInstance(this)
+        val upstreamFactory = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
+            if (spec.uri.scheme == SONG_SCHEME) {
+                val songId = spec.uri.lastPathSegment!!
+                val offlineFile = offlineDownloads.getOfflineFile(songId)
+                if (offlineFile != null && offlineFile.exists()) {
+                    spec.withUri(offlineFile.toUri())
+                } else {
+                    spec.withUri(api.streamUrl(songId).toUri())
+                }
+            } else spec
         }
+        val cache = AudioCache.get(this)
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(cache)
+            .setUpstreamDataSourceFactory(upstreamFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_HEADER_REQUEST_RANGE)
+
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)

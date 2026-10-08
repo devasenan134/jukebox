@@ -1,4 +1,4 @@
-import { subsonic } from '../api/subsonic'
+import { catalog } from '../api/catalog'
 
 /**
  * The loudness shape of a song (its waveform), for picking a part of it to share: BARS numbers from
@@ -21,7 +21,7 @@ export function waveform(songId: string): Promise<number[]> {
 }
 
 async function decode(songId: string): Promise<number[]> {
-  const res = await fetch(subsonic.streamUrl(songId))
+  const res = await fetch(catalog.streamUrl(songId, 'mobile'))
   if (!res.ok) throw new Error(`Couldn't load the song (${res.status})`)
   const data = await res.arrayBuffer()
   const ctx = new OfflineAudioContext(1, 1, 22050)

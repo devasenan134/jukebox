@@ -86,6 +86,27 @@ open class AudioTools(
         run(listOf(ffmpeg, "-v", "error", "-nostdin", "-i", image.path, "-vf",
             "scale='min($size,iw)':'min($size,ih)':force_original_aspect_ratio=decrease", "-q:v", "3", "-f", "image2pipe", "-c:v", "mjpeg", "-"))
 
+    /** Transcodes [input] to Opus/Ogg format at [bitrateKbps] into [output]. Returns true on success. */
+    open fun transcodeToOpus(input: File, output: File, bitrateKbps: Int = 128): Boolean {
+        if (output.isFile && output.length() > 0) return true
+        output.parentFile?.mkdirs()
+        val temp = File(output.parentFile, "${output.name}.tmp")
+        if (temp.exists()) temp.delete()
+        val ok = run(
+            listOf(
+                ffmpeg, "-v", "error", "-nostdin", "-y", "-i", input.path,
+                "-c:a", "libopus", "-b:a", "${bitrateKbps}k", "-vbr", "on",
+                "-vn", "-f", "opus", temp.path
+            ),
+            timeoutSeconds = 180
+        ) != null
+        if (ok && temp.isFile && temp.length() > 0) {
+            return temp.renameTo(output)
+        }
+        temp.delete()
+        return false
+    }
+
     private fun run(command: List<String>, timeoutSeconds: Long = 60): ByteArray? {
         val command = if (lowPriority && File("/usr/bin/nice").exists()) listOf("/usr/bin/nice", "-n", "15") + command else command
         val process = runCatching { ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).start() }.getOrNull() ?: return null

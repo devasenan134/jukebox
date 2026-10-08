@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { PlayEvent, Song, SongRef } from '../api/types'
 import { MIX_SOURCE_PREFIX, songToRef } from '../api/types'
 import { subsonic } from '../api/subsonic'
+import { catalog } from '../api/catalog'
 import { social } from '../api/social'
 import { session } from '../state/session'
 import { queueMemory, useRecentSongs } from '../state/history'
@@ -142,7 +143,7 @@ function load_(index: number, startMs = 0, autoplay = true) {
       old.removeAttribute('src')
       old.load()
     } else {
-      audio.src = subsonic.streamUrl(item.song.id)
+      audio.src = catalog.streamUrl(item.song.id)
     }
     standbyUid = -1
     onTransition(item)
@@ -464,7 +465,7 @@ function prepareNext() {
   const next = i != null ? s.items[i] : undefined
   if (!next || next.uid === standbyUid || next.uid === item.uid) return
   standbyUid = next.uid
-  standby.src = subsonic.streamUrl(next.song.id)
+  standby.src = catalog.streamUrl(next.song.id)
   standby.load()
 }
 

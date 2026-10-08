@@ -225,4 +225,52 @@ class CatalogApiTest {
         assertEquals("Siragadikkum aasai", match.matchedLine)
         assertEquals(18500L, match.startMs)
     }
+
+    @Test
+    fun `songs stream endpoint supports range requests and token parameter`() = testApplication {
+        val dir = File.createTempFile("jukebox-stream-test", "").apply { delete(); mkdirs(); deleteOnExit() }
+        val musicDir = File(dir, "music").apply { mkdirs() }
+        File(musicDir, "Roja/01.m4a").apply { parentFile.mkdirs(); writeBytes(ByteArray(1024) { (it % 256).toByte() }) }
+        val dbFile = File(dir, "jukebox.db").path
+        val db = Db(dbFile)
+        seedCatalog(db)
+        db.tx {
+            update("UPDATE files SET path = 'Roja/01.m4a', size = 1024 WHERE recording_id = 'rec-chinna-orig'")
+        }
+        addAccount(dbFile, "alice")
+
+        application {
+            jukeboxServer(Config(
+                port = 0,
+                dbPath = dbFile,
+                libraries = "tamil=${musicDir.path}:film:tamil"
+            ))
+        }
+        val client = createClient { install(ContentNegotiation) { json(eventJson) } }
+        val token = client.post("/auth/login") {
+            contentType(ContentType.Application.Json)
+            setBody(loginRequest("alice"))
+        }.body<SessionResponse>().sessionToken
+
+        // 1. Stream with Bearer token
+        val fullStream = client.get("/api/v2/songs/rec-chinna-orig/stream") {
+            bearerAuth(token)
+        }
+        assertEquals(io.ktor.http.HttpStatusCode.OK, fullStream.status)
+        assertEquals(1024, fullStream.body<ByteArray>().size)
+
+        // 2. Stream with query ?token=
+        val tokenStream = client.get("/api/v2/songs/rec-chinna-orig/stream?token=$token")
+        assertEquals(io.ktor.http.HttpStatusCode.OK, tokenStream.status)
+        assertEquals(1024, tokenStream.body<ByteArray>().size)
+
+        // 3. HTTP Range request (Partial Content 206)
+        val rangeStream = client.get("/api/v2/songs/rec-chinna-orig/stream") {
+            bearerAuth(token)
+            headers.append(io.ktor.http.HttpHeaders.Range, "bytes=0-99")
+        }
+        assertEquals(io.ktor.http.HttpStatusCode.PartialContent, rangeStream.status)
+        assertEquals(100, rangeStream.body<ByteArray>().size)
+        assertEquals("bytes 0-99/1024", rangeStream.headers[io.ktor.http.HttpHeaders.ContentRange])
+    }
 }

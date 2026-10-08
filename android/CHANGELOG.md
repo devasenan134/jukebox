@@ -8,6 +8,21 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Milestone 5: The Data Plane (0.16.0)
+
+App, website, Mac app and server.
+
+### New
+- **Ahead-of-time mobile audio copies.** Background worker generates mobile-quality Opus copies (128 kbps VBR) for efficient streaming and low battery consumption without modifying the read-only music library.
+- **Native audio streaming endpoint.** `GET /api/v2/songs/{id}/stream` with HTTP Range request support (`206 Partial Content`) and quality negotiation (`auto`, `mobile`, `original`).
+- **Android media caching & offline playback.** Integrated Media3 `CacheDataSource` with a 250 MB LRU disk cache for instant scrubbing and gapless pre-buffered playback, and added offline download manager for local offline playback with automatic media source switching.
+- **Web streaming quality controls.** Streaming quality preference setting (Auto, High, Data Saver) in Settings with standby prefetch optimization.
+
+### Improved
+- **Subsonic streaming transcoding.** Seamlessly serves ahead-of-time Opus mobile copies when `maxBitRate <= 192` or Opus format is requested.
+
+---
+
 ## Movie Title Prefix on Background Scores (0.15.2)
 
 App, website, Mac app and server.

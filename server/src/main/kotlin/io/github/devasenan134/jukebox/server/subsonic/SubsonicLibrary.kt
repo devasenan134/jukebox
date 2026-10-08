@@ -5,6 +5,7 @@ import io.github.devasenan134.jukebox.server.Fuzzy
 import io.github.devasenan134.jukebox.server.library.Covers
 import io.github.devasenan134.jukebox.server.library.Personal
 import io.github.devasenan134.jukebox.server.library.PlaylistRow
+import io.github.devasenan134.jukebox.server.library.Transcoder
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.serialization.json.JsonArray
@@ -29,7 +30,12 @@ import java.time.Instant
  * album's id, and its background score release, if any, as a second album under the release's id, named
  * "<album> (Original Background Score)". A song is a recording; its id never changes.
  */
-class SubsonicLibrary(private val db: Db, private val covers: Covers, private val roots: () -> Map<Long, String>) {
+class SubsonicLibrary(
+    private val db: Db,
+    private val covers: Covers,
+    private val roots: () -> Map<Long, String>,
+    private val transcoder: Transcoder? = null,
+) {
 
     // ---------- albums ----------
 
@@ -422,11 +428,17 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
     } }
 
     /** The best copy of a song on disk: (file, content type). */
-    suspend fun audio(requested: String): Pair<File, String>? = mapped(requested).let { id -> db.read {
-        val rid = resolve(id)
-        queryOne("""SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
-                    ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
-    }?.let { (lib, path, format) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(format) } } }
+    suspend fun audio(requested: String, maxBitRate: Int? = null, format: String? = null): Pair<File, String>? = mapped(requested).let { id ->
+        val rid = db.read { resolve(id) }
+        if (transcoder != null && (format?.lowercase() == "opus" || (maxBitRate != null && maxBitRate <= 192))) {
+            val mobile = transcoder.find(rid)
+            if (mobile != null) return mobile to "audio/ogg; codecs=opus"
+        }
+        db.read {
+            queryOne("""SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
+                        ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
+        }?.let { (lib, path, fmt) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(fmt) } }
+    }
 
     /** A cover (by artwork, album, release or song id), resized to fit [size] when asked. */
     suspend fun cover(requested: String, size: Int?): Pair<File, String>? {

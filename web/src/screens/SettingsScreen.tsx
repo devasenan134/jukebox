@@ -12,6 +12,8 @@ import { checkPassword, PasswordStrength } from '../ui/password'
 import { useNav } from '../ui/nav'
 import { usePhotoPicker } from '../ui/PhotoPicker'
 import { useQuery } from '@tanstack/react-query'
+import { load, save } from '../state/storage'
+import type { StreamingQuality } from '../api/catalog'
 
 /** Settings (ui/settings/SettingsScreen.kt): your profile, password, invites for friends, and signing out. */
 export function SettingsScreen() {
@@ -81,6 +83,8 @@ export function SettingsScreen() {
         {me && <Invites />}
 
         {me && <NotificationsCard />}
+
+        <StreamingQualityCard />
 
         {me && <AdminCard onOpen={nav.openStats} />}
 
@@ -156,6 +160,51 @@ function NotificationsCard() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <div className="body-medium muted" style={{ flex: 1 }}>{note}</div>
         <Switch checked={on && permission === 'granted'} disabled={permission === 'unsupported'} onChange={(v) => void setOn(v)} />
+      </div>
+    </Card>
+  )
+}
+
+/** Audio streaming quality preference: Auto, High, or Data Saver. */
+function StreamingQualityCard() {
+  const [quality, setQuality] = useState<StreamingQuality>(() => load<StreamingQuality>('player.quality', 'auto'))
+
+  const select = (q: StreamingQuality) => {
+    setQuality(q)
+    save('player.quality', q)
+    toast(
+      q === 'auto'
+        ? 'Streaming quality: Auto'
+        : q === 'original'
+          ? 'Streaming quality: High (Original)'
+          : 'Streaming quality: Data Saver (Opus 128 kbps)'
+    )
+  }
+
+  return (
+    <Card title="Streaming quality">
+      <div className="body-medium muted" style={{ marginBottom: 12 }}>
+        Choose audio quality when streaming. Data Saver uses efficient Opus copies to preserve bandwidth and battery.
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button
+          className={`btn ${quality === 'auto' ? 'filled' : 'tonal'}`}
+          onClick={() => select('auto')}
+        >
+          Auto
+        </button>
+        <button
+          className={`btn ${quality === 'original' ? 'filled' : 'tonal'}`}
+          onClick={() => select('original')}
+        >
+          High (Original)
+        </button>
+        <button
+          className={`btn ${quality === 'mobile' ? 'filled' : 'tonal'}`}
+          onClick={() => select('mobile')}
+        >
+          Data Saver (Opus)
+        </button>
       </div>
     </Card>
   )

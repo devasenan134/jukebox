@@ -9,7 +9,7 @@ Milestones in the order they're built. Each one leaves the app working.
 | 2 | Own the listening data ([plan](docs/milestone-2.md)) | Users and sign-in without Navidrome, likes, playlists, plays, lyrics, the event log; a one-time import from Navidrome | Done (switched over 2026-10-04) |
 | 3 | Realtime gateway ([plan](docs/milestone-3.md)) | One WebSocket per device: presence, playback state across devices, jam, notifications; the social module behind a setting | Done (0.14.0) |
 | 4 | Jukebox API v2 ([plan](docs/milestone-4.md)) | Albums with film details, people, lyrics search in the API; the app and web app move to it | Done (0.15.0) |
-| 5 | Data plane | Mobile-quality copies made ahead of time, prefetch, offline downloads | |
+| 5 | Data plane ([plan](docs/milestone-5.md)) | Mobile-quality copies made ahead of time, prefetch, offline downloads | Done (0.16.0) |
 | 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, APK releases (the Android app and web app are in this repo already) | |
 | – | Engine | The recommendation engine in its own repository, following the event stream | Later |
 

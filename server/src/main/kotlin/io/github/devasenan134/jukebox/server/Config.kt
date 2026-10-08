@@ -42,6 +42,10 @@ data class Config(
     val spotifyClientSecret: String? = null,
     /** Social features: friends, chat, listen-together jams, push notifications. */
     val socialEnabled: Boolean = true,
+    /** Where mobile-quality transcodes (Opus 128 kbps) are stored. Default: <data>/transcoded */
+    val transcodeDir: String? = null,
+    /** Ahead-of-time mobile audio transcoding in the background. */
+    val transcodeEnabled: Boolean = true,
 ) {
     companion object {
         fun fromEnv(): Config {
@@ -66,6 +70,8 @@ data class Config(
                 spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID")?.takeIf { it.isNotBlank() },
                 spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET")?.takeIf { it.isNotBlank() },
                 socialEnabled = System.getenv("JUKEBOX_SOCIAL")?.lowercase() != "off" && System.getenv("JUKEBOX_SOCIAL")?.lowercase() != "false",
+                transcodeDir = System.getenv("TRANSCODE_DIR")?.takeIf { it.isNotBlank() },
+                transcodeEnabled = System.getenv("TRANSCODE")?.lowercase() != "off",
             )
         }
     }

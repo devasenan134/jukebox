@@ -74,7 +74,6 @@ class SubsonicApi(
     }
 
     fun routes(route: Route) = route.route("/rest") {
-        install(PartialContent)
         for (path in listOf("{call}", "{call}.view")) {
             get(path) { handle(call) }
             post(path) { handle(call) }
@@ -91,7 +90,7 @@ class SubsonicApi(
             val username = signIn(p)
             when (name) {
                 "stream", "download" -> {
-                    val (file, type) = library.audio(p.need("id")) ?: throw Failure(70, "Song not found")
+                    val (file, type) = library.audio(p.need("id"), p["maxBitRate"]?.toIntOrNull(), p["format"]) ?: throw Failure(70, "Song not found")
                     call.respond(LocalFileContent(file, ContentType.parse(type)))
                 }
                 "getCoverArt" -> {

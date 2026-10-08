@@ -1,6 +1,6 @@
 # Milestone 5: The Data Plane
 
-> In progress. See [DESIGN.md](DESIGN.md) for architectural goals and [ROADMAP.md](../ROADMAP.md) for milestone order.
+> Completed in release 0.16.0. See [DESIGN.md](DESIGN.md) for architectural goals and [ROADMAP.md](../ROADMAP.md) for milestone order.
 
 Milestone 5 builds the **Data Plane** of Jukebox. While the Control Plane (Milestones 1–4) handles catalog metadata, playlists, social interactions, and search, the Data Plane is responsible for the actual audio bytes: serving audio efficiently, preserving bandwidth and mobile battery, eliminating playback latency, and enabling listening on the go without an internet connection.
 

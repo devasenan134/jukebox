@@ -1,5 +1,6 @@
 import type { Album, Artist, ArtistRef, Song } from './types'
 import { session } from '../state/session'
+import { load } from '../state/storage'
 import { subsonic } from './subsonic'
 
 // Jukebox API v2: Film-first catalog endpoints
@@ -436,4 +437,19 @@ export const catalog = {
   search: async (query: string): Promise<UnifiedSearch> => {
     return get<UnifiedSearch>('/api/v2/search', { q: query })
   },
+
+  streamUrl: (songId: string, quality?: StreamingQuality): string => {
+    const s = session()
+    const tok = s.social?.token
+    const q = quality ?? load<StreamingQuality>('player.quality', 'auto')
+    if (tok) {
+      const params = new URLSearchParams()
+      if (q && q !== 'auto') params.set('quality', q)
+      params.set('token', tok)
+      return `/api/v2/songs/${enc(songId)}/stream?${params.toString()}`
+    }
+    return subsonic.streamUrl(songId)
+  },
 }
+
+export type StreamingQuality = 'auto' | 'mobile' | 'original'

@@ -24,6 +24,9 @@ import io.ktor.server.plugins.compression.gzip
 import io.ktor.server.plugins.compression.matchContentType
 import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.github.devasenan134.jukebox.server.library.Transcoder
+import io.ktor.http.auth.HttpAuthHeader
+import io.ktor.server.plugins.partialcontent.PartialContent
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
 import io.ktor.server.request.httpMethod
@@ -130,9 +133,6 @@ fun Application.jukeboxServer(
     // Without a cast file next to the database, search just has no actors.
     val castFile = File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)
     val search = music?.let { LibrarySearch(it, castFile) }
-    val catalogService = CatalogService(db, castFile)
-    // Asking for music the library doesn't have (it needs the library, to know what's missing).
-    val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds) }
     // Jukebox's own library (docs/milestone-1.md): scanned in the background, served through the Subsonic API.
     val musicLibrary = MusicLibrary.parse(config.libraries).takeIf { it.isNotEmpty() }?.let { defs ->
         MusicLibrary(
@@ -141,11 +141,36 @@ fun Application.jukeboxServer(
             config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes,
         ).also { it.start(this) }
     }
+    // Milestone 5: Ahead-of-time mobile audio copies (Opus 128 kbps)
+    val transcodeDir = File(config.transcodeDir ?: File(File(config.dbPath).absoluteFile.parentFile, "transcoded").path)
+    val transcoder = if (config.transcodeEnabled && musicLibrary != null) {
+        Transcoder(
+            db = db,
+            audioTools = AudioTools(lowPriority = true),
+            transcodeDir = transcodeDir,
+            roots = { musicLibrary.roots().mapValues { File(it.value) } },
+        ).also { it.start(this) }
+    } else null
+    val catalogService = CatalogService(
+        db = db,
+        castFile = castFile,
+        transcoder = transcoder,
+        roots = { musicLibrary?.roots().orEmpty() },
+    )
+    // Asking for music the library doesn't have (it needs the library, to know what's missing).
+    val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds) }
     val listening = Listening(db)
     // Playlists from Spotify, Apple Music, YouTube or a file, matched to the library.
     val imports = music?.let { PlaylistImports(db, it, listening, requests, playlistReader) }
     val pictures = Pictures(db, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
-    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.covers, lib::roots), signIn::checkToken, signIn::userId, listening) }
+    val subsonic = musicLibrary?.let { lib ->
+        SubsonicApi(
+            SubsonicLibrary(db, lib.covers, lib::roots, transcoder = transcoder),
+            signIn::checkToken,
+            signIn::userId,
+            listening
+        )
+    }
     val limiter = RateLimiter(maxPerMinute = 10)
     // Every 10 minutes, forget chat pictures nobody can see any more.
     launch {
@@ -213,8 +238,20 @@ fun Application.jukeboxServer(
             if (length != null && length > limit) call.respond(HttpStatusCode.PayloadTooLarge, ErrorResponse("Request is too large"))
         }
     })
+    // HTTP byte-range requests for seamless seeking, scrubbing, and pause-resume (Milestone 5).
+    install(PartialContent)
     install(Authentication) {
         bearer("session") {
+            authHeader { call ->
+                val header = call.request.headers[HttpHeaders.Authorization]
+                if (header != null && header.startsWith("Bearer ", ignoreCase = true)) {
+                    HttpAuthHeader.Single("Bearer", header.substring(7).trim())
+                } else {
+                    val qToken = call.request.queryParameters["token"]?.trim()
+                    if (!qToken.isNullOrBlank()) HttpAuthHeader.Single("Bearer", qToken)
+                    else null
+                }
+            }
             authenticate { credential -> accounts.userForToken(credential.token) }
         }
     }
