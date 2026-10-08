@@ -1,7 +1,11 @@
 # Jukebox: the server and the web app in one image (works on ARM and x86).
 
+# The web app and the server's jars are the same on every CPU, so they're built on the machine doing the build
+# ($BUILDPLATFORM); only the last stage is made per platform. (Building them under arm64 emulation in CI was slow
+# enough that Gradle's download timed out.)
+
 # 1. The web app (web/): a static site the server hands out at /.
-FROM node:22-slim AS web
+FROM --platform=$BUILDPLATFORM node:22-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -9,7 +13,7 @@ COPY web ./
 RUN npm run build
 
 # 2. The server (server/), compiled with Gradle.
-FROM eclipse-temurin:21-jdk AS build
+FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk AS build
 WORKDIR /src
 COPY server/gradlew server/settings.gradle.kts server/build.gradle.kts ./
 COPY server/gradle gradle
