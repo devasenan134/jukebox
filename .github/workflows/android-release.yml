@@ -1,0 +1,84 @@
+name: Android Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the APK to (e.g. v0.16.0)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      ISAIPETTI_KEYSTORE_BASE64: ${{ secrets.ISAIPETTI_KEYSTORE_BASE64 }}
+      ISAIPETTI_KEYSTORE_PASSWORD: ${{ secrets.ISAIPETTI_KEYSTORE_PASSWORD }}
+      ISAIPETTI_KEY_ALIAS: ${{ secrets.ISAIPETTI_KEY_ALIAS }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Configure signing keystore
+        run: |
+          if [ -n "$ISAIPETTI_KEYSTORE_BASE64" ]; then
+            mkdir -p "$HOME/.gradle"
+            echo "$ISAIPETTI_KEYSTORE_BASE64" | base64 -d > "$HOME/release.keystore"
+            cat <<EOF >> "$HOME/.gradle/gradle.properties"
+          ISAIPETTI_KEYSTORE=$HOME/release.keystore
+          ISAIPETTI_KEYSTORE_PASSWORD=$ISAIPETTI_KEYSTORE_PASSWORD
+          ISAIPETTI_KEY_ALIAS=${ISAIPETTI_KEY_ALIAS:-isaipetti}
+          EOF
+          fi
+
+      - name: Build APK
+        id: build
+        run: |
+          if [ -n "$TAG" ]; then
+            version="${TAG#v}"
+          else
+            version=$(grep 'versionName' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          fi
+          
+          # Assemble release APK
+          ./gradlew assembleRelease --no-daemon
+          
+          APK_DIR="app/build/outputs/apk/release"
+          cp "$APK_DIR/app-release.apk" "$APK_DIR/isaipetti-$version.apk"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "apk_release=$APK_DIR/app-release.apk" >> "$GITHUB_OUTPUT"
+          echo "apk_versioned=$APK_DIR/isaipetti-$version.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: isaipetti-android-${{ steps.build.outputs.version }}
+          path: android/${{ steps.build.outputs.apk_versioned }}
+
+      - name: Attach APK to GitHub Release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$TAG" \
+            "${{ steps.build.outputs.apk_release }}" \
+            "${{ steps.build.outputs.apk_versioned }}" \
+            --clobber

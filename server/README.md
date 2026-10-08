@@ -3,7 +3,7 @@
 One Docker container that does everything: it scans your music, serves it to the app and to any Subsonic
 player (`/rest/...`), keeps accounts, likes, playlists and plays, makes mixes and stations, runs friends,
 chat and listening together, and serves the web app at the same address. It keeps one SQLite database in
-`data/`. How it works inside: [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
+`data/`. How it works inside: [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). For turnkey deployments and compose files, see [../deploy/](../deploy/) and the [Self-Hosting Guide](../docs/SELF_HOSTING.md).
 
 ## What you need
 

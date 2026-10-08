@@ -1,0 +1,43 @@
+# Jukebox Full Stack: Server + Audio Analyzer
+# Includes music streaming, web app, realtime social features, and
+# the AI audio analyzer for mood mixes, sound-alike radio, and acoustic features.
+services:
+  jukebox:
+    image: ghcr.io/devasenan134/jukebox:latest
+    container_name: jukebox
+    env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - DB_PATH=/data/jukebox.db
+      - FEATURES_DB=/features/features.db
+      - FIREBASE_KEY_FILE=/secrets/firebase-key.json
+      - FIREBASE_APP_CONFIG=/secrets/google-services.json
+      - JUKEBOX_SOCIAL=${JUKEBOX_SOCIAL:-on}
+    volumes:
+      - ./data:/data
+      - ./secrets:/secrets:ro
+      - ./analyzer-data:/features:ro
+      - ${MUSIC_FOLDER}:/music:ro
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8095}:8095"
+    mem_limit: ${MEM_LIMIT:-1g}
+    restart: unless-stopped
+    depends_on:
+      - jukebox-analyzer
+
+  jukebox-analyzer:
+    image: ghcr.io/devasenan134/jukebox-analyzer:latest
+    container_name: jukebox-analyzer
+    env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - JUKEBOX_DB=/jukebox/jukebox.db
+      - MUSIC_DIR=/music
+      - FEATURES_DB=/data/features.db
+    volumes:
+      - ./data:/jukebox:ro
+      - ./analyzer-data:/data
+      - ${MUSIC_FOLDER}:/music:ro
+    cpus: ${ANALYZER_CPUS:-4}
+    mem_limit: 3g
+    restart: unless-stopped

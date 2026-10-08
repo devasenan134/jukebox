@@ -1,0 +1,22 @@
+# Jukebox: Music + Social Server
+# Full music server with friends, live chat, listen-together jams, and cross-device sync.
+# Optional push notifications via Firebase Cloud Messaging.
+services:
+  jukebox:
+    image: ghcr.io/devasenan134/jukebox:latest
+    container_name: jukebox
+    env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - DB_PATH=/data/jukebox.db
+      - FIREBASE_KEY_FILE=/secrets/firebase-key.json
+      - FIREBASE_APP_CONFIG=/secrets/google-services.json
+      - JUKEBOX_SOCIAL=on
+    volumes:
+      - ./data:/data
+      - ./secrets:/secrets:ro      # Optional Firebase files for push notifications
+      - ${MUSIC_FOLDER}:/music:ro  # Read-only music library
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8095}:8095"
+    mem_limit: ${MEM_LIMIT:-1g}
+    restart: unless-stopped

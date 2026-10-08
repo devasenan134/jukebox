@@ -10,7 +10,7 @@ Milestones in the order they're built. Each one leaves the app working.
 | 3 | Realtime gateway ([plan](docs/milestone-3.md)) | One WebSocket per device: presence, playback state across devices, jam, notifications; the social module behind a setting | Done (0.14.0) |
 | 4 | Jukebox API v2 ([plan](docs/milestone-4.md)) | Albums with film details, people, lyrics search in the API; the app and web app move to it | Done (0.15.0) |
 | 5 | Data plane ([plan](docs/milestone-5.md)) | Mobile-quality copies made ahead of time, prefetch, offline downloads | Done (0.16.0) |
-| 6 | Packaging | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + engine), self-hosting guide, APK releases (the Android app and web app are in this repo already) | |
+| 6 | Packaging ([plan](docs/milestone-6.md)) | Multi-arch images on GHCR, `deploy/` compose files (standalone, music + social, + analyzer), self-hosting guide, APK releases | Done (0.17.0) |
 | – | Engine | The recommendation engine in its own repository, following the event stream | Later |
 
 How it all works today: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -44,8 +44,8 @@ How it all works today: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
    so installed apps keep updating in place.
 4. **Milestone 5, the data plane**: lighter mobile-quality copies made ahead of time, prefetching, offline
    downloads.
-5. **Milestone 6, packaging**: published images, ready-made `deploy/` files and a self-hosting guide, so others
-   can run Jukebox.
+5. **Milestone 6, packaging** ([plan](docs/milestone-6.md)): published multi-arch images on GHCR, ready-made
+   `deploy/` files (standalone, social, analyzer), APK release automation, and the [self-hosting guide](docs/SELF_HOSTING.md). Done (shipped in 0.17.0).
 
 ### The recommendation engine
 
