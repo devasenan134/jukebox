@@ -18,8 +18,8 @@ android {
         applicationId = "io.github.devasenan134.isaipetti"
         minSdk = 26
         targetSdk = 36
-        versionCode = 55
-        versionName = "0.15.0"
+        versionCode = 56
+        versionName = "0.15.1"
 
         // Where the app looks for new versions (GitHub Releases).
         buildConfigField("String", "GITHUB_REPO", "\"${privateSetting("ISAIPETTI_GITHUB_REPO") ?: "devasenan134/jukebox"}\"")

@@ -2,9 +2,9 @@
 
 > In progress. See [DESIGN.md](DESIGN.md) for architectural goals and [ROADMAP.md](../ROADMAP.md) for milestone order.
 
-Milestone 4 moves Jukebox to its own first-class native API. Instead of forcing film music into the legacy Subsonic model (which treats films as two split albums, lumps music directors as generic "artists", and has no native concept of lyricists, cast, or releases), Jukebox API v2 exposes the true catalog schema:
+Milestone 4 moves Jukebox to its own first-class native API. Instead of forcing film music into the legacy Subsonic model (which lumps music directors as generic "artists" and has no native concept of lyricists, cast, or releases), Jukebox API v2 exposes the true catalog schema:
 
-1. **Films and Albums with full details**: A film is an album with releases (Soundtrack, Background Score, Singles) rather than split duplicate albums. Film details (cast, directors) and album music directors are native credits.
+1. **Films and Original Background Scores as Separate Albums**: A film album contains its soundtrack and songs, while its Original Background Score is maintained as its own distinct album entry (`<Title> (Original Background Score)`) for clean browsing and separate listening.
 2. **People as first-class citizens**: Composers, singers, lyricists, and actors with distinct profiles, filmographies, discographies, and roles.
 3. **Lyrics search**: Search inside synced and plain lyrics text across the entire library to find songs by lyrics lines.
 4. **App and Web migration**: Web and Android clients transition off Subsonic API to Jukebox API v2 for catalog browsing, lyrics, and search.

@@ -93,21 +93,25 @@ class CatalogApiTest {
             setBody(loginRequest("alice"))
         }.body<SessionResponse>().sessionToken
 
-        // 1. List albums
+        // 1. List albums (movie album and score release are separate albums)
         val albumsResp = client.get("/api/v2/albums") { bearerAuth(token) }.body<AlbumsResponse>()
-        assertEquals(1, albumsResp.total)
-        val roja = albumsResp.albums.first()
-        assertEquals("alb-roja", roja.id)
+        assertEquals(2, albumsResp.total)
+        val roja = albumsResp.albums.first { it.id == "alb-roja" }
         assertEquals("Roja", roja.title)
         assertEquals(1992, roja.year)
         assertEquals("A.R. Rahman", roja.composers.first().name)
         assertTrue(roja.cast.contains("Arvind Swami"))
-        assertTrue(roja.songCount >= 2)
+        assertEquals(2, roja.songCount)
 
-        // 2. Full album details with releases
+        val rojaScore = albumsResp.albums.first { it.id == "rel-roja-score" }
+        assertEquals("Roja (Original Background Score)", rojaScore.title)
+        assertEquals("score", rojaScore.kind)
+        assertEquals(1, rojaScore.songCount)
+
+        // 2. Movie album details (does not include background score)
         val albumDetail = client.get("/api/v2/albums/alb-roja") { bearerAuth(token) }.body<AlbumDetailDto>()
         assertEquals("alb-roja", albumDetail.id)
-        assertEquals(2, albumDetail.releases.size) // Soundtrack + Score
+        assertEquals(1, albumDetail.releases.size) // Soundtrack only
 
         val ost = albumDetail.releases.first { it.kind == "soundtrack" }
         assertEquals(2, ost.tracks.size)
@@ -116,9 +120,13 @@ class CatalogApiTest {
         assertEquals("Vairamuthu", trk1.recording.lyricists.first().name)
         assertTrue(trk1.recording.hasSyncedLyrics)
 
-        val score = albumDetail.releases.first { it.kind == "score" }
-        assertEquals(1, score.tracks.size)
-        assertEquals("Roja Theme", score.tracks.first().title)
+        // 3. Score album details (as its own album)
+        val scoreDetail = client.get("/api/v2/albums/rel-roja-score") { bearerAuth(token) }.body<AlbumDetailDto>()
+        assertEquals("rel-roja-score", scoreDetail.id)
+        assertEquals("score", scoreDetail.kind)
+        assertEquals("Roja (Original Background Score)", scoreDetail.title)
+        assertEquals(1, scoreDetail.releases.size)
+        assertEquals("Roja Theme", scoreDetail.releases.first().tracks.first().title)
     }
 
     @Test

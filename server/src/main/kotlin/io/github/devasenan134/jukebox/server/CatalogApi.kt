@@ -233,15 +233,27 @@ class CatalogService(
             composers.getOrPut(it.getString(1)) { mutableListOf() } += PersonRefDto(it.getString(2), it.getString(3), "composer")
         }
 
-        // Distinct recordings on disk per album
-        val counts = query(
+        // Distinct recordings on disk per movie/song album (excluding scores)
+        val songsCounts = query(
             """SELECT a.id, count(DISTINCT r.id), sum(DISTINCT r.duration_ms)
                FROM albums a
                JOIN releases rl ON rl.album_id = a.id
                JOIN tracks t ON t.release_id = rl.id
                JOIN recordings r ON r.id = t.recording_id
                JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+               WHERE rl.kind != 'score'
                GROUP BY a.id"""
+        ) { it.getString(1) to (it.getInt(2) to it.getLong(3)) }.toMap()
+
+        // Distinct recordings on disk per background score release
+        val scoreCounts = query(
+            """SELECT rl.id, count(DISTINCT r.id), sum(DISTINCT r.duration_ms)
+               FROM releases rl
+               JOIN tracks t ON t.release_id = rl.id
+               JOIN recordings r ON r.id = t.recording_id
+               JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+               WHERE rl.kind = 'score'
+               GROUP BY rl.id"""
         ) { it.getString(1) to (it.getInt(2) to it.getLong(3)) }.toMap()
 
         val userLikes = query("SELECT item_id, liked_at FROM likes WHERE user_id = ? AND item_type = 'album'", user.id) {
@@ -250,50 +262,96 @@ class CatalogService(
 
         val playsByAlbum = if (sort == "recent" || sort == "frequent") {
             query(
-                """SELECT a.id, count(p.count), max(p.last_played)
+                """SELECT CASE WHEN rl.kind = 'score' THEN rl.id ELSE a.id END, count(p.count), max(p.last_played)
                    FROM play_counts p
                    JOIN recordings r ON r.id = p.recording_id
                    JOIN tracks t ON t.recording_id = r.id
                    JOIN releases rl ON rl.id = t.release_id
                    JOIN albums a ON a.id = rl.album_id
                    WHERE p.user_id = ?
-                   GROUP BY a.id""",
+                   GROUP BY 1""",
                 user.id,
             ) { it.getString(1) to (it.getInt(2) to it.getLong(3)) }.toMap()
         } else emptyMap()
 
-        val allAlbums = query(
-            """SELECT a.id, a.title, a.year, a.kind, a.cover_id, a.created_at, a.sort_title
-               FROM albums a
-               WHERE (? IS NULL OR a.kind = ?)
-                 AND (? IS NULL OR a.year >= ?)
-                 AND (? IS NULL OR a.year <= ?)""",
-            kind, kind, fromYear, fromYear, toYear, toYear,
-        ) { rs ->
-            val id = rs.getString(1)
-            val title = rs.getString(2)
-            val year = (rs.getObject(3) as Number?)?.toInt()
-            val k = rs.getString(4)
-            val coverId = rs.getString(5)
-            val createdAt = rs.getLong(6)
-            val sortTitle = rs.getString(7)
-            val (songCount, duration) = counts[id] ?: (0 to 0L)
-            val starred = userLikes[id]?.let { Instant.ofEpochMilli(it).toString() }
-            val cast = castMap[title.lowercase() to (year ?: 0)].orEmpty().take(4)
+        val filmAlbums = if (kind == null || kind != "score") {
+            query(
+                """SELECT a.id, a.title, a.year, a.kind, a.cover_id, a.created_at, a.sort_title
+                   FROM albums a
+                   WHERE (? IS NULL OR a.kind = ?)
+                     AND (? IS NULL OR a.year >= ?)
+                     AND (? IS NULL OR a.year <= ?)""",
+                kind, kind, fromYear, fromYear, toYear, toYear,
+            ) { rs ->
+                val id = rs.getString(1)
+                val title = rs.getString(2)
+                val year = (rs.getObject(3) as Number?)?.toInt()
+                val k = rs.getString(4)
+                val coverId = rs.getString(5)
+                val createdAt = rs.getLong(6)
+                val sortTitle = rs.getString(7)
+                val (songCount, duration) = songsCounts[id] ?: (0 to 0L)
+                val starred = userLikes[id]?.let { Instant.ofEpochMilli(it).toString() }
+                val cast = castMap[title.lowercase() to (year ?: 0)].orEmpty().take(4)
 
-            AlbumSummaryDto(
-                id = id,
-                title = title,
-                year = year,
-                kind = k,
-                coverArt = coverId?.let { "al-$id" },
-                composers = composers[id].orEmpty(),
-                cast = cast,
-                songCount = songCount,
-                durationMs = duration,
-                starred = starred,
-            ) to (sortTitle to createdAt)
-        }.filter { it.first.songCount > 0 }
+                AlbumSummaryDto(
+                    id = id,
+                    title = title,
+                    year = year,
+                    kind = k,
+                    coverArt = coverId?.let { "al-$id" },
+                    composers = composers[id].orEmpty(),
+                    cast = cast,
+                    songCount = songCount,
+                    durationMs = duration,
+                    starred = starred,
+                ) to (sortTitle to createdAt)
+            }.filter { it.first.songCount > 0 }
+        } else emptyList()
+
+        val scoreAlbums = if (kind == null || kind == "score" || kind == "film") {
+            query(
+                """SELECT rl.id, a.title, rl.title, coalesce(rl.year, a.year), coalesce(rl.cover_id, a.cover_id), a.created_at, a.sort_title, a.id
+                   FROM releases rl
+                   JOIN albums a ON a.id = rl.album_id
+                   WHERE rl.kind = 'score'
+                     AND (? IS NULL OR coalesce(rl.year, a.year) >= ?)
+                     AND (? IS NULL OR coalesce(rl.year, a.year) <= ?)""",
+                fromYear, fromYear, toYear, toYear,
+            ) { rs ->
+                val relId = rs.getString(1)
+                val albumTitle = rs.getString(2)
+                val relTitle = rs.getString(3)
+                val scoreTitle = if (relTitle.contains("score", ignoreCase = true) || relTitle.contains("bgm", ignoreCase = true)) {
+                    relTitle
+                } else {
+                    "$albumTitle (Original Background Score)"
+                }
+                val year = (rs.getObject(4) as Number?)?.toInt()
+                val coverId = rs.getString(5)
+                val createdAt = rs.getLong(6)
+                val sortTitle = rs.getString(7) + " ~"
+                val parentAlbumId = rs.getString(8)
+                val (songCount, duration) = scoreCounts[relId] ?: (0 to 0L)
+                val starred = (userLikes[relId] ?: userLikes[parentAlbumId])?.let { Instant.ofEpochMilli(it).toString() }
+                val cast = castMap[albumTitle.lowercase() to (year ?: 0)].orEmpty().take(4)
+
+                AlbumSummaryDto(
+                    id = relId,
+                    title = scoreTitle,
+                    year = year,
+                    kind = "score",
+                    coverArt = coverId?.let { "al-$relId" },
+                    composers = composers[parentAlbumId].orEmpty(),
+                    cast = cast,
+                    songCount = songCount,
+                    durationMs = duration,
+                    starred = starred,
+                ) to (sortTitle to createdAt)
+            }.filter { it.first.songCount > 0 }
+        } else emptyList()
+
+        val allAlbums = filmAlbums + scoreAlbums
 
         val sorted = when (sort) {
             "newest" -> allAlbums.sortedByDescending { it.second.second }
@@ -315,27 +373,174 @@ class CatalogService(
             "SELECT id, title, year, kind, cover_id FROM albums WHERE id = ?", id
         ) {
             Triple(it.getString(1), it.getString(2), (it.getObject(3) as Number?)?.toInt()) to (it.getString(4) to it.getString(5))
+        }
+
+        if (album != null) {
+            val (albumId, title, year) = album.first
+            val (kind, coverId) = album.second
+
+            val credits = query(
+                """SELECT c.role, p.id, p.name FROM album_credits c JOIN people p ON p.id = c.person_id
+                   WHERE c.album_id = ? ORDER BY c.role, c.position""", id
+            ) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
+
+            val composers = credits.filter { it.first == "composer" }.map { PersonRefDto(it.second, it.third, "composer") }
+            val directors = credits.filter { it.first == "director" }.map { it.third }
+            val creditActors = credits.filter { it.first == "actor" }.map { PersonRefDto(it.second, it.third, "actor") }
+            val castNames = castMap[title.lowercase() to (year ?: 0)].orEmpty()
+            val cast = if (creditActors.isNotEmpty()) creditActors else castNames.map {
+                PersonRefDto("actor-${Fuzzy.key(it)}", it, "actor")
+            }
+
+            val starred = queryOne(
+                "SELECT liked_at FROM likes WHERE user_id = ? AND item_type = 'album' AND item_id = ?",
+                user.id, id,
+            ) { Instant.ofEpochMilli(it.getLong(1)).toString() }
+
+            val userSongLikes = query("SELECT item_id, liked_at FROM likes WHERE user_id = ? AND item_type = 'recording'", user.id) {
+                it.getString(1) to it.getLong(2)
+            }.toMap()
+
+            val userSongPlays = query("SELECT recording_id, count FROM play_counts WHERE user_id = ?", user.id) {
+                it.getString(1) to it.getInt(2)
+            }.toMap()
+
+            // Fetch releases (excluding score releases so movie and score are kept separate)
+            val releases = query(
+                """SELECT rl.id, rl.title, rl.kind, rl.year, rl.cover_id
+                   FROM releases rl WHERE rl.album_id = ? AND rl.kind != 'score'
+                   ORDER BY CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'single' THEN 1 ELSE 2 END, rl.year""",
+                id,
+            ) { rs ->
+                val relId = rs.getString(1)
+                val relTitle = rs.getString(2)
+                val relKind = rs.getString(3)
+                val relYear = (rs.getObject(4) as Number?)?.toInt()
+                val relCover = rs.getString(5)
+
+                val tracks = query(
+                    """SELECT t.id, t.disc, t.number, t.title, r.id, r.title, r.version, r.duration_ms, coalesce(f.cover_id, rl.cover_id, a.cover_id),
+                              EXISTS(SELECT 1 FROM lyrics l WHERE l.recording_id = r.id AND l.synced = 1)
+                       FROM tracks t
+                       JOIN recordings r ON r.id = t.recording_id
+                       JOIN releases rl ON rl.id = t.release_id
+                       JOIN albums a ON a.id = rl.album_id
+                       JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+                       WHERE t.release_id = ?
+                       ORDER BY t.disc, t.number, t.title""",
+                    relId,
+                ) { trs ->
+                    val trkId = trs.getString(1)
+                    val disc = trs.getInt(2)
+                    val num = trs.getInt(3)
+                    val trkTitle = trs.getString(4)
+                    val recId = trs.getString(5)
+                    val recTitle = trs.getString(6)
+                    val version = trs.getString(7) ?: "original"
+                    val durationMs = trs.getLong(8)
+                    val trkCover = trs.getString(9)
+                    val hasSynced = trs.getInt(10) == 1
+
+                    val songCredits = query(
+                        """SELECT c.role, p.id, p.name FROM recording_credits c JOIN people p ON p.id = c.person_id
+                           WHERE c.recording_id = ? ORDER BY c.role, c.position""",
+                        recId,
+                    ) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
+
+                    val singers = songCredits.filter { it.first == "singer" }.map { PersonRefDto(it.second, it.third, "singer") }
+                    val songComposers = songCredits.filter { it.first == "composer" }.map { PersonRefDto(it.second, it.third, "composer") }
+                        .ifEmpty { composers }
+                    val lyricists = songCredits.filter { it.first == "lyricist" }.map { PersonRefDto(it.second, it.third, "lyricist") }
+
+                    val songStarred = userSongLikes[recId]?.let { Instant.ofEpochMilli(it).toString() }
+                    val playCount = userSongPlays[recId] ?: 0
+
+                    TrackDto(
+                        id = trkId,
+                        disc = disc,
+                        number = num,
+                        title = trkTitle,
+                        recording = RecordingDto(
+                            id = recId,
+                            title = recTitle,
+                            version = version,
+                            durationMs = durationMs,
+                            singers = singers,
+                            composers = songComposers,
+                            lyricists = lyricists,
+                            coverArt = trkCover?.let { "al-$id" },
+                            hasSyncedLyrics = hasSynced,
+                            playCount = playCount,
+                            starred = songStarred,
+                        ),
+                    )
+                }.distinctBy { it.recording.id }
+
+                ReleaseDto(
+                    id = relId,
+                    title = relTitle,
+                    kind = relKind,
+                    year = relYear,
+                    coverArt = relCover?.let { "rl-$relId" } ?: coverId?.let { "al-$id" },
+                    tracks = tracks,
+                )
+            }.filter { it.tracks.isNotEmpty() }
+
+            return@read AlbumDetailDto(
+                id = id,
+                title = title,
+                year = year,
+                kind = kind,
+                coverArt = coverId?.let { "al-$id" },
+                composers = composers,
+                directors = directors,
+                cast = cast,
+                starred = starred,
+                releases = releases,
+            )
+        }
+
+        // If not found in albums table, check if id is a score release
+        val scoreRelease = queryOne(
+            """SELECT rl.id, a.title, rl.title, coalesce(rl.year, a.year), coalesce(rl.cover_id, a.cover_id), a.id
+               FROM releases rl
+               JOIN albums a ON a.id = rl.album_id
+               WHERE rl.id = ? AND rl.kind = 'score'""", id
+        ) {
+            val relId = it.getString(1)
+            val parentTitle = it.getString(2)
+            val relTitle = it.getString(3)
+            val year = (it.getObject(4) as Number?)?.toInt()
+            val coverId = it.getString(5)
+            val parentAlbumId = it.getString(6)
+            val scoreTitle = if (relTitle.contains("score", ignoreCase = true) || relTitle.contains("bgm", ignoreCase = true)) {
+                relTitle
+            } else {
+                "$parentTitle (Original Background Score)"
+            }
+            Triple(relId, scoreTitle, year) to (coverId to (parentAlbumId to parentTitle))
         } ?: return@read null
 
-        val (albumId, title, year) = album.first
-        val (kind, coverId) = album.second
+        val (scoreId, scoreTitle, scoreYear) = scoreRelease.first
+        val (scoreCoverId, parentInfo) = scoreRelease.second
+        val (parentAlbumId, parentTitle) = parentInfo
 
         val credits = query(
             """SELECT c.role, p.id, p.name FROM album_credits c JOIN people p ON p.id = c.person_id
-               WHERE c.album_id = ? ORDER BY c.role, c.position""", id
+               WHERE c.album_id = ? ORDER BY c.role, c.position""", parentAlbumId
         ) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
 
         val composers = credits.filter { it.first == "composer" }.map { PersonRefDto(it.second, it.third, "composer") }
         val directors = credits.filter { it.first == "director" }.map { it.third }
         val creditActors = credits.filter { it.first == "actor" }.map { PersonRefDto(it.second, it.third, "actor") }
-        val castNames = castMap[title.lowercase() to (year ?: 0)].orEmpty()
+        val castNames = castMap[parentTitle.lowercase() to (scoreYear ?: 0)].orEmpty()
         val cast = if (creditActors.isNotEmpty()) creditActors else castNames.map {
             PersonRefDto("actor-${Fuzzy.key(it)}", it, "actor")
         }
 
         val starred = queryOne(
-            "SELECT liked_at FROM likes WHERE user_id = ? AND item_type = 'album' AND item_id = ?",
-            user.id, id,
+            "SELECT liked_at FROM likes WHERE user_id = ? AND item_type = 'album' AND (item_id = ? OR item_id = ?)",
+            user.id, scoreId, parentAlbumId,
         ) { Instant.ofEpochMilli(it.getLong(1)).toString() }
 
         val userSongLikes = query("SELECT item_id, liked_at FROM likes WHERE user_id = ? AND item_type = 'recording'", user.id) {
@@ -346,99 +551,84 @@ class CatalogService(
             it.getString(1) to it.getInt(2)
         }.toMap()
 
-        // Fetch releases
-        val releases = query(
-            """SELECT rl.id, rl.title, rl.kind, rl.year, rl.cover_id
-               FROM releases rl WHERE rl.album_id = ?
-               ORDER BY CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'score' THEN 1 WHEN 'single' THEN 2 ELSE 3 END, rl.year""",
-            id,
-        ) { rs ->
-            val relId = rs.getString(1)
-            val relTitle = rs.getString(2)
-            val relKind = rs.getString(3)
-            val relYear = (rs.getObject(4) as Number?)?.toInt()
-            val relCover = rs.getString(5)
+        val tracks = query(
+            """SELECT t.id, t.disc, t.number, t.title, r.id, r.title, r.version, r.duration_ms, coalesce(f.cover_id, rl.cover_id, a.cover_id),
+                      EXISTS(SELECT 1 FROM lyrics l WHERE l.recording_id = r.id AND l.synced = 1)
+               FROM tracks t
+               JOIN recordings r ON r.id = t.recording_id
+               JOIN releases rl ON rl.id = t.release_id
+               JOIN albums a ON a.id = rl.album_id
+               JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+               WHERE t.release_id = ?
+               ORDER BY t.disc, t.number, t.title""",
+            scoreId,
+        ) { trs ->
+            val trkId = trs.getString(1)
+            val disc = trs.getInt(2)
+            val num = trs.getInt(3)
+            val trkTitle = trs.getString(4)
+            val recId = trs.getString(5)
+            val recTitle = trs.getString(6)
+            val version = trs.getString(7) ?: "original"
+            val durationMs = trs.getLong(8)
+            val trkCover = trs.getString(9)
+            val hasSynced = trs.getInt(10) == 1
 
-            // Tracks for this release
-            val tracks = query(
-                """SELECT t.id, t.disc, t.number, t.title, r.id, r.title, r.version, r.duration_ms, coalesce(f.cover_id, rl.cover_id, a.cover_id),
-                          EXISTS(SELECT 1 FROM lyrics l WHERE l.recording_id = r.id AND l.synced = 1)
-                   FROM tracks t
-                   JOIN recordings r ON r.id = t.recording_id
-                   JOIN releases rl ON rl.id = t.release_id
-                   JOIN albums a ON a.id = rl.album_id
-                   JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
-                   WHERE t.release_id = ?
-                   ORDER BY t.disc, t.number, t.title""",
-                relId,
-            ) { trs ->
-                val trkId = trs.getString(1)
-                val disc = trs.getInt(2)
-                val num = trs.getInt(3)
-                val trkTitle = trs.getString(4)
-                val recId = trs.getString(5)
-                val recTitle = trs.getString(6)
-                val version = trs.getString(7)
-                val durationMs = trs.getLong(8)
-                val trkCover = trs.getString(9)
-                val hasSynced = trs.getInt(10) == 1
+            val songCredits = query(
+                """SELECT c.role, p.id, p.name FROM recording_credits c JOIN people p ON p.id = c.person_id
+                   WHERE c.recording_id = ? ORDER BY c.role, c.position""",
+                recId,
+            ) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
 
-                val songCredits = query(
-                    """SELECT c.role, p.id, p.name FROM recording_credits c JOIN people p ON p.id = c.person_id
-                       WHERE c.recording_id = ? ORDER BY c.role, c.position""",
-                    recId,
-                ) { Triple(it.getString(1), it.getString(2), it.getString(3)) }
+            val singers = songCredits.filter { it.first == "singer" }.map { PersonRefDto(it.second, it.third, "singer") }
+            val songComposers = songCredits.filter { it.first == "composer" }.map { PersonRefDto(it.second, it.third, "composer") }
+                .ifEmpty { composers }
+            val lyricists = songCredits.filter { it.first == "lyricist" }.map { PersonRefDto(it.second, it.third, "lyricist") }
 
-                val singers = songCredits.filter { it.first == "singer" }.map { PersonRefDto(it.second, it.third, "singer") }
-                val songComposers = songCredits.filter { it.first == "composer" }.map { PersonRefDto(it.second, it.third, "composer") }
-                    .ifEmpty { composers }
-                val lyricists = songCredits.filter { it.first == "lyricist" }.map { PersonRefDto(it.second, it.third, "lyricist") }
+            val songStarred = userSongLikes[recId]?.let { Instant.ofEpochMilli(it).toString() }
+            val playCount = userSongPlays[recId] ?: 0
 
-                val songStarred = userSongLikes[recId]?.let { Instant.ofEpochMilli(it).toString() }
-                val playCount = userSongPlays[recId] ?: 0
-
-                TrackDto(
-                    id = trkId,
-                    disc = disc,
-                    number = num,
-                    title = trkTitle,
-                    recording = RecordingDto(
-                        id = recId,
-                        title = recTitle,
-                        version = version,
-                        durationMs = durationMs,
-                        singers = singers,
-                        composers = songComposers,
-                        lyricists = lyricists,
-                        coverArt = trkCover?.let { "al-$id" },
-                        hasSyncedLyrics = hasSynced,
-                        playCount = playCount,
-                        starred = songStarred,
-                    ),
-                )
-            }.distinctBy { it.recording.id }
-
-            ReleaseDto(
-                id = relId,
-                title = relTitle,
-                kind = relKind,
-                year = relYear,
-                coverArt = relCover?.let { "rl-$relId" } ?: coverId?.let { "al-$id" },
-                tracks = tracks,
+            TrackDto(
+                id = trkId,
+                disc = disc,
+                number = num,
+                title = trkTitle,
+                recording = RecordingDto(
+                    id = recId,
+                    title = recTitle,
+                    version = version,
+                    durationMs = durationMs,
+                    singers = singers,
+                    composers = songComposers,
+                    lyricists = lyricists,
+                    coverArt = trkCover?.let { "al-$scoreId" },
+                    hasSyncedLyrics = hasSynced,
+                    playCount = playCount,
+                    starred = songStarred,
+                ),
             )
-        }.filter { it.tracks.isNotEmpty() }
+        }.distinctBy { it.recording.id }
 
         AlbumDetailDto(
-            id = id,
-            title = title,
-            year = year,
-            kind = kind,
-            coverArt = coverId?.let { "al-$id" },
+            id = scoreId,
+            title = scoreTitle,
+            year = scoreYear,
+            kind = "score",
+            coverArt = scoreCoverId?.let { "al-$scoreId" },
             composers = composers,
             directors = directors,
             cast = cast,
             starred = starred,
-            releases = releases,
+            releases = listOf(
+                ReleaseDto(
+                    id = scoreId,
+                    title = scoreTitle,
+                    kind = "score",
+                    year = scoreYear,
+                    coverArt = scoreCoverId?.let { "al-$scoreId" },
+                    tracks = tracks,
+                )
+            ),
         )
     }
 

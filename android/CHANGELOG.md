@@ -8,6 +8,15 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Separate Movie Albums and Scores (0.15.1)
+
+App, website, Mac app and server.
+
+### Fixed
+- **Album separation.** Restored separate album listings for movie albums and Original Background Scores instead of merging them together.
+
+---
+
 ## Jukebox API v2 & Redesign (0.15.0)
 
 App, website, Mac app and server.
