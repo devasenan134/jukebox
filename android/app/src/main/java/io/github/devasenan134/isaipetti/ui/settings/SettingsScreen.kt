@@ -5,6 +5,9 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import io.github.devasenan134.isaipetti.data.Appearance
 import io.github.devasenan134.isaipetti.data.ThemeMode
+import io.github.devasenan134.isaipetti.data.StreamingQuality
+import io.github.devasenan134.isaipetti.data.DownloadQuality
+import io.github.devasenan134.isaipetti.ui.components.formatFileSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.ui.res.painterResource
@@ -135,6 +138,8 @@ fun SettingsScreen(nav: Nav) {
             if (social != null) ListeningStatsCard(onOpen = nav.openStats)
 
             AppearanceCard()
+
+            AudioQualityCard()
 
             LockScreenCard()
 
@@ -293,6 +298,104 @@ private fun AppearanceCard() {
                 )
             }
         }
+    }
+}
+
+/** Audio quality options for online streaming and offline downloading. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioQualityCard() {
+    val app = LocalApp.current
+    val settings = app.audioQuality
+    val offline = app.offlineDownloads
+    val context = LocalContext.current
+
+    val streamingQuality by settings.streamingQuality.collectAsStateWithLifecycle()
+    val downloadQuality by settings.downloadQuality.collectAsStateWithLifecycle()
+    val downloadedIds by offline.downloadedIds.collectAsStateWithLifecycle()
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Audio quality", style = MaterialTheme.typography.titleMedium)
+            HorizontalDivider()
+
+            Text("Streaming quality", style = MaterialTheme.typography.bodyLarge)
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                StreamingQuality.entries.forEachIndexed { i, option ->
+                    SegmentedButton(
+                        selected = streamingQuality == option,
+                        onClick = { settings.setStreamingQuality(option) },
+                        shape = SegmentedButtonDefaults.itemShape(i, StreamingQuality.entries.size),
+                    ) { Text(option.label) }
+                }
+            }
+            Text(
+                streamingQuality.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text("Offline download quality", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 4.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                DownloadQuality.entries.forEachIndexed { i, option ->
+                    SegmentedButton(
+                        selected = downloadQuality == option,
+                        onClick = { settings.setDownloadQuality(option) },
+                        shape = SegmentedButtonDefaults.itemShape(i, DownloadQuality.entries.size),
+                    ) { Text(option.label) }
+                }
+            }
+            Text(
+                downloadQuality.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            val count = downloadedIds.size
+            if (count > 0) {
+                HorizontalDivider(Modifier.padding(top = 4.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Downloaded music", style = MaterialTheme.typography.bodyMedium)
+                        val bytes = remember(downloadedIds) { offline.totalBytesUsed() }
+                        Text(
+                            "$count songs · ${formatFileSize(bytes)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { showClearDialog = true }) {
+                        Text("Clear", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+    }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = { Text("Clear downloaded music?") },
+            text = { Text("All downloaded songs will be removed from this device. You will need an internet connection to stream them.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearDialog = false
+                        offline.clearAll()
+                        Toast.makeText(context, "Downloaded songs removed", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                ) { Text("Clear") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 }
 

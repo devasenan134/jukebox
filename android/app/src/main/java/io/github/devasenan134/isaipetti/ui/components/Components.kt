@@ -110,6 +110,12 @@ fun formatTotalDuration(seconds: Int): String {
 /** "1 song", "3,264 songs" */
 fun songCount(n: Int) = if (n == 1) "1 song" else "%,d songs".format(n)
 
+fun formatFileSize(bytes: Long): String = when {
+    bytes >= 1_000_000_000 -> "%.1f GB".format(bytes / 1e9)
+    bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1e6)
+    else -> "%d KB".format(bytes / 1000)
+}
+
 /** "1 like", "12 likes", or "No likes yet". */
 fun likeCount(n: Int) = when (n) {
     0 -> "No likes yet"
@@ -189,6 +195,8 @@ fun SongRow(
     // Saved = liked or in one of your playlists; shown with a check mark like Spotify.
     val inPlaylists by app.myPlaylists.songs.collectAsStateWithLifecycle()
     val saved = (liked && !inLikedSongs) || inPlaylists[song.id].orEmpty().any { it != inOwnPlaylist }
+    val downloadedIds by app.offlineDownloads.downloadedIds.collectAsStateWithLifecycle()
+    val isDownloaded = downloadedIds.contains(song.id)
     val scope = rememberCoroutineScope()
     var menuOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
@@ -273,6 +281,14 @@ fun SongRow(
                     modifier = Modifier.padding(end = 8.dp).clip(CircleShape).clickable { addingToPlaylist = true }.padding(2.dp).size(18.dp),
                 )
             }
+            if (isDownloaded) {
+                Icon(
+                    painterResource(R.drawable.ic_download_done),
+                    contentDescription = "Downloaded offline",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(end = 6.dp).size(16.dp),
+                )
+            }
             Text(formatDuration(song.duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Box {
                 IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
@@ -284,6 +300,27 @@ fun SongRow(
                     DropdownMenuItem(text = { Text("Play next") }, onClick = { player.playNext(song); menuOpen = false })
                     DropdownMenuItem(text = { Text("Add to queue") }, onClick = { player.addToQueue(song); menuOpen = false })
                     DropdownMenuItem(text = { Text("Add to playlist") }, onClick = { addingToPlaylist = true; menuOpen = false })
+                    if (isDownloaded) {
+                        DropdownMenuItem(
+                            text = { Text("Remove download") },
+                            onClick = {
+                                app.offlineDownloads.removeSong(song.id)
+                                menuOpen = false
+                                Toast.makeText(context, "Removed download", Toast.LENGTH_SHORT).show()
+                            },
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Download") },
+                            onClick = {
+                                menuOpen = false
+                                scope.launch {
+                                    val ok = app.offlineDownloads.downloadSong(song.id, app.api, app.audioQuality.downloadQuality.value)
+                                    if (ok) Toast.makeText(context, "Downloaded", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        )
+                    }
                     onRemoveFromPlaylist?.let { remove ->
                         DropdownMenuItem(text = { Text("Remove from this playlist") }, onClick = { remove(); menuOpen = false })
                     }

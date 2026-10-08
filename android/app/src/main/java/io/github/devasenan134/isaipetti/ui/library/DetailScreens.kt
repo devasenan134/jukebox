@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import io.github.devasenan134.isaipetti.data.toAlbum
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -337,7 +338,7 @@ internal fun SongList(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { onPlay(); player.play(songs, source = source) }, enabled = songs.isNotEmpty()) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Text("Play", Modifier.padding(start = 8.dp))
@@ -347,6 +348,7 @@ internal fun SongList(
                         Text("Shuffle", Modifier.padding(start = 8.dp))
                     }
                     liked?.let { LikeButton(it, onToggleLike) }
+                    DownloadButton(songs = songs)
                 }
                 extraAction?.let { Box(Modifier.padding(top = 8.dp)) { it() } }
             }
@@ -403,5 +405,54 @@ internal fun ResumeButton(source: String, songs: List<Song>, onResume: () -> Uni
     }) {
         Icon(Icons.Filled.PlayArrow, contentDescription = null)
         Text("Resume · ${current.title}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+/** Downloads all songs in this album or playlist for offline listening. */
+@Composable
+private fun DownloadButton(songs: List<Song>) {
+    if (songs.isEmpty()) return
+    val app = LocalApp.current
+    val offline = app.offlineDownloads
+    val downloadedIds by offline.downloadedIds.collectAsStateWithLifecycle()
+    val downloadingIds by offline.downloadingIds.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val songIds = remember(songs) { songs.map { it.id }.toSet() }
+    val allDownloaded = remember(downloadedIds, songIds) { songIds.isNotEmpty() && songIds.all { it in downloadedIds } }
+    val isDownloading = remember(downloadingIds, songIds) { songIds.any { it in downloadingIds } }
+
+    IconButton(
+        onClick = {
+            if (isDownloading) return@IconButton
+            if (allDownloaded) {
+                songIds.forEach { offline.removeSong(it) }
+                Toast.makeText(context, "Downloads removed", Toast.LENGTH_SHORT).show()
+            } else {
+                scope.launch {
+                    val count = songs.count { it.id !in downloadedIds }
+                    Toast.makeText(context, "Downloading $count songs…", Toast.LENGTH_SHORT).show()
+                    val completed = offline.downloadSongs(songs, app.api, app.audioQuality.downloadQuality.value)
+                    Toast.makeText(context, "Downloaded $completed songs", Toast.LENGTH_SHORT).show()
+                }
+            }
+        },
+    ) {
+        if (isDownloading) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else if (allDownloaded) {
+            Icon(
+                painterResource(R.drawable.ic_download_done),
+                contentDescription = "Downloaded. Tap to remove",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        } else {
+            Icon(
+                painterResource(R.drawable.ic_download),
+                contentDescription = "Download for offline listening",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

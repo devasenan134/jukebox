@@ -8,6 +8,19 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Streaming & Offline Download Quality Controls (0.16.1)
+
+App.
+
+### New
+- **Streaming quality options.** Added setting to select streaming quality (Auto, High / Original, Data Saver / Opus 128 kbps) in Settings.
+- **Offline downloading quality options.** Added setting to choose quality for downloaded music (Auto, High / Original, Data Saver / Opus 128 kbps).
+- **Offline album and playlist downloads.** Added one-tap download button on albums and playlists to download entire collections for offline listening.
+- **Song offline download actions.** Added download and remove download options to song menus, with downloaded checkmark indicator.
+- **Offline storage management.** Shows downloaded song count and total disk usage in Settings, with one-tap option to clear downloaded music.
+
+---
+
 ## Milestone 5: The Data Plane (0.16.0)
 
 App, website, Mac app and server.

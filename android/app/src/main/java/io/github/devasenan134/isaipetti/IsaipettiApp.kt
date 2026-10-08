@@ -70,6 +70,10 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         private set
     lateinit var lockScreen: LockScreenSettings
         private set
+    lateinit var audioQuality: io.github.devasenan134.isaipetti.data.AudioQualitySettings
+        private set
+    lateinit var offlineDownloads: io.github.devasenan134.isaipetti.data.OfflineDownloads
+        private set
     lateinit var waveforms: Waveforms
         private set
 
@@ -86,6 +90,8 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         session = SessionStore(this).also { it.load() }
         appearance = Appearance(this)
         lockScreen = LockScreenSettings(this)
+        audioQuality = io.github.devasenan134.isaipetti.data.AudioQualitySettings(this)
+        offlineDownloads = io.github.devasenan134.isaipetti.data.OfflineDownloads.getInstance(this)
         val http = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

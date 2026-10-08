@@ -54,7 +54,8 @@ class PlaybackService : MediaSessionService() {
                 if (offlineFile != null && offlineFile.exists()) {
                     spec.withUri(offlineFile.toUri())
                 } else {
-                    spec.withUri(api.streamUrl(songId).toUri())
+                    val quality = app.audioQuality.streamingQuality.value
+                    spec.withUri(api.streamUrl(songId, quality).toUri())
                 }
             } else spec
         }

@@ -131,7 +131,40 @@ class SubsonicApi(
         get("scrobble", mapOf("id" to songId, "submission" to submission, "time" to System.currentTimeMillis()))
     }
 
-    fun streamUrl(songId: String): String = url("stream", mapOf("id" to songId)).toString()
+    fun streamUrl(songId: String, quality: StreamingQuality = StreamingQuality.Auto): String {
+        val params = mutableMapOf<String, Any>("id" to songId)
+        when (quality) {
+            StreamingQuality.DataSaver -> {
+                params["maxBitRate"] = 128
+                params["format"] = "opus"
+            }
+            StreamingQuality.High -> {
+                // High: full bitrate original
+            }
+            StreamingQuality.Auto -> {
+                // Auto: default streaming behavior
+            }
+        }
+        return url("stream", params).toString()
+    }
+
+    fun downloadUrl(songId: String, quality: DownloadQuality = DownloadQuality.Auto): String {
+        val params = mutableMapOf<String, Any>("id" to songId)
+        when (quality) {
+            DownloadQuality.DataSaver -> {
+                params["maxBitRate"] = 128
+                params["format"] = "opus"
+            }
+            DownloadQuality.High -> {
+                // High: download full original file
+            }
+            DownloadQuality.Auto -> {
+                params["maxBitRate"] = 192
+                params["format"] = "opus"
+            }
+        }
+        return url("download", params).toString()
+    }
 
     fun coverUrl(coverArtId: String?, size: Int = 300): String? =
         coverArtId?.let { url("getCoverArt", mapOf("id" to it, "size" to size)).toString() }
