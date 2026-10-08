@@ -23,6 +23,7 @@ rsync -avz --delete \
   --exclude='.gradle' \
   --exclude='server/build' \
   --exclude='data' \
+  --exclude='desktop/src-tauri/target' \
   "$ROOT/" "$REMOTE_HOST:$REMOTE_DIR/"
 
 echo "Rebuilding and restarting container on $REMOTE_HOST (with --no-cache)..."
