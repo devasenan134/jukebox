@@ -51,10 +51,10 @@ fun PersonScreen(id: String, name: String, coverArt: String?, nav: Nav) {
                     io.github.devasenan134.isaipetti.data.MixSong(
                         id = r.id,
                         title = r.title,
+                        artist = r.singers.joinToString(", ") { it.name },
                         duration = maxOf(1, (r.durationMs / 1000).toInt()),
                         coverArt = r.coverArt,
-                        artists = r.singers.map { it.name },
-                        starred = r.starred != null,
+                        artists = r.singers.map { io.github.devasenan134.isaipetti.data.ArtistRef(id = it.id, name = it.name) },
                     )
                 },
             )

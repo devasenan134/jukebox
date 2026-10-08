@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import io.github.devasenan134.isaipetti.data.toAlbum
 import io.github.devasenan134.isaipetti.ui.components.UiSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

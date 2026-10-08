@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
@@ -128,7 +129,7 @@ fun AlbumScreen(id: String, nav: Nav) {
                                 ) {
                                     items(detail.cast) { actor ->
                                         androidx.compose.material3.AssistChip(
-                                            onClick = { nav.openSearch() },
+                                            onClick = { nav.openArtist(actor.id) },
                                             label = { Text(actor.name) },
                                             leadingIcon = {
                                                 Icon(
