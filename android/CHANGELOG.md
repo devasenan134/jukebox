@@ -8,7 +8,7 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
-## Unreleased
+## Composer Albums, Artist Photos & Background Score Split (0.17.0)
 
 ### New
 - **Photos of composers and artists.** Lists and person pages show each person's photo (from JioSaavn, else Wikimedia Commons), or their newest album's cover when there's no photo.
