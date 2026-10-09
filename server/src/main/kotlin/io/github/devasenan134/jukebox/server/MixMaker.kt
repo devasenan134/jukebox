@@ -103,10 +103,11 @@ class MixMaker(
     /** How much this person likes each song they've interacted with. */
     val weights: Map<Int, Double> = buildMap {
         val recent = history.plays.filter { it.second > now - 30 * DAY }.groupingBy { it.first }.eachCount()
-        val keys = history.playCount.keys + history.starred + history.rating.keys + recent.keys
+        val keys = history.playCount.keys + history.starred + history.rating.keys + recent.keys + history.playlisted.keys
         for (i in keys) {
             var w = ln(1.0 + (history.playCount[i] ?: 0)) + 0.5 * ln(1.0 + (recent[i] ?: 0))
             if (i in history.starred) w += 2.0
+            w += history.playlisted[i] ?: 0.0
             when (history.rating[i]) {
                 5 -> w += 1.5
                 4 -> w += 1.0
@@ -347,7 +348,7 @@ class MixMaker(
         for (i in 0 until n) scores[i] += 0.3f * affinity[i] + 0.4f * ln(1.0 + (friendsPlays[i] ?: 0)).toFloat()
         val list = pickBlend(
             scores.indices.associateWith { scores[it] }, 30, weekRandom, pool = 150, blend = yourLanguages,
-            exclude = heard + history.starred, maxPerAlbum = 1, maxPerPerson = 5, scoreOnly = false,
+            exclude = heard + history.starred + history.playlisted.keys, maxPerAlbum = 1, maxPerPerson = 5, scoreOnly = false,
         )
         if (list.size < 10) return null
         return mix(

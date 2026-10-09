@@ -56,8 +56,12 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
 
 1. **User Taste Profiling:**
    - **Interaction Weights:** Scores every song the user touched:
-     $$\text{weight} = \ln(1 + \text{plays}) + 0.5 \ln(1 + \text{recentPlays}) + 2.0 \cdot \text{liked} - 0.5 \cdot (\text{skips} - \text{listens})$$
+     $$\text{weight} = \ln(1 + \text{plays}) + 0.5 \ln(1 + \text{recentPlays}) + 2.0 \cdot \text{liked} + \text{playlisted} - 0.5 \cdot (\text{skips} - \text{listens})$$
    - Liked albums, composers, and singers contribute fractional weights to their associated songs.
+   - **Playlists** (`playlistTaste` in `Library.kt`): each song in a playlist the user made adds 1.0 × carefulness
+     (+0.3 if added in the last 30 days); in a playlist they liked, 0.4 × carefulness. Carefulness is
+     $\sqrt{30 / \text{size}}$ clamped to 0.4–1, so a 30-song playlist says more per song than a 500-song dump.
+     A song in several playlists adds up, capped at 2.0. Playlist songs count as known, so Discover Weekly skips them.
    - Heavily skipped songs ($\ge 2$ skips and skips $> 2 \times$ listens) are placed on an exclusion list.
    - **Taste Centroid:** Computes the average 512-dim embedding of the user's top liked songs.
    - **Affinity:** Calculates cosine similarity (dot product) between each song in the library and the user's taste centroid, adjusted for composer/singer preference.

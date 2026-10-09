@@ -112,6 +112,38 @@ class MixMakerTest {
     }
 
     @Test
+    fun `your playlists teach your taste even before you play anything`() {
+        val lib = Pretend.library()
+        // A playlist of kuthu songs (100..199), and nothing played or liked.
+        val kuthu = PlaylistTaste((100 until 120).map { it to now - 90 * MixMaker.DAY }, own = true)
+        val history = History(emptyMap(), emptyMap(), emptyList(), emptySet(), emptySet(), emptySet(), emptyMap(), playlisted = playlistTaste(listOf(kuthu), now))
+        val maker = maker(lib, history)
+        assertTrue(maker.hasTaste)
+        val discover = assertNotNull(maker.discover())
+        assertTrue(discover.songs.none { it.id.removePrefix("song").toInt() in 100 until 120 })
+        assertTrue(discover.songs.count { style(it.id) == 1 } >= discover.songs.size / 2)
+    }
+
+    @Test
+    fun `playlists you made count more than ones you liked, and careful ones more than dumps`() {
+        val old = now - 90 * MixMaker.DAY
+        val taste = playlistTaste(
+            listOf(
+                PlaylistTaste(listOf(1 to old, 2 to now), own = true),
+                PlaylistTaste((10 until 510).map { it to old }, own = true),
+                PlaylistTaste(listOf(3 to old), own = false),
+                PlaylistTaste(listOf(1 to old), own = false),
+            ),
+            now,
+        )
+        assertTrue(taste.getValue(2) > taste.getValue(1) - 0.4) // recently added counts a bit more
+        assertTrue(taste.getValue(1) > taste.getValue(3)) // made > liked
+        assertTrue(taste.getValue(1) > taste.getValue(10)) // small playlist > 500-song dump
+        assertTrue(taste.getValue(10) > 0.3) // but a big playlist you made still says you like its songs
+        assertTrue(taste.values.all { it <= 2.0 })
+    }
+
+    @Test
     fun `karaoke and songs you keep skipping stay out`() {
         val karaoke = Pretend.song(900, 0, karaoke = true) to Pretend.sound(0)
         val lib = Pretend.library(listOf(karaoke))

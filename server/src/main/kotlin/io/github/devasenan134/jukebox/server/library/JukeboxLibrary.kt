@@ -6,7 +6,9 @@ import io.github.devasenan134.jukebox.server.LibrarySnapshot
 import io.github.devasenan134.jukebox.server.LibrarySong
 import io.github.devasenan134.jukebox.server.MusicSource
 import io.github.devasenan134.jukebox.server.Person
+import io.github.devasenan134.jukebox.server.PlaylistTaste
 import io.github.devasenan134.jukebox.server.moodScores
+import io.github.devasenan134.jukebox.server.playlistTaste
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.coroutines.Dispatchers
@@ -61,12 +63,20 @@ class JukeboxLibrary(
             "SELECT json_extract(payload, '$.recording'), at FROM events WHERE user_id = ? AND type = 'played' ORDER BY seq DESC LIMIT 5000", userId,
         ) { rs -> snapshot.index[rs.getString(1)]?.let { it to rs.getLong(2) } }.filterNotNull()
         val likes = query("SELECT item_type, item_id FROM likes WHERE user_id = ?", userId) { it.getString(1) to it.getString(2) }
+        // Playlists they made, and playlists they liked (someone else's, or a deleted one's leftovers aren't there).
+        val playlistRows = query(
+            """SELECT e.playlist_id, p.owner_id = ?, e.recording_id, e.added_at FROM playlist_entries e JOIN playlists p ON p.id = e.playlist_id
+                 WHERE p.owner_id = ? OR e.playlist_id IN (SELECT playlist_id FROM liked_playlists WHERE user_id = ?)""",
+            userId, userId, userId,
+        ) { rs -> snapshot.index[rs.getString(3)]?.let { Triple(rs.getString(1), rs.getInt(2) == 1, it to rs.getLong(4)) } }.filterNotNull()
+        val playlists = playlistRows.groupBy { it.first }.values.map { rows -> PlaylistTaste(rows.map { it.third }, own = rows.first().second) }
         History(
             playCount, lastPlayed, plays,
             starred = likes.filter { it.first == "recording" }.mapNotNull { snapshot.index[it.second] }.toSet(),
             starredAlbums = likes.filter { it.first == "album" }.map { it.second }.toSet(),
             starredArtists = likes.filter { it.first == "person" }.map { it.second }.toSet(),
             rating = emptyMap(),
+            playlisted = playlistTaste(playlists, System.currentTimeMillis()),
         )
     }
 

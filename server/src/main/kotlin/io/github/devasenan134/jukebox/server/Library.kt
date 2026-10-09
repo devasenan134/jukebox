@@ -72,13 +72,43 @@ class History(
     val starredAlbums: Set<String>,
     val starredArtists: Set<String>,
     val rating: Map<Int, Int>,
+    /**
+     * How much this person's playlists say they like each song: the ones they made, and (less) the ones
+     * they liked. Already weighted (see [playlistTaste]).
+     */
+    val playlisted: Map<Int, Double> = emptyMap(),
 ) {
-    /** Changes whenever this person plays or likes something. */
-    val version = "${playCount.values.sum()}-${plays.firstOrNull()?.second}-${starred.size}-${starredAlbums.size}-${starredArtists.size}-${rating.size}"
+    /** Changes whenever this person plays or likes something, or changes their playlists. */
+    val version = "${playCount.values.sum()}-${plays.firstOrNull()?.second}-${starred.size}-${starredAlbums.size}-${starredArtists.size}-${rating.size}" +
+        "-${playlisted.size}-${playlisted.values.sum().hashCode()}"
 
     companion object {
         val EMPTY = History(emptyMap(), emptyMap(), emptyList(), emptySet(), emptySet(), emptySet(), emptyMap())
     }
+}
+
+/** A playlist as a taste signal: its songs, whether this person made it (or only liked it), and when each song was added. */
+class PlaylistTaste(val songs: List<Pair<Int, Long>>, val own: Boolean)
+
+/**
+ * How much someone's playlists say they like each song. Putting a song in a playlist is a deliberate
+ * choice, like a like, so it counts about half as much as liking it, a bit more if added in the last
+ * 30 days. A small, careful playlist says more per song than a 500-song dump, and a playlist someone
+ * else made that you liked says less than one you made. A song in several playlists adds up, to a limit.
+ */
+fun playlistTaste(playlists: List<PlaylistTaste>, now: Long): Map<Int, Double> {
+    val out = HashMap<Int, Double>()
+    for (p in playlists) {
+        val songs = p.songs.distinctBy { it.first }
+        if (songs.isEmpty()) continue
+        val careful = kotlin.math.sqrt(30.0 / songs.size).coerceIn(0.4, 1.0)
+        for ((i, added) in songs) {
+            var w = (if (p.own) 1.0 else 0.4) * careful
+            if (p.own && added > now - 30 * MixMaker.DAY) w += 0.3
+            out.merge(i, w, Double::plus)
+        }
+    }
+    return out.mapValues { it.value.coerceAtMost(2.0) }
 }
 
 /** Where the mixes get their music from. Tests use a pretend library. */
