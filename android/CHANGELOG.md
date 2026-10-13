@@ -8,6 +8,12 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Saffron (0.18.1)
+
+### Improved
+- **Saffron colours everywhere.** The icon is now gold through saffron to deep orange, with a bigger harmonium, and the app, the website and the Mac app take their colours from it: saffron highlights, the logo's gradient on the play buttons, warm greys.
+- **Light mode.** Settings → Appearance → Light now gives a light Saffron app, and Auto follows your phone's dark mode. Wallpaper colours still work in both.
+
 ## New Icon & Mixes That Know Your Playlists (0.18.0)
 
 ### New
