@@ -230,9 +230,12 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <Artwork item={item} size={48} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="body-large ellipsis">{movie ? item.movie : item.title}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <div className="body-large ellipsis">{movie ? item.movie : item.title}</div>
+            <span className={`kind-tag${movie ? ' album' : ''}`}>{movie ? 'Album' : 'Song'}</span>
+          </div>
           <div className="body-small muted ellipsis">
-            {(movie ? ['Whole movie', item.year, item.trackCount > 0 ? `${item.trackCount} songs` : null] : [item.movie, item.year, item.artist]).filter(Boolean).join(' · ')}
+            {(movie ? [item.year, item.trackCount > 0 ? `${item.trackCount} songs` : null] : [item.movie, item.year, item.artist]).filter(Boolean).join(' · ')}
           </div>
           <div className="body-small" style={{ color }}>{status}</div>
           {showAskers && r.askedBy.length > 0 && <div className="body-small muted ellipsis">Asked by {r.askedBy.join(', ')}</div>}

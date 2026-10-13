@@ -2,6 +2,7 @@ package io.github.devasenan134.isaipetti.ui.search
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -317,9 +318,18 @@ private fun RequestRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Artwork(item, Modifier.size(UiSize.SongThumb))
             Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
-                Text(if (item.isMovie) item.movie else item.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (item.isMovie) item.movie else item.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    KindTag(item.isMovie, Modifier.padding(start = 8.dp))
+                }
                 Text(
-                    (if (item.isMovie) listOfNotNull("Whole movie", item.year?.toString(), item.trackCount.takeIf { it > 0 }?.let { "$it songs" })
+                    (if (item.isMovie) listOfNotNull(item.year?.toString(), item.trackCount.takeIf { it > 0 }?.let { "$it songs" })
                     else listOfNotNull(item.movie, item.year?.toString(), item.artist)).joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -347,6 +357,22 @@ private fun RequestRow(
             }
         }
     }
+}
+
+/** "Album" or "Song", so a request's kind shows at a glance. */
+@Composable
+private fun KindTag(album: Boolean, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(4.dp)
+    val colors = MaterialTheme.colorScheme
+    Text(
+        if (album) "Album" else "Song",
+        style = MaterialTheme.typography.labelSmall,
+        color = if (album) colors.primary else colors.onSurfaceVariant,
+        modifier = modifier
+            .clip(shape)
+            .then(if (album) Modifier.background(colors.primary.copy(alpha = 0.18f)) else Modifier.border(1.dp, colors.outline, shape))
+            .padding(horizontal = 7.dp, vertical = 1.dp),
+    )
 }
 
 private fun ago(millis: Long): String {

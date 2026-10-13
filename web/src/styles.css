@@ -625,6 +625,23 @@ a.nav-item:hover {
 .fab-play .icon {
   font-size: 32px;
 }
+/* "Album" / "Song" on a request (RequestsScreen). */
+.kind-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--outline);
+  color: var(--on-surface-variant);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+}
+.kind-tag.album {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--primary);
+}
 .chip {
   height: 32px;
   padding: 0 14px;

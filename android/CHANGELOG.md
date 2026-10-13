@@ -8,6 +8,11 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Unreleased
+
+**Improved**
+- Requests: each one is tagged **Album** or **Song**, so you can tell at a glance what was asked for (app, website and Mac app).
+
 ## Saffron (0.18.1)
 
 ### Improved
