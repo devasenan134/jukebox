@@ -124,7 +124,7 @@ def svg_icon(x, y, size, radius, dark, ids):
     """One rounded-square icon at (x, y). Light: sunset gradient lit from the top-left corner,
     white mark with a coloured shadow. Dark: near-black, mark in the sunset gradient."""
     s = size / 64
-    k, tx, ty = fit(64, 42, 40, 32, 32)
+    k, tx, ty = fit(64, 48, 46, 32, 32)
     clip = f'<rect width="64" height="64" rx="{radius / s:.2f}"'
     if not dark:
         defs = (f'<linearGradient id="{ids}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{GOLD}"/>'
@@ -202,7 +202,7 @@ def android_mark(paint):
 
 def android_foreground(paint):
     # Adaptive icons are 108 dp with the visible part in the middle 72 and a 66 dp safe circle.
-    k, tx, ty = fit(108, 48, 44, 54, 54)
+    k, tx, ty = fit(108, 56, 50, 54, 54)
     return (f'<?xml version="1.0" encoding="utf-8"?>\n<!-- Made by scripts/brand/make_logo.py; edit that, not this. -->\n'
             f'<vector xmlns:android="http://schemas.android.com/apk/res/android" {AAPT}\n'
             f'    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">\n'
