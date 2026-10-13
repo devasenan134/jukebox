@@ -78,6 +78,25 @@ data class CatalogResults(val movies: List<CatalogHit> = emptyList(), val songs:
 
 @Serializable data class DeclineMusicRequest(val note: String? = null)
 
+/** "Added", optionally saying where: for music filed by a script that knows the album it just filled. */
+@Serializable data class CompleteMusicRequest(val albumId: String? = null, val songId: String? = null)
+
+/**
+ * Where a request's album is in the library (for the fulfil script, docs/request-fulfilment.md): the album,
+ * the song if asked for, and the folder its files are in, as `library` (the name in LIBRARIES) and a path
+ * inside it, with one of its files to copy album tags from.
+ */
+@Serializable
+data class RequestPlace(
+    val albumId: String,
+    val album: String,
+    val year: Int? = null,
+    val songId: String? = null,
+    val library: String? = null,
+    val folder: String? = null,
+    val sampleFile: String? = null,
+)
+
 /** Where songs and movies that aren't in the library are found. Tests use a pretend one. */
 interface Catalog {
     /** Songs and movies for [query], best first. Empty if the catalog can't be reached. */
@@ -312,11 +331,49 @@ class MusicRequests(
         }
     }
 
-    /** An admin added the music: it must be in the library now. Everyone who asked is told. */
-    suspend fun complete(me: UserDto, id: Long): MusicRequestDto {
+    /**
+     * Where the album a request is for is in the library, if it is. The catalog's year and artist can be a
+     * re-release's ("Anbe Aaruyire", 2013, "A.R. Rahman & Vaali" for the 2005 film), so the caller gives the
+     * real [year] and [composer], and one of them has to agree: a same-named film from another year by
+     * someone else is another film. [title] is the song to look for (default: the requested song).
+     */
+    suspend fun place(me: UserDto, id: Long, year: Int?, composer: String?, title: String?): RequestPlace {
         requireAdmin(me)
         val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
-        val place = shelf()?.find(request.item)
+        val library = shelf() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "The library isn't loaded yet")
+        val movie = library.findAlbum(request.item.movie, year, composer)
+            ?: throw ApiError(HttpStatusCode.NotFound, "That album isn't in the library")
+        val songTitle = title?.takeIf { it.isNotBlank() } ?: request.item.title.takeIf { request.item.kind == "song" }
+        val songId = songTitle?.let { t -> Fuzzy.words(t).let { words -> movie.songs.firstOrNull { same(words, it.second) }?.first } }
+        // The folder most of its files are in (a disc or two can sit in subfolders).
+        val files = db.read {
+            query(
+                """SELECT l.name, f.path FROM files f JOIN tracks t ON t.id = f.track_id JOIN releases r ON r.id = t.release_id
+                   JOIN libraries l ON l.id = f.library_id WHERE r.album_id = ? AND f.missing_since IS NULL ORDER BY f.path""",
+                movie.id,
+            ) { it.getString(1) to it.getString(2) }
+        }
+        val folder = files.groupBy { (lib, path) -> lib to path.substringBeforeLast('/', "") }.maxByOrNull { it.value.size }
+        return RequestPlace(
+            albumId = movie.id,
+            album = movie.title,
+            year = movie.year.takeIf { it > 0 },
+            songId = songId,
+            library = folder?.key?.first,
+            folder = folder?.key?.second,
+            sampleFile = folder?.value?.first()?.second,
+        )
+    }
+
+    /**
+     * An admin added the music: it must be in the library now. Everyone who asked is told. With [where], the
+     * caller says which album (and song) it is, for when the catalog's details don't find it on their own.
+     */
+    suspend fun complete(me: UserDto, id: Long, where: CompleteMusicRequest? = null): MusicRequestDto {
+        requireAdmin(me)
+        val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
+        val library = shelf()
+        val place = (if (where?.albumId != null) library?.place(where.albumId, where.songId) else library?.find(request.item))
             ?: throw ApiError(HttpStatusCode.Conflict, "It isn't in the library yet. New files are picked up at the next scan; try again then")
         val askers = db.tx {
             update(
@@ -388,12 +445,29 @@ class MusicRequests(
     private class Shelf(snapshot: LibrarySnapshot) {
         val version = snapshot.version
 
-        class Movie(val id: String, val words: List<String>, val year: Int, val composer: List<String>, val songs: List<Pair<String, List<String>>>)
+        class Movie(val id: String, val title: String, val words: List<String>, val year: Int, val composer: List<String>, val songs: List<Pair<String, List<String>>>)
 
         val movies = snapshot.byAlbum.map { (id, list) ->
             val songs = list.map { snapshot.songs[it] }.filter { !it.karaoke }
             val first = snapshot.songs[list.first()]
-            Movie(id, Fuzzy.words(first.album), list.maxOf { snapshot.songs[it].year }, Fuzzy.words(first.composer?.name.orEmpty()), songs.map { it.id to Fuzzy.words(it.title) })
+            Movie(id, first.album, Fuzzy.words(first.album), list.maxOf { snapshot.songs[it].year }, Fuzzy.words(first.composer?.name.orEmpty()), songs.map { it.id to Fuzzy.words(it.title) })
+        }
+        private val byId = movies.associateBy { it.id }
+
+        /** The album called [title] from [year] (±1) or by [composer]; the closest year first. */
+        fun findAlbum(title: String, year: Int?, composer: String?): Movie? {
+            val words = Fuzzy.words(title)
+            val by = Fuzzy.words(composer.orEmpty())
+            return movies.filter { same(words, it.words) }
+                .filter { m -> (year != null && m.year > 0 && abs(m.year - year) <= 1) || same(by, m.composer) }
+                .minByOrNull { m -> if (year != null && m.year > 0) abs(m.year - year) else 99 }
+        }
+
+        /** [albumId] (and [songId] on it), if they're in the library. */
+        fun place(albumId: String, songId: String?): Place? {
+            val movie = byId[albumId] ?: return null
+            if (songId != null && movie.songs.none { it.first == songId }) return null
+            return Place(albumId, songId)
         }
 
         fun find(item: CatalogItem): Place? {

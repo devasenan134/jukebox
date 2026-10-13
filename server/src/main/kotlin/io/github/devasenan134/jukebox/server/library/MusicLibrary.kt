@@ -55,13 +55,18 @@ class MusicLibrary(
     val photos = PeoplePhotos(db, File(artworkDir.parentFile, "people-photos"), artworkDir)
     private val lock = Mutex()
     @Volatile private var scanning = false
+    /** A scan was asked for and is waiting for the lock: status says "scanning" from the moment it's asked. */
+    @Volatile private var queued = false
     @Volatile private var roots: Map<Long, String> = emptyMap()
 
     /** Library id → folder, for turning a file's path into a file. */
     fun roots(): Map<Long, String> = roots
 
+    fun queueScan() { queued = true }
+
     suspend fun scanAll(): List<ScanReport> = lock.withLock {
         scanning = true
+        queued = false
         try {
             libraries.mapNotNull { l -> runCatching { scanner.scan(l) }.onFailure { log.error("Scanning {} failed", l.name, it) }.getOrNull() }
                 .also {
@@ -102,7 +107,7 @@ class MusicLibrary(
         fun count(sql: String) = query(sql) { it.getInt(1) }.first()
         LibraryStatus(
             libraries = libraries.map { "${it.name} (${it.kind})" },
-            scanning = scanning,
+            scanning = scanning || queued,
             lastScans = query("SELECT info FROM scans WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?", libraries.size.coerceAtLeast(1)) {
                 runCatching { kotlinx.serialization.json.Json.decodeFromString(ScanReport.serializer(), it.getString(1)) }.getOrNull()
             }.filterNotNull(),

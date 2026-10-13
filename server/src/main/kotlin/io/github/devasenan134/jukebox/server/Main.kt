@@ -29,6 +29,7 @@ import io.ktor.http.auth.HttpAuthHeader
 import io.ktor.server.plugins.partialcontent.PartialContent
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveText
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
@@ -452,6 +453,7 @@ fun Application.jukeboxServer(
                 post("/scan") {
                     call.admin()
                     val lib = libraryOn()
+                    lib.queueScan()
                     call.application.launch { lib.scanAll() }
                     call.respond(HttpStatusCode.Accepted, mapOf("status" to "scanning"))
                 }
@@ -462,7 +464,15 @@ fun Application.jukeboxServer(
                 get("/access") { call.respond(AdminAccessDto(stats.isAdmin(call.me()))) }
                 get("/stats") { call.respond(stats.report(call.me(), call.request.queryParameters["tz"])) }
                 get("/requests") { call.respond(requestsOn().all(call.me())) }
-                post("/requests/{id}/done") { call.respond(requestsOn().complete(call.me(), call.longParam("id"))) }
+                get("/requests/{id}/place") {
+                    val q = call.request.queryParameters
+                    call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200)))
+                }
+                post("/requests/{id}/done") {
+                    // The body is optional: the apps send none, the fulfil script says which album it filled.
+                    val where = call.receiveText().takeIf { it.isNotBlank() }?.let { eventJson.decodeFromString(CompleteMusicRequest.serializer(), it) }
+                    call.respond(requestsOn().complete(call.me(), call.longParam("id"), where))
+                }
                 post("/requests/{id}/decline") {
                     call.respond(requestsOn().decline(call.me(), call.longParam("id"), call.receive<DeclineMusicRequest>().note))
                 }

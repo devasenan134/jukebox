@@ -78,6 +78,9 @@ class MusicRequestsTest {
             CatalogItem("itunes-song-3", "song", "Nenjukulle", "Kadal", 2012),
             CatalogItem("itunes-movie-10", "movie", "David", "David", 2013, "Anirudh"),
             CatalogItem("itunes-movie-11", "movie", "Kadal", "Kadal", 2012, "A.R. Rahman", trackCount = 8),
+            // iTunes has the 2005 film as a 2013 re-release, and the library has a 1975 film of the same name.
+            CatalogItem("itunes-song-20", "song", "Mayilrage", "Anbe Aaruyire", 2013, "A.R. Rahman, Madhushree, Naresh Iyer & Vaali"),
+            CatalogItem("itunes-movie-21", "movie", "Anbe Aaruyire", "Anbe Aaruyire", 2013, "A.R. Rahman & Vaali", trackCount = 6),
         ),
     )
 
@@ -133,6 +136,38 @@ class MusicRequestsTest {
         assertEquals("m2", ready.first().second["albumId"])
         assertEquals(emptyList(), requests.search(alice, "kadal").songs) // in the library now
         assertEquals("done", requests.mine(alice).single().status)
+    }
+
+    @Test
+    fun `filling a request finds the right film, then closes with the album the script filled`() = runBlocking {
+        val (requests, music, push) = setUp()
+        music.songs = music.songs + LibrarySong("old1", "Neeyum Naanum", "Anbe Aaruyire", "m1975", "", emptyList(), Person("p-msv", "M. S. Viswanathan"), 1975, 200, "Tamil", 0, false)
+        val song = requests.request(alice, "itunes-song-20")
+        val album = requests.request(bob, "itunes-movie-21")
+
+        // The 1975 film has the same name but another year and composer: not this album.
+        assertFailsWith<ApiError> { requests.place(admin, song.id, 2005, "A.R.Rahman", "Mayiliragae") }
+        assertFailsWith<ApiError> { requests.place(alice, song.id, 2005, "A.R.Rahman", null) } // admins only
+        assertEquals("m1975", requests.place(admin, song.id, 1975, null, null).albumId)
+
+        // The script files the 2005 album; after the scan both requests find it.
+        music.songs = music.songs + listOf("Aararai Kodi", "Mayiliragae", "Varugirai").mapIndexed { i, t ->
+            LibrarySong("new$i", t, "Anbe Aaruyire", "m2005", "", emptyList(), Person("p-arr", "A. R. Rahman"), 2005, 300, "Tamil", 0, false)
+        }
+        val place = requests.place(admin, song.id, 2005, "A.R.Rahman", "Mayiliragae")
+        assertEquals("m2005", place.albumId)
+        assertEquals("new1", place.songId)
+        assertEquals("m2005", requests.place(admin, album.id, null, "A.R.Rahman", null).albumId) // the composer is enough
+        assertNull(requests.place(admin, album.id, 2005, null, null).songId)
+
+        // The catalog's 2013 / "A.R. Rahman & Vaali" don't find it, so the script says where it is.
+        assertFailsWith<ApiError> { requests.complete(admin, album.id) }
+        assertFailsWith<ApiError> { requests.complete(admin, song.id, CompleteMusicRequest("m2005", "old1")) } // not on that album
+        assertFailsWith<ApiError> { requests.complete(admin, song.id, CompleteMusicRequest("nope")) }
+        val done = requests.complete(admin, song.id, CompleteMusicRequest(place.albumId, place.songId))
+        assertEquals("done" to "new1", done.status to done.songId)
+        assertEquals("done", requests.complete(admin, album.id, CompleteMusicRequest("m2005")).status)
+        assertEquals(setOf("phone-alice", "phone-bob"), push.sent.filter { it.second["type"] == "musicReady" }.map { it.first }.toSet())
     }
 
     @Test
