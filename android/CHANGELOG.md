@@ -8,6 +8,17 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## New Icon & Mixes That Know Your Playlists (0.18.0)
+
+### New
+- **New icon.** A harmonium, pumped open, in sunset colours, on the phone, the Mac app and the website. Where the launcher follows dark mode the icon turns dark, and Android 13's themed icons take your wallpaper's colour.
+
+### Improved
+- **Mixes learn from your playlists.** Songs in your own playlists, and in playlists you've liked, now count towards your taste (recently added songs a bit more), and Discover leaves out songs you already have in a playlist.
+
+### Server
+- The Docker image builds the web app and server jars natively and only the runtime per platform, so multi-platform builds no longer stall.
+
 ## Composer Albums, Artist Photos & Background Score Split (0.17.0)
 
 ### New
