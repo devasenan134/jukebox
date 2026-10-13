@@ -1,35 +1,41 @@
 /*
  * Jukebox's look: a dark music app. The page is near-black and the music brings the colour: page headers
- * and the players take their tint from the cover (ui/coverColor.ts). One accent, mango, marks what's yours
- * and what's playing. The variable names are the Material roles the screens already use.
+ * and the players take their tint from the cover (ui/coverColor.ts). The accent is the logo's "Saffron" (gold
+ * through saffron to deep orange): saffron marks what's yours and what's playing, the full gradient fills the
+ * main buttons, and the greys lean slightly warm, like the logo's dark version. The variable names are the Material roles the screens
+ * already use.
  */
 
 :root {
   --app-bg: #000000;
-  --primary: #ffb547;
-  --on-primary: #1d1300;
-  --primary-container: #4a3412;
-  --on-primary-container: #ffe0b0;
-  --secondary-container: #2a2a2a;
+  --primary: #ffa12b;
+  --on-primary: #2b1300;
+  --primary-container: #5c3000;
+  --on-primary-container: #ffdcb8;
+  --secondary-container: #2c2723;
   --on-secondary-container: #ffffff;
-  --tertiary: #8fd3c1;
-  --background: #121212;
+  --tertiary: #ffe36e;
+  --background: #141210;
   --on-background: #ffffff;
-  --surface: #121212;
+  --surface: #141210;
   --on-surface: #ffffff;
-  --surface-variant: #2a2a2a;
-  --on-surface-variant: #a7a7a7;
-  --surface-container-lowest: #0a0a0a;
-  --surface-container-low: #181818;
-  --surface-container: #1f1f1f;
-  --surface-container-high: #282828;
-  --surface-container-highest: #333333;
+  --surface-variant: #2c2723;
+  --on-surface-variant: #ada59d;
+  --surface-container-lowest: #0c0a09;
+  --surface-container-low: #1a1714;
+  --surface-container: #211d1a;
+  --surface-container-high: #2a2521;
+  --surface-container-highest: #35302b;
   --inverse-surface: #ffffff;
-  --inverse-on-surface: #121212;
-  --outline: #727272;
-  --outline-variant: #2e2e2e;
+  --inverse-on-surface: #141210;
+  --outline: #78716a;
+  --outline-variant: #302b27;
   --error: #f3727f;
   --scrim: rgba(0, 0, 0, 0.7);
+  --primary-rgb: 255, 161, 43;
+  /* The logo's gradient, for the main buttons, with dark text and icons on it. */
+  --brand: linear-gradient(135deg, #ffe36e 0%, #ff9f1c 55%, #e5480b 100%);
+  --on-brand: #2b1300;
   --hover: rgba(255, 255, 255, 0.07);
   --hover-strong: rgba(255, 255, 255, 0.12);
   color-scheme: dark;
@@ -246,7 +252,7 @@ a:hover {
   display: flex;
   height: calc(var(--nav-height) + env(safe-area-inset-bottom));
   padding: 8px 0 env(safe-area-inset-bottom);
-  background: linear-gradient(to top, #000 55%, rgba(0, 0, 0, 0.85) 80%, transparent);
+  background: linear-gradient(to top, var(--app-bg) 55%, rgba(0, 0, 0, 0.85) 80%, transparent);
 }
 .nav-item {
   flex: 1;
@@ -433,8 +439,8 @@ a.nav-item:hover {
   height: 36px;
   border-radius: 50%;
   border: 0;
-  background: #fff;
-  color: #000;
+  background: var(--brand);
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -547,8 +553,8 @@ a.nav-item:hover {
   padding: 0 28px;
   border-radius: 22px;
   border: 0;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--brand);
+  color: var(--on-brand);
   font-weight: 800;
   font-size: 15px;
   cursor: pointer;
@@ -599,8 +605,8 @@ a.nav-item:hover {
   height: 56px;
   border-radius: 50%;
   border: 0;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--brand);
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -836,8 +842,8 @@ a.nav-item:hover {
   height: 48px;
   border-radius: 50%;
   border: 0;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--brand);
+  color: var(--on-brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1345,8 +1351,8 @@ a.nav-item:hover {
   }
 }
 .toast {
-  background: #2e77d0;
-  color: #fff;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
   font-weight: 600;
   padding: 10px 16px;
   border-radius: 8px;

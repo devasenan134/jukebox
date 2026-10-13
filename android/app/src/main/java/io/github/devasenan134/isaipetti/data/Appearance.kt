@@ -19,7 +19,7 @@ class Appearance(context: Context) {
     val mode: StateFlow<ThemeMode> = _mode
 
     private val _wallpaper = MutableStateFlow(prefs.getBoolean(WALLPAPER, false))
-    /** Use the colours Android picks from the wallpaper ("Material You") instead of Graphite & mango. */
+    /** Use the colours Android picks from the wallpaper ("Material You") instead of Jukebox's saffron. */
     val wallpaper: StateFlow<Boolean> = _wallpaper
 
     fun setMode(mode: ThemeMode) {

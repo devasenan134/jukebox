@@ -276,12 +276,12 @@ export function PersonCard({ artist, onClick, className = 'tile' }: { artist: Ar
 }
 
 const TILES = [
-  { label: 'Albums', color: 'hsl(330 70% 42%)', go: (n: Nav) => n.openAlbums() },
-  { label: 'Composers', color: 'hsl(205 70% 38%)', go: (n: Nav) => n.openArtists() },
-  { label: 'Artists', color: 'hsl(20 75% 42%)', go: (n: Nav) => n.openSingers() },
-  { label: 'Playlists', color: 'hsl(180 55% 30%)', go: (n: Nav) => n.openPlaylists() },
-  { label: 'Liked songs', color: 'hsl(255 50% 46%)', go: (n: Nav) => n.openLikedSongs() },
-  { label: 'Your Library', color: 'hsl(150 55% 30%)', go: (n: Nav) => n.openLibrary() },
+  { label: 'Albums', color: 'hsl(22 85% 44%)', go: (n: Nav) => n.openAlbums() },
+  { label: 'Composers', color: 'hsl(38 90% 40%)', go: (n: Nav) => n.openArtists() },
+  { label: 'Artists', color: 'hsl(12 75% 42%)', go: (n: Nav) => n.openSingers() },
+  { label: 'Playlists', color: 'hsl(30 60% 30%)', go: (n: Nav) => n.openPlaylists() },
+  { label: 'Liked songs', color: 'hsl(16 85% 48%)', go: (n: Nav) => n.openLikedSongs() },
+  { label: 'Your Library', color: 'hsl(45 70% 32%)', go: (n: Nav) => n.openLibrary() },
 ]
 
 /** Before you type: recent searches, places to browse (each with a tilted album cover), your requests, recent picks. */

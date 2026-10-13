@@ -1,87 +1,117 @@
 package io.github.devasenan134.isaipetti.ui.theme
 
 import android.os.Build
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import io.github.devasenan134.isaipetti.data.ThemeMode
 
-// Jukebox dark palette matching web/src/styles.css
-private val AppBackground = Color(0xFF121212)
-private val Mango = Color(0xFFFFB547)
-private val OnMango = Color(0xFF1D1300)
-private val MangoContainer = Color(0xFF4A3412)
-private val OnMangoContainer = Color(0xFFFFE0B0)
-private val TertiaryMint = Color(0xFF8FD3C1)
-private val OnTertiary = Color(0xFF00382D)
+// Jukebox's "Saffron" palettes, from the logo (gold through saffron to deep orange); the dark one
+// matches web/src/styles.css. Greys lean slightly warm, like the logo's dark version.
+private val Saffron = Color(0xFFFFA12B)
 private val White = Color(0xFFFFFFFF)
-private val MutedText = Color(0xFFA7A7A7)
-private val DarkSurfaceLowest = Color(0xFF0A0A0A)
-private val DarkSurfaceLow = Color(0xFF181818)
-private val DarkSurface = Color(0xFF1F1F1F)
-private val DarkSurfaceHigh = Color(0xFF282828)
-private val DarkSurfaceHighest = Color(0xFF333333)
-private val DarkSurfaceVariant = Color(0xFF2A2A2A)
-private val OutlineGrey = Color(0xFF727272)
-private val OutlineVariantGrey = Color(0xFF2E2E2E)
-private val ErrorRed = Color(0xFFF3727F)
 
 private val JukeboxDarkColors = darkColorScheme(
-    primary = Mango,
-    onPrimary = OnMango,
-    primaryContainer = MangoContainer,
-    onPrimaryContainer = OnMangoContainer,
-    inversePrimary = Color(0xFF9A5C00),
-    secondary = MutedText,
-    onSecondary = AppBackground,
-    secondaryContainer = DarkSurfaceVariant,
+    primary = Saffron,
+    onPrimary = Color(0xFF2B1300),
+    primaryContainer = Color(0xFF5C3000),
+    onPrimaryContainer = Color(0xFFFFDCB8),
+    inversePrimary = Color(0xFF9A4A00),
+    secondary = Color(0xFFADA59D),
+    onSecondary = Color(0xFF141210),
+    secondaryContainer = Color(0xFF2C2723),
     onSecondaryContainer = White,
-    tertiary = TertiaryMint,
-    onTertiary = OnTertiary,
-    tertiaryContainer = Color(0xFF1F5145),
-    onTertiaryContainer = Color(0xFFABF0DC),
-    background = AppBackground,
+    tertiary = Color(0xFFFFE36E),
+    onTertiary = Color(0xFF3A2F00),
+    tertiaryContainer = Color(0xFF544500),
+    onTertiaryContainer = Color(0xFFFFF0B3),
+    background = Color(0xFF141210),
     onBackground = White,
-    surface = AppBackground,
+    surface = Color(0xFF141210),
     onSurface = White,
-    surfaceVariant = DarkSurfaceVariant,
-    onSurfaceVariant = MutedText,
-    surfaceTint = Mango,
-    surfaceDim = DarkSurfaceLow,
-    surfaceBright = DarkSurfaceHighest,
-    surfaceContainerLowest = DarkSurfaceLowest,
-    surfaceContainerLow = DarkSurfaceLow,
-    surfaceContainer = DarkSurface,
-    surfaceContainerHigh = DarkSurfaceHigh,
-    surfaceContainerHighest = DarkSurfaceHighest,
+    surfaceVariant = Color(0xFF2C2723),
+    onSurfaceVariant = Color(0xFFADA59D),
+    surfaceTint = Saffron,
+    surfaceDim = Color(0xFF1A1714),
+    surfaceBright = Color(0xFF35302B),
+    surfaceContainerLowest = Color(0xFF0C0A09),
+    surfaceContainerLow = Color(0xFF1A1714),
+    surfaceContainer = Color(0xFF211D1A),
+    surfaceContainerHigh = Color(0xFF2A2521),
+    surfaceContainerHighest = Color(0xFF35302B),
     inverseSurface = White,
-    inverseOnSurface = AppBackground,
-    outline = OutlineGrey,
-    outlineVariant = OutlineVariantGrey,
-    error = ErrorRed,
+    inverseOnSurface = Color(0xFF141210),
+    outline = Color(0xFF78716A),
+    outlineVariant = Color(0xFF302B27),
+    error = Color(0xFFF3727F),
 )
 
-/** Whether the app is showing dark colours (Jukebox is designed as a dark music app). */
+// On light screens saffron itself is too pale for text, so the accent is a deeper burnt saffron.
+private val JukeboxLightColors = lightColorScheme(
+    primary = Color(0xFFA84B00),
+    onPrimary = White,
+    primaryContainer = Color(0xFFFFDCBE),
+    onPrimaryContainer = Color(0xFF351000),
+    inversePrimary = Saffron,
+    secondary = Color(0xFF6E5F55),
+    onSecondary = White,
+    secondaryContainer = Color(0xFFF3E3D7),
+    onSecondaryContainer = Color(0xFF261A12),
+    tertiary = Color(0xFF7A5900),
+    onTertiary = White,
+    tertiaryContainer = Color(0xFFFFDF94),
+    onTertiaryContainer = Color(0xFF261A00),
+    background = Color(0xFFFFF8F4),
+    onBackground = Color(0xFF221A15),
+    surface = Color(0xFFFFF8F4),
+    onSurface = Color(0xFF221A15),
+    surfaceVariant = Color(0xFFF0E0D3),
+    onSurfaceVariant = Color(0xFF53443A),
+    surfaceTint = Color(0xFFA84B00),
+    surfaceDim = Color(0xFFE8D7CC),
+    surfaceBright = Color(0xFFFFF8F4),
+    surfaceContainerLowest = White,
+    surfaceContainerLow = Color(0xFFFCF2EB),
+    surfaceContainer = Color(0xFFF7ECE4),
+    surfaceContainerHigh = Color(0xFFF1E6DE),
+    surfaceContainerHighest = Color(0xFFEBE0D8),
+    inverseSurface = Color(0xFF382F29),
+    inverseOnSurface = Color(0xFFFFEDE4),
+    outline = Color(0xFF85746A),
+    outlineVariant = Color(0xFFD8C3B6),
+    error = Color(0xFFBA1A1A),
+)
+
+/** Whether the app is showing dark colours: the choice in Settings, or the phone's for Auto. */
 @Composable
-fun isAppInDarkTheme(mode: ThemeMode): Boolean = true
+fun isAppInDarkTheme(mode: ThemeMode): Boolean = when (mode) {
+    ThemeMode.System -> isSystemInDarkTheme()
+    ThemeMode.Light -> false
+    ThemeMode.Dark -> true
+}
 
 /**
- * Jukebox dark theme (matching the web app styling).
- * With [wallpaper] on Android 12+, dynamic Material You dark colors can be used if enabled.
+ * Jukebox's Saffron theme, light or dark as chosen in Settings (Auto follows the phone).
+ * With [wallpaper] on Android 12+, the colours come from the wallpaper instead.
  */
 @Composable
 fun IsaipettiTheme(
-    mode: ThemeMode = ThemeMode.Dark,
+    mode: ThemeMode = ThemeMode.System,
     wallpaper: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val dark = isAppInDarkTheme(mode)
     val colors = when {
-        wallpaper && Build.VERSION.SDK_INT >= 31 -> dynamicDarkColorScheme(context)
-        else -> JukeboxDarkColors
+        wallpaper && Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        dark -> JukeboxDarkColors
+        else -> JukeboxLightColors
     }
     MaterialTheme(colorScheme = colors, typography = IsaipettiTypography, content = content)
 }
@@ -89,7 +119,7 @@ fun IsaipettiTheme(
 /** Official JukeboxTheme alias */
 @Composable
 fun JukeboxTheme(
-    mode: ThemeMode = ThemeMode.Dark,
+    mode: ThemeMode = ThemeMode.System,
     wallpaper: Boolean = false,
     content: @Composable () -> Unit,
 ) = IsaipettiTheme(mode, wallpaper, content)

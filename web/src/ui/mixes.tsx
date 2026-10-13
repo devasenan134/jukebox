@@ -6,7 +6,7 @@ import type { Nav } from './nav'
 
 // Mixes by Jukebox, drawn in the browser (ui/mixes/MixComponents.kt).
 
-const DEFAULT_TINT = '#7A3E9D'
+const DEFAULT_TINT = '#E5480B'
 
 function hexToHsl(hex: string): [number, number, number] {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
@@ -161,7 +161,7 @@ export function LikedTile({ size, fill }: { size: number; fill?: boolean }) {
     <div
       style={{
         ...(fill ? { width: '100%', aspectRatio: '1' } : { width: size, height: size }),
-        borderRadius: size / 10, background: 'var(--primary)', color: 'var(--on-primary)',
+        borderRadius: size / 10, background: 'var(--brand)', color: 'var(--on-brand)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
       }}
     >

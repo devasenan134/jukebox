@@ -285,7 +285,7 @@ private fun AppearanceCard() {
                 Column(Modifier.weight(1f)) {
                     Text("Use wallpaper colours", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        if (Appearance.wallpaperSupported) "Colours from your wallpaper instead of Graphite & mango"
+                        if (Appearance.wallpaperSupported) "Colours from your wallpaper instead of Jukebox's saffron"
                         else "Needs Android 12 or later",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

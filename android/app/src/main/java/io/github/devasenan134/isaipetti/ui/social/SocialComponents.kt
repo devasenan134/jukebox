@@ -95,8 +95,8 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.absoluteValue
 
 private val avatarColors = listOf(
-    Color(0xFFF5B942), Color(0xFFE8643C), Color(0xFF7FB8A4), Color(0xFF8C7BD8),
-    Color(0xFFE38FB0), Color(0xFF6FA8DC), Color(0xFFC9A26B),
+    Color(0xFFFFD25E), Color(0xFFFF9F1C), Color(0xFFF07A3A), Color(0xFFE8B07A),
+    Color(0xFFD9824A), Color(0xFFFFC48A), Color(0xFFC9A26B),
 )
 
 /** A coloured circle with the person's first letter, and a green dot when they're online. */
@@ -119,7 +119,7 @@ fun Avatar(
         ) {
             Text(
                 name.trim().firstOrNull()?.uppercase() ?: "?",
-                color = Color(0xFF1B1726),
+                color = Color(0xFF2B1300),
                 style = if (size > 40.dp) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleSmall,
             )
             if (picture != null) FriendsServerPicture(picture, Modifier.matchParentSize())
@@ -299,7 +299,7 @@ fun GroupAvatar(key: String, size: Dp = 44.dp, conversation: Conversation? = nul
             .size(size).clip(CircleShape).background(avatarColors[key.hashCode().absoluteValue % avatarColors.size]),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(R.drawable.ic_group), contentDescription = "Group", tint = Color(0xFF1B1726), modifier = Modifier.size(size * 0.55f))
+        Icon(painterResource(R.drawable.ic_group), contentDescription = "Group", tint = Color(0xFF2B1300), modifier = Modifier.size(size * 0.55f))
         if (picture != null) FriendsServerPicture(picture, Modifier.matchParentSize())
     }
 }

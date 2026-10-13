@@ -3,13 +3,14 @@
 
 The mark is a harmonium seen from the front, pumped open: the keyboard board leans out on the
 left, the button board on the right, and the bellows fan out between them with folds that
-alternate solid and hollow. Colours are "Sunset" (gold, coral, magenta).
+alternate solid and hollow. Colours are "Saffron" (gold through saffron to deep orange).
 
 Writes:
   web/public/favicon.svg                         light icon, dark icon when the browser is dark
+  web/public/logo.svg                            the light icon only (the sign-in page)
   desktop/icon.svg                               macOS app icon (then: cd desktop && npm run icons)
   android/.../drawable/ic_launcher_foreground.xml  white mark (also the themed-icon layer)
-  android/.../drawable/ic_launcher_background.xml  sunset gradient
+  android/.../drawable/ic_launcher_background.xml  saffron gradient
   android/.../drawable-night/ic_launcher_*.xml     dark mode: near-black, mark in the gradient
 
 Run from the repo root: python3 scripts/brand/make_logo.py
@@ -20,8 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "android/app/src/main/res"
 
-GOLD, CORAL, MAGENTA = "#FFC857", "#FF5E62", "#C2185B"
-NIGHT_TOP, NIGHT_BOTTOM = "#26232B", "#0B0A0D"
+GOLD, SAFFRON, EMBER = "#FFE36E", "#FF9F1C", "#E5480B"
+NIGHT_TOP, NIGHT_BOTTOM = "#2A2520", "#0D0B09"
 
 # ---- the mark, on a 64-unit grid; everything fans out from a pivot below the instrument ----
 
@@ -121,27 +122,27 @@ def svg_mark(paint):
 
 
 def svg_icon(x, y, size, radius, dark, ids):
-    """One rounded-square icon at (x, y). Light: sunset gradient lit from the top-left corner,
-    white mark with a coloured shadow. Dark: near-black, mark in the sunset gradient."""
+    """One rounded-square icon at (x, y). Light: saffron gradient lit from the top-left corner,
+    white mark with a coloured shadow. Dark: near-black, mark in the saffron gradient."""
     s = size / 64
     k, tx, ty = fit(64, 48, 46, 32, 32)
     clip = f'<rect width="64" height="64" rx="{radius / s:.2f}"'
     if not dark:
         defs = (f'<linearGradient id="{ids}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="{GOLD}"/>'
-                f'<stop offset=".55" stop-color="{CORAL}"/><stop offset="1" stop-color="{MAGENTA}"/></linearGradient>'
+                f'<stop offset=".55" stop-color="{SAFFRON}"/><stop offset="1" stop-color="{EMBER}"/></linearGradient>'
                 f'<radialGradient id="{ids}h" cx=".22" cy=".05" r=".85"><stop offset="0" stop-color="#fff" stop-opacity=".38"/>'
                 f'<stop offset=".55" stop-color="#fff" stop-opacity="0"/></radialGradient>'
                 f'<linearGradient id="{ids}v" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/>'
                 f'<stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient>'
                 f'<filter id="{ids}s" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="1.6" '
-                f'stdDeviation="1.6" flood-color="{MAGENTA}" flood-opacity=".7"/></filter>')
+                f'stdDeviation="1.6" flood-color="{EMBER}" flood-opacity=".7"/></filter>')
         body = (f'{clip} fill="url(#{ids}g)"/>{clip} fill="url(#{ids}v)"/>{clip} fill="url(#{ids}h)"/>'
                 f'<g filter="url(#{ids}s)"><g transform="translate({tx:.3f} {ty:.3f}) scale({k:.4f})">{svg_mark("#fff")}</g></g>')
     else:
         defs = (f'<linearGradient id="{ids}k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{NIGHT_TOP}"/>'
                 f'<stop offset="1" stop-color="{NIGHT_BOTTOM}"/></linearGradient>'
                 f'<linearGradient id="{ids}f" gradientUnits="userSpaceOnUse" x1="10" y1="12" x2="54" y2="60">'
-                f'<stop offset="0" stop-color="{GOLD}"/><stop offset=".55" stop-color="{CORAL}"/><stop offset="1" stop-color="{MAGENTA}"/></linearGradient>')
+                f'<stop offset="0" stop-color="{GOLD}"/><stop offset=".55" stop-color="{SAFFRON}"/><stop offset="1" stop-color="{EMBER}"/></linearGradient>')
         body = (f'{clip} fill="url(#{ids}k)"/>'
                 f'<g transform="translate({tx:.3f} {ty:.3f}) scale({k:.4f})">{svg_mark(f"url(#{ids}f)")}</g>')
     return f'<defs>{defs}</defs><g transform="translate({x} {y}) scale({s:.5f})">{body}</g>'
@@ -153,6 +154,11 @@ def favicon():
             '<style>.dark{display:none}@media (prefers-color-scheme:dark){.light{display:none}.dark{display:inline}}</style>'
             f'<g class="light">{svg_icon(0, 0, 64, 14.5, False, "l")}</g>'
             f'<g class="dark">{svg_icon(0, 0, 64, 14.5, True, "d")}</g></svg>\n')
+
+
+def logo():
+    return ('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
+            f'{svg_icon(0, 0, 64, 14.5, False, "o")}</svg>\n')
 
 
 def mac_icon():
@@ -215,7 +221,7 @@ def android_background(dark):
         fill = android_gradient("android:fillColor", [(0, android_colour(NIGHT_TOP)), (1, android_colour(NIGHT_BOTTOM))], 54, 0, 54, 108)
         layers = f'<path android:pathData="M0,0h108v108h-108z">{fill}</path>'
     else:
-        fill = android_gradient("android:fillColor", [(0, android_colour(GOLD)), (0.55, android_colour(CORAL)), (1, android_colour(MAGENTA))], 0, 0, 108, 108)
+        fill = android_gradient("android:fillColor", [(0, android_colour(GOLD)), (0.55, android_colour(SAFFRON)), (1, android_colour(EMBER))], 0, 0, 108, 108)
         shade = android_gradient("android:fillColor", [(0.55, android_colour("#000000", 0)), (1, android_colour("#000000", 0.18))], 54, 0, 54, 108)
         light = ('<aapt:attr name="android:fillColor"><gradient android:type="radial" android:centerX="24" android:centerY="5" '
                  f'android:gradientRadius="92"><item android:offset="0" android:color="{android_colour("#FFFFFF", 0.38)}"/>'
@@ -228,13 +234,14 @@ def android_background(dark):
 
 
 def main():
-    sunset = android_gradient("X", [(0, android_colour(GOLD)), (0.55, android_colour(CORAL)), (1, android_colour(MAGENTA))], 10, 12, 54, 60)
+    saffron = android_gradient("X", [(0, android_colour(GOLD)), (0.55, android_colour(SAFFRON)), (1, android_colour(EMBER))], 10, 12, 54, 60)
     files = {
         ROOT / "web/public/favicon.svg": favicon(),
+        ROOT / "web/public/logo.svg": logo(),
         ROOT / "desktop/icon.svg": mac_icon(),
         RES / "drawable/ic_launcher_foreground.xml": android_foreground("#FFFFFFFF"),
         RES / "drawable/ic_launcher_background.xml": android_background(False),
-        RES / "drawable-night/ic_launcher_foreground.xml": android_foreground(sunset),
+        RES / "drawable-night/ic_launcher_foreground.xml": android_foreground(saffron),
         RES / "drawable-night/ic_launcher_background.xml": android_background(True),
         RES / "drawable/ic_launcher_monochrome.xml": android_foreground("#FFFFFFFF"),
     }

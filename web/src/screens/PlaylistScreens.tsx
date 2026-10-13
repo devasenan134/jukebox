@@ -35,7 +35,7 @@ export function LikedSongsScreen() {
   return (
     <Collection
       art={<div className="art"><LikedTile size={240} fill /></div>}
-      tint="hsl(250 45% 38%)"
+      tint="hsl(30 70% 34%)"
       kind="Playlist"
       title="Liked songs"
       meta={<Meta parts={[name && <b>{name}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />}

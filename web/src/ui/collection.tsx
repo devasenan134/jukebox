@@ -62,7 +62,7 @@ export function PageSkeleton({ hero = true, rows = 8 }: { hero?: boolean; rows?:
   return (
     <div className="page" aria-busy="true" aria-label="Loading">
       {hero && (
-        <div className="hero" style={{ ['--tint' as string]: '#2a2a2a' }}>
+        <div className="hero" style={{ ['--tint' as string]: '#2c2723' }}>
           <div className="art skel" />
           <div className="text">
             <div className="skel" style={{ width: 70, height: 12, marginBottom: 12 }} />

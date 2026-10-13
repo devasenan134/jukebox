@@ -72,7 +72,7 @@ export function HomeScreen() {
     : null
 
   const [hovered, setHovered] = useState<string | undefined>()
-  const [tint, setTint] = useState('hsl(28 45% 30%)')
+  const [tint, setTint] = useState('hsl(30 55% 28%)')
   useEffect(() => useMixes.getState().refresh(), [])
   const lists = useLoad(['home', 'lists'], async () => {
     const [recent, frequent, newest] = await Promise.all([
@@ -235,7 +235,7 @@ function greeting(): string {
 
 /** Picks up a cover's colour for the top of Home (it follows the tile under the pointer). */
 function TintFrom({ coverArt, onColor }: { coverArt?: string; onColor: (c: string) => void }) {
-  const color = useCoverColor(coverArt, 'hsl(28 45% 30%)')
+  const color = useCoverColor(coverArt, 'hsl(30 55% 28%)')
   useEffect(() => onColor(color), [color, onColor])
   return null
 }
