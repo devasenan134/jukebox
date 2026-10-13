@@ -43,5 +43,6 @@ npm run build:mac     # src-tauri/target/universal-apple-darwin/release/bundle/d
 npx tauri dev         # run it without packaging
 ```
 
-The icon is `icon.svg` (the Android launcher mark); after changing it run `npm run icons` and delete the
-`android/`, `ios/` and `Square*` files it also makes.
+The icon is `icon.svg`, written with the Android and website icons by `scripts/brand/make_logo.py`; after
+changing it run `npm run icons` and delete the `android/`, `ios/`, `Square*`, `StoreLogo.png` and `64x64.png`
+files it also makes.

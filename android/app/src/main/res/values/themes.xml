@@ -8,5 +8,4 @@
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
     <color name="launch_background">#FF121212</color>
-    <color name="launcher_background">#FF121212</color>
 </resources>
