@@ -66,6 +66,24 @@ ALLOW_LOCAL = os.environ.get("FULFIL_ALLOW_LOCAL") == "1"
 AGENT = "jukebox-fulfil (https://github.com/devasenan134/jukebox)"
 
 
+TTY = sys.stdout.isatty()
+
+
+def say(text="", end="\n"):
+    """Progress for the person running a batch (no timestamps; the server half logs with them)."""
+    print(text, end=end, flush=True)
+
+
+def live(text):
+    """A line that's rewritten as it changes (download progress), when the output is a terminal."""
+    if TTY:
+        print("\r\033[K" + text, end="", flush=True)
+
+
+def megabytes(n):
+    return f"{n / 1_048_576:.1f} MB"
+
+
 def log(*parts):
     print(datetime.now().strftime("%H:%M:%S"), *parts, flush=True)
 
@@ -101,9 +119,23 @@ KEYS = ["JUKEBOX_URL", "JUKEBOX_TOKEN", "MUSIC_FOLDER", "LIBRARY_NAME", "REQUEST
 # ---------------------------------------------------------------- the server's files, from either machine
 
 
+# One ssh connection for the whole run: the first one stays open in the background and every later ssh and
+# rsync goes through it, so the server's password (if it asks for one) is typed once, not at every step.
+SSH_SHARE = ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/jukebox-fulfil-%C", "-o", "ControlPersist=15m"]
+
+
 def ssh(cfg, command, **kw):
     """Runs [command] (a list of words) on the server, quoted for its shell."""
-    return subprocess.run(["ssh", cfg["REMOTE"], " ".join(shlex.quote(c) for c in command)], stdin=subprocess.DEVNULL, **kw)
+    return subprocess.run(["ssh", *SSH_SHARE, cfg["REMOTE"], " ".join(shlex.quote(c) for c in command)], stdin=subprocess.DEVNULL, **kw)
+
+
+def connect(cfg):
+    """Opens the shared connection (the only place a password can be asked for). False if it can't."""
+    return subprocess.run(["ssh", *SSH_SHARE, cfg["REMOTE"], "true"]).returncode == 0
+
+
+def disconnect(cfg):
+    subprocess.run(["ssh", *SSH_SHARE, "-O", "exit", cfg["REMOTE"]], capture_output=True, stdin=subprocess.DEVNULL)
 
 
 def music_exists(cfg, relative):
@@ -128,7 +160,8 @@ def send_to_server(cfg, rid):
     local = Path(cfg["WORK_FOLDER"]) / str(rid)
     remote = f"{cfg['REQUESTS_FOLDER'].rstrip('/')}/{rid}"
     ssh(cfg, ["mkdir", "-p", remote], check=True, capture_output=True)
-    done = subprocess.run(["rsync", "-a", "--delete", "--exclude", ".*", f"{local}/", f"{cfg['REMOTE']}:{shlex.quote(remote)}/"],
+    done = subprocess.run(["rsync", "-a", "--delete", "--exclude", ".*", "-e", " ".join(["ssh", *SSH_SHARE]),
+                           f"{local}/", f"{cfg['REMOTE']}:{shlex.quote(remote)}/"],
                           stdin=subprocess.DEVNULL, capture_output=True, text=True)
     if done.returncode != 0:
         raise RuntimeError(f"rsync to {cfg['REMOTE']} failed: {done.stderr.strip()[:300]}")
@@ -266,7 +299,7 @@ def reachable(url):
             f"The network's DNS may be blocking the site")
 
 
-def fetch(client, url, dest, tries=3):
+def fetch(client, url, dest, tries=3, progress=None):
     """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written."""
     last = None
     for attempt in range(tries):
@@ -280,6 +313,7 @@ def fetch(client, url, dest, tries=3):
                         continue
                     r.raise_for_status()
                     size = 0
+                    expected = int(r.headers.get("content-length") or 0)
                     part = dest.with_name(dest.name + ".part")
                     with open(part, "wb") as f:
                         for chunk in r.iter_bytes(64 * 1024):
@@ -287,6 +321,8 @@ def fetch(client, url, dest, tries=3):
                             if size > MAX_FILE_BYTES:
                                 raise ValueError("bigger than 60 MB")
                             f.write(chunk)
+                            if progress:
+                                progress(size, expected)
                     part.rename(dest)
                     return size
             raise ValueError("too many redirects")
@@ -424,6 +460,10 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     if not picked:
         raise RuntimeError("no tracks to download")
 
+    say(f"      matched   {album}{f' ({year})' if year else ''}" + (f" · music {composer}" if composer else "")
+        + (f" · score {round(match['match_score'])}" if match.get("match_score") is not None else "")
+        + (f" · {len(picked)} of {len(tracks)} songs" if is_song else f" · {len(picked)} songs"))
+
     # Where it goes: the album's own folder if it's in the library (same title, and its year or composer).
     title_for_place = clean_title(picked[0][1].get("name"), album) if is_song else None
     place = server.place(rid, year, composer, title_for_place)
@@ -436,6 +476,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
         review.update(destination="new", destinationFolder=folder)
         if music_exists(cfg, folder):
             notes.append(f"A folder called {folder} is already in the library; the songs will be added to it")
+    say(f"      goes to   {'joins ' + review['destinationFolder'] + ' (already in the library)' if existing else 'new folder ' + review['destinationFolder']}")
     if dry:
         review["tracks"] = [{"n": n, "file": "", "title": clean_title(t.get("name"), album)} for n, t in picked]
         return review, existing
@@ -447,24 +488,29 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
 
     cover = None
     if cover_url:
+        say("      cover     downloading…", end="")
         try:
             cover = raw / "cover.jpg"
             fetch(client, cover_url, cover)
+            say(" ✓")
         except RuntimeError as e:
             cover = None
             notes.append(f"No cover: {e}")
+            say(f" ✗ {e}")
 
     base_tags = {"album": album, "date": str(year) if year else None, "album_artist": composer, "composer": composer,
                  "genre": meta.get("language") or "Tamil"}
     if existing:
+        say("      tags      reading the album's tags from the library…", end="")
         copied = {k: v for k, v in music_tags(cfg, existing["sampleFile"]).items() if v}
         base_tags.update(copied)
+        say(f" ✓ {copied.get('album', album)} ({copied.get('date', year)})")
 
     out = []
     width = max(2, len(str(total or len(tracks))))
     for i, (n, t) in enumerate(picked, 1):
         title = clean_title(t.get("name"), album)
-        log(f"  {i}/{len(picked)} {title}")
+        head = f"      {i}/{len(picked)} {title[:34]:<34}"
         expected = millis(t.get("duration"))
         downloaded = None
         for quality in ("download320", "download128"):
@@ -472,10 +518,17 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
             if not link:
                 continue
             dest = raw / f"{n:0{width}d}.mp3"
+            kbps = quality[8:]
+            say_progress = (lambda got, size, kbps=kbps: live(f"{head} downloading {kbps} kbps… {megabytes(got)}"
+                                                               + (f" of {megabytes(size)}" if size else "")))
+            if not TTY:
+                say(f"{head} downloading {kbps} kbps…")
             try:
-                fetch(client, urljoin(base, link), dest)
+                fetch(client, urljoin(base, link), dest, progress=say_progress)
             except RuntimeError as e:
-                notes.append(f"{title}: {quality[8:]} kbps link failed ({e})")
+                notes.append(f"{title}: {kbps} kbps link failed ({e})")
+                live(f"{head} {kbps} kbps failed ({e})")
+                say() if TTY else say(f"{head} {kbps} kbps failed ({e})")
                 continue
             info = probe(dest)
             problem = None
@@ -500,10 +553,17 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
         singers = people(t.get("artist") or "")
         tags = dict(base_tags, title=title, artist=singers, lyricist=lyricists or None,
                     track=f"{n}/{total}" if total else str(n), disc="1/1")
+        live(f"{head} tagging…")
         tag(dest, work / f"{name}.mp3", tags, cover)
+        live(f"{head} looking for lyrics…")
         kind, text = lyrics(client, title, singers, album, info["durationMs"])
         if text:
             (work / f"{name}.{'lrc' if kind == 'synced' else 'txt'}").write_text(text.rstrip() + "\n", encoding="utf-8")
+        size = (work / f"{name}.mp3").stat().st_size
+        done = (f"{head} ✓ {info['durationMs'] // 60000}:{info['durationMs'] // 1000 % 60:02d} · {info['bitrate']} kbps · "
+                f"{megabytes(size)} · {dict(synced='synced lyrics', plain='plain lyrics').get(kind, 'no lyrics')}")
+        live(done)
+        say() if TTY else say(done)
         out.append({"n": n, "file": f"{name}.mp3", "title": title, "singers": singers or None,
                     "durationMs": info["durationMs"], "bitrate": info["bitrate"], "lyrics": kind})
     if cover and not existing:
@@ -518,46 +578,74 @@ def run(cfg, batch, dry):
     matches = json.loads(Path(batch).read_text())
     if isinstance(matches, dict):
         matches = [matches]
+    remote = cfg.get("REMOTE")
+    steps = 4 if remote else 3
+    say(f"Jukebox fulfil · {len(matches)} request(s) in {Path(batch).name}{' · dry run: nothing is downloaded or changed' if dry else ''}")
+    say()
+
+    say(f"Step 1/{steps}  Checking the requests in Jukebox…", end="")
     requests = server.requests()
+    say(f" ✓ {sum(1 for r in requests.values() if r['status'] == 'open')} open")
     # Whole albums first: a song from an album in the same batch comes with it.
     matches.sort(key=lambda m: 0 if (requests.get(m.get("request_id")) or {}).get("item", {}).get("kind") == "movie" else 1)
-    albums = {}
-    handed, report = [], []
-    # Before anything: can this machine reach the download site at all?
-    if not dry:
+
+    if dry:
+        say(f"Step 2/{steps}  Checking the download site… skipped (dry run)")
+    else:
         sites = {urlparse(urljoin((m.get("best_match") or {}).get("url") or "", l)).scheme + "://" + urlparse(urljoin((m.get("best_match") or {}).get("url") or "", l)).netloc
                  for m in matches if m.get("match_found")
                  for t in ([m["matched_song"]] if m.get("matched_song") else m.get("tracks") or [])
                  for l in [t.get("download320") or t.get("download128") or ""] if l}
+        say(f"Step 2/{steps}  Checking the download site…", end="")
         for site in sorted(sites):
             why = reachable(site)
             if why:
+                say(" ✗")
                 sys.exit(f"Stopped before downloading anything: {why}.")
+        say(f" ✓ {', '.join(urlparse(x).netloc for x in sorted(sites)) or 'nothing to download'}")
+
+    if remote:
+        say(f"Step 3/{steps}  Connecting to {remote} (if it asks for a password, this is the only time)…")
+        if not connect(cfg):
+            sys.exit(f"Couldn't connect to {remote} with ssh; check that `ssh {remote}` works.")
+        say(f"           ✓ connected")
+    say(f"Step {steps}/{steps}  Filling the requests")
+
+    albums = {}
+    handed, report = [], []
     with httpx.Client(timeout=httpx.Timeout(60, connect=15), headers={"User-Agent": AGENT}) as client:
-        for match in matches:
+        for i, match in enumerate(matches, 1):
             rid = match.get("request_id")
             request = requests.get(rid)
             label = f"#{rid} {match.get('title') or ''} ({match.get('movie') or ''})"
+            kind = (request or {}).get("item", {}).get("kind")
+            say()
+            say(f"  [{i}/{len(matches)}] {label}" + (f" · {'album' if kind == 'movie' else 'song'} · asked by {', '.join(request['askedBy'])}" if request else ""))
             if not request or request["status"] != "open":
                 report.append(f"skipped  {label}: not open any more")
+                say("      skipped   not open any more")
                 continue
             if request.get("stage") and not dry:
                 report.append(f"skipped  {label}: already handed in ({request['stage']})")
+                say(f"      skipped   already handed in ({request['stage']})")
                 continue
             if not match.get("match_found"):
                 report.append(f"skipped  {label}: the matcher found nothing")
+                say("      skipped   the matcher found nothing")
                 continue
-            log(f"{label}…")
             album_key = (key(clean_album((match.get("best_match") or {}).get("title") or "")), year_of(match))
-            covered_by = albums.get(album_key) if request["item"]["kind"] == "song" else None
+            covered_by = albums.get(album_key) if kind == "song" else None
+            if covered_by:
+                say(f"      comes with #{covered_by} (its album is in this batch): nothing to download")
             notes = []
             try:
                 review, existing = prepare(cfg, server, client, match, request, covered_by, notes, dry)
             except Exception as e:  # one bad request doesn't stop the batch
                 shutil.rmtree(Path(cfg["WORK_FOLDER"]) / str(rid), ignore_errors=True)
                 report.append(f"failed   {label}: {e}")
+                say(f"      ✗ failed  {e}")
                 continue
-            if request["item"]["kind"] == "movie":
+            if kind == "movie":
                 albums[album_key] = rid
             where = (f"comes with #{covered_by}" if covered_by else
                      f"joins {review['destinationFolder']}" if existing else f"new folder {review['destinationFolder']}")
@@ -566,24 +654,41 @@ def run(cfg, batch, dry):
             if review["tracks"] and not dry:
                 line += f", lyrics for {lyr}"
             report.append(line + "".join(f"\n           ! {n}" for n in notes))
+            for n in notes:
+                say(f"      !         {n}")
             if dry:
+                say("      would hand this in for your check")
                 continue
             work = Path(cfg["WORK_FOLDER"]) / str(rid)
             work.mkdir(parents=True, exist_ok=True)
             (work / "review.json").write_text(json.dumps({"request": rid, "kind": request["item"]["kind"], "review": review,
                                                           "match": match}, indent=1, ensure_ascii=False))
-            if cfg.get("REMOTE"):
-                log(f"  sending to {cfg['REMOTE']}")
+            if remote:
+                files = [f for f in work.iterdir() if f.is_file() and not f.name.startswith(".")]
+                say(f"      sending   {len(files)} file{'' if len(files) == 1 else 's'} ({megabytes(sum(f.stat().st_size for f in files))}) to {remote}…", end="")
                 try:
                     send_to_server(cfg, rid)
+                    say(" ✓")
                 except (RuntimeError, subprocess.CalledProcessError) as e:
+                    say(" ✗")
                     report[-1] = f"failed   {label}: {e} (the download is kept in {work})"
+                    say(f"      ✗ failed  {e} (the download is kept in {work})")
                     continue
             server.call("POST", f"/admin/requests/{rid}/review", json=review)
             handed.append(rid)
+            say(f"      ✓ handed in · {'closes when #' + str(covered_by) + ' is approved' if covered_by else 'waiting for your check'}")
     if handed:
         server.call("POST", "/admin/requests/reviews-ready", json={"ids": handed})
-    print("\n".join(report) or "Nothing in the file.", flush=True)
+
+    say()
+    say("Summary")
+    say("\n".join("  " + line for line in report) or "  Nothing in the file.")
+    say()
+    if handed:
+        say(f"Next: open Jukebox → Requests → Everyone's → Ready to check, listen, and Approve or Reject ({len(handed)} handed in).")
+        say("      Approved music is moved into the library, the library rescanned and the askers told, by the server.")
+    elif dry:
+        say("Next: run the same command without --dry-run to download and hand them in.")
     return handed
 
 
@@ -754,10 +859,14 @@ def wait_in_background(cfg):
 
 def start_remote_waiter(cfg):
     """Starts the waiting half on the server, which files approved music while the laptop is off."""
+    say(f"Starting the filing half on {cfg['REMOTE']}…", end="")
     done = ssh(cfg, [cfg["REMOTE_FULFIL"], "resume"], capture_output=True, text=True)
-    print((done.stdout or done.stderr).strip(), flush=True)
     if done.returncode != 0:
-        print(f"Couldn't start the waiting half on {cfg['REMOTE']}; run: ssh {cfg['REMOTE']} {cfg['REMOTE_FULFIL']} resume")
+        say(" ✗")
+        say(f"Couldn't start it; run: ssh {cfg['REMOTE']} {cfg['REMOTE_FULFIL']} resume")
+        return
+    say(" ✓ it waits for your decisions there, so this laptop can sleep now.")
+    say(f"      Its log: ssh {cfg['REMOTE']} tail -f {cfg['REQUESTS_FOLDER'].rstrip('/')}/fulfil.log")
 
 
 def status(cfg):
@@ -798,14 +907,26 @@ def main():
     cfg = settings()
     remote = cfg.get("REMOTE")
     if args.command == "run":
-        handed = run(cfg, args.batch, args.dry_run)
-        if handed and not args.dry_run:
+        try:
+            handed = run(cfg, args.batch, args.dry_run)
+            if handed and not args.dry_run:
+                if remote:
+                    start_remote_waiter(cfg)
+                else:
+                    wait(cfg) if args.foreground else wait_in_background(cfg)
+        finally:
             if remote:
-                start_remote_waiter(cfg)
-            else:
-                wait(cfg) if args.foreground else wait_in_background(cfg)
+                disconnect(cfg)
     elif args.command == "resume":
-        start_remote_waiter(cfg) if remote else wait_in_background(cfg)
+        if remote:
+            if not connect(cfg):
+                sys.exit(f"Couldn't connect to {remote} with ssh; check that `ssh {remote}` works.")
+            try:
+                start_remote_waiter(cfg)
+            finally:
+                disconnect(cfg)
+        else:
+            wait_in_background(cfg)
     elif args.command == "wait":
         if remote:
             sys.exit("The waiting half runs on the server: fulfil.py resume")
