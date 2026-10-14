@@ -95,8 +95,9 @@ class SubsonicApi(
                 }
                 "getCoverArt" -> {
                     val (file, type) = library.cover(p.need("id"), p["size"]?.toIntOrNull()) ?: throw Failure(70, "Cover not found")
-                    // A cover's id names one image for good: browsers can keep it.
-                    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=604800, immutable")
+                    // A cover's id names an album (or song, person, playlist), whose picture can change (a cover fixed by
+                    // hand, a cleanup): devices keep it a day, then ask again.
+                    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=86400")
                     call.respond(LocalFileContent(file, ContentType.parse(type)))
                 }
                 else -> ok(call, answer(name, p, idOf(username)))
