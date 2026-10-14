@@ -74,7 +74,7 @@ def log(*parts):
 
 
 def settings():
-    path = Path(os.environ.get("FULFIL_ENV", Path.home() / ".config/jukebox-fulfil.env"))
+    path = Path(os.path.expanduser(str(os.environ.get("FULFIL_ENV") or "~/.config/jukebox-fulfil.env")))
     values = {}
     if path.is_file():
         for line in path.read_text().splitlines():
