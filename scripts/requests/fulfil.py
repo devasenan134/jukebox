@@ -194,6 +194,24 @@ def public_url(url):
             raise ValueError(f"{u.hostname} is a local address")
 
 
+def reachable(url):
+    """Whether this machine can open a connection to [url]'s site; a reason if not."""
+    u = urlparse(url)
+    port = u.port or (443 if u.scheme == "https" else 80)
+    try:
+        addresses = sorted({i[4][0] for i in socket.getaddrinfo(u.hostname, port, type=socket.SOCK_STREAM)})
+    except OSError as e:
+        return f"{u.hostname} doesn't resolve here ({e})"
+    for address in addresses:
+        try:
+            socket.create_connection((address, port), timeout=10).close()
+            return None
+        except OSError:
+            continue
+    return (f"can't connect to {u.hostname}: this machine's DNS gives {', '.join(addresses)} and none of them answer. "
+            f"The network's DNS may be blocking the site")
+
+
 def fetch(client, url, dest, tries=3):
     """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written."""
     last = None
@@ -223,6 +241,12 @@ def fetch(client, url, dest, tries=3):
             if e.response.status_code in (403, 404, 410):
                 break  # a dead link stays dead
             time.sleep(2 * (attempt + 1))
+            continue
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            last = f"can't connect ({type(e).__name__})"
+            if attempt >= 1:
+                break  # an unreachable site won't start answering in a few seconds
+            time.sleep(2)
             continue
         except (httpx.HTTPError, ValueError, OSError) as e:
             last = str(e).splitlines()[0] if str(e) else type(e).__name__
@@ -383,8 +407,9 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
 
     out = []
     width = max(2, len(str(total or len(tracks))))
-    for n, t in picked:
+    for i, (n, t) in enumerate(picked, 1):
         title = clean_title(t.get("name"), album)
+        log(f"  {i}/{len(picked)} {title}")
         expected = millis(t.get("duration"))
         downloaded = None
         for quality in ("download320", "download128"):
@@ -443,7 +468,17 @@ def run(cfg, batch, dry):
     matches.sort(key=lambda m: 0 if (requests.get(m.get("request_id")) or {}).get("item", {}).get("kind") == "movie" else 1)
     albums = {}
     handed, report = [], []
-    with httpx.Client(timeout=120, headers={"User-Agent": AGENT}) as client:
+    # Before anything: can this machine reach the download site at all?
+    if not dry:
+        sites = {urlparse(urljoin((m.get("best_match") or {}).get("url") or "", l)).scheme + "://" + urlparse(urljoin((m.get("best_match") or {}).get("url") or "", l)).netloc
+                 for m in matches if m.get("match_found")
+                 for t in ([m["matched_song"]] if m.get("matched_song") else m.get("tracks") or [])
+                 for l in [t.get("download320") or t.get("download128") or ""] if l}
+        for site in sorted(sites):
+            why = reachable(site)
+            if why:
+                sys.exit(f"Stopped before downloading anything: {why}.")
+    with httpx.Client(timeout=httpx.Timeout(60, connect=15), headers={"User-Agent": AGENT}) as client:
         for match in matches:
             rid = match.get("request_id")
             request = requests.get(rid)
@@ -457,6 +492,7 @@ def run(cfg, batch, dry):
             if not match.get("match_found"):
                 report.append(f"skipped  {label}: the matcher found nothing")
                 continue
+            log(f"{label}…")
             album_key = (key(clean_album((match.get("best_match") or {}).get("title") or "")), year_of(match))
             covered_by = albums.get(album_key) if request["item"]["kind"] == "song" else None
             notes = []
