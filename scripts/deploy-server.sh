@@ -15,6 +15,7 @@ rsync -avz --delete \
   --filter='P /docker-compose.override.yml' \
   --filter='P /secrets/' \
   --filter='P /backups/' \
+  --filter='P /requests/' \
   --filter='P /analyzer/.env' \
   --filter='P /analyzer/docker-compose.override.yml' \
   --exclude='.git' \
