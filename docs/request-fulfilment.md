@@ -5,38 +5,38 @@ on web, Mac and Android, `scripts/requests/fulfil.py` and the analyzer's wake-up
 
 ## Using it
 
+The download site can't be reached from the Mac mini (its DNS sends the site to a dead address, and WARP
+there didn't help), so the downloading half runs on the MacBook and the waiting half on the Mac mini.
+
 1. Look at the requests in Jukebox and run the matcher on the MacBook (one request or a batch) → one JSON file.
-2. Copy it to the Mac mini and start the script:
-   ```bash
-   scp jukebox_requests_matched.json craftingtable:~/fulfil/
-   ssh craftingtable '~/jukebox-fulfil/fulfil.py run ~/fulfil/jukebox_requests_matched.json'
-   ```
-   It prints what it handed in (and anything odd), then keeps waiting in the background.
+2. On the MacBook: `fulfil.py run jukebox_requests_matched.json`. For each request it downloads, checks, tags and
+   fetches lyrics, rsyncs the folder to `craftingtable:/mnt/ugreen/jukebox/requests/<id>/` right away and hands it
+   in. At the end it starts the waiting half on the Mac mini over ssh, so the laptop can sleep afterwards.
 3. Requests → Everyone's → **Ready to check**: listen, then Approve or Reject.
-4. Approved music is in the library within a minute or two and the askers get "ready". `fulfil.py status`
-   shows what's in progress; `tail -f /mnt/ugreen/jukebox/requests/fulfil.log` shows what it did.
+4. The Mac mini files approved music within a minute or two; the askers get "ready".
+   `ssh craftingtable /mnt/ugreen/jukebox/scripts/requests/fulfil.py status` shows what's in progress and
+   `/mnt/ugreen/jukebox/requests/fulfil.log` what it did.
 
-Other commands: `fulfil.py run <json> --dry-run` (what it would do, nothing downloaded), `fulfil.py resume`
-(after a reboot, picks up decisions left over), `fulfil.py undo /mnt/ugreen/jukebox/requests/undo/<time>.jsonl`.
+Other commands: `fulfil.py run <json> --dry-run` (nothing downloaded), `fulfil.py resume` (starts the waiting half
+again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/jukebox/requests/undo/<time>.jsonl`.
 
-## Setup (once, on the Mac mini)
+## Setup (once)
 
-- `mkdir -p /mnt/ugreen/jukebox/requests`; in `/mnt/ugreen/jukebox/.env`: `REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`
-  and `REQUESTS_DIR=/requests`; in the live `docker-compose.yml`: `- ${REQUESTS_FOLDER}:/requests:ro`.
-- The script lives in `~/jukebox-fulfil/` (copied from `scripts/requests/`); it runs with `uv` and needs ffmpeg.
-- `~/.config/jukebox-fulfil.env` (chmod 600): `JUKEBOX_URL=http://127.0.0.1:8098`,
-  `JUKEBOX_TOKEN=` (from `docker exec jukebox /app/bin/jukebox user token devs`),
-  `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil/jiosaavn_m4a`, `LIBRARY_NAME=tamil`,
-  `REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`, `ANALYZER=jukebox-analyzer`.
-- Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).
+MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`, or
+`curl -O https://raw.githubusercontent.com/devasenan134/jukebox/main/scripts/requests/fulfil.py`); `ssh craftingtable`
+working; `~/.config/jukebox-fulfil.env` (chmod 600) from `craftingtable:~/jukebox-fulfil-laptop.env`:
+`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER` and `REQUESTS_FOLDER` (the Mac mini's
+paths), `LIBRARY_NAME=tamil`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
 
-
-Goal: a music request goes from "asked" to "in the library, everyone told" without copying files by hand.
+Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys), `REQUESTS_FOLDER` + `REQUESTS_DIR=/requests` in `.env`,
+the read-only mount in the live `docker-compose.yml`, and `~/.config/jukebox-fulfil.env` with `JUKEBOX_URL=http://127.0.0.1:8098`,
+its own token, `MUSIC_FOLDER`, `LIBRARY_NAME`, `REQUESTS_FOLDER`, `ANALYZER=jukebox-analyzer`.
+Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).
 
 ## Decided (2026-10-13)
 
-- The matcher runs only on the MacBook and writes `jukebox_requests_matched.json`. The download links work
-  from anywhere, so downloading happens elsewhere.
+- The matcher runs only on the MacBook and writes `jukebox_requests_matched.json`. The Mac mini can't reach the
+  download site, so downloading happens on the MacBook too; files go to the Mac mini by rsync.
 - A **fulfil script** does the rest, using the server's existing admin API: download → tag → rescan →
   mark done. Almost no server changes.
 - The matcher fetches only the song for a song request and the whole album for an album request; a song is

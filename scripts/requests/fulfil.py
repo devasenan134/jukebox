@@ -4,8 +4,13 @@
 # dependencies = ["httpx>=0.27"]
 # ///
 """
-Fills music requests from the matcher's JSON (docs/request-fulfilment.md). Runs on the server's host,
-beside the music folder, and only when started:
+Fills music requests from the matcher's JSON (docs/request-fulfilment.md). Two halves, one script:
+
+- On the laptop (REMOTE set), where the download site can be reached: download, check, tag and fetch
+  lyrics, rsync each request's folder to the server's REQUESTS_FOLDER right away, hand it in for an
+  admin's check, then start the waiting half on the server over ssh.
+- On the server's host, beside the music folder: wait for the admin's decisions and file approved music.
+  (Without REMOTE it can also do the downloading itself, if that machine can reach the site.)
 
     fulfil.py run batch.json [--dry-run]   download, check, tag and hand in each request for an admin's
                                            check, then wait in the background for the decisions
@@ -19,13 +24,17 @@ closed (askers get "ready") and the analyzer is woken. Rejected downloads are de
 waits again.
 
 Settings: ~/.config/jukebox-fulfil.env (KEY=value lines, chmod 600):
-    JUKEBOX_URL      http://127.0.0.1:8098
+    JUKEBOX_URL      server: http://127.0.0.1:8098 · laptop: https://jukebox.craftingtable.cc
     JUKEBOX_TOKEN    an admin's token: docker exec jukebox /app/bin/jukebox user token <admin>
-    MUSIC_FOLDER     the library folder on this machine (the one mounted at /music)
+    MUSIC_FOLDER     the library folder on the server (the one mounted at /music)
     LIBRARY_NAME     its name in LIBRARIES (tamil)
-    REQUESTS_FOLDER  where downloads wait (mounted read-only in the container as REQUESTS_DIR)
-    ANALYZER         the analyzer's container (jukebox-analyzer), woken after a scan; blank: don't
-Needs ffmpeg and ffprobe.
+    REQUESTS_FOLDER  where downloads wait on the server (mounted read-only in the container as REQUESTS_DIR)
+    ANALYZER         server: the analyzer's container (jukebox-analyzer), woken after a scan; blank: don't
+  laptop only:
+    REMOTE           the server's ssh name (craftingtable); MUSIC_FOLDER and REQUESTS_FOLDER are then on it
+    REMOTE_FULFIL    this script's path on the server (/mnt/ugreen/jukebox/scripts/requests/fulfil.py)
+    STAGING_FOLDER   where downloads are put together on the laptop (default ~/.cache/jukebox-fulfil)
+Needs ffmpeg and ffprobe (and rsync + ssh on the laptop).
 """
 
 import argparse
@@ -34,6 +43,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import shutil
 import socket
 import subprocess
@@ -72,13 +82,57 @@ def settings():
                 k, v = line.split("=", 1)
                 values[k.strip()] = v.strip().strip('"')
     values.update({k: v for k, v in os.environ.items() if k in KEYS})
-    missing = [k for k in KEYS if k != "ANALYZER" and not values.get(k)]
+    optional = {"ANALYZER", "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER"}
+    missing = [k for k in KEYS if k not in optional and not values.get(k)]
+    if values.get("REMOTE") and not values.get("REMOTE_FULFIL"):
+        missing.append("REMOTE_FULFIL")
     if missing:
         sys.exit(f"Missing settings in {path}: {', '.join(missing)}")
+    # Where downloads are put together: the waiting folder itself on the server, a staging folder on the laptop.
+    values["WORK_FOLDER"] = (os.path.expanduser(values.get("STAGING_FOLDER") or "~/.cache/jukebox-fulfil")
+                             if values.get("REMOTE") else values["REQUESTS_FOLDER"])
     return values
 
 
-KEYS = ["JUKEBOX_URL", "JUKEBOX_TOKEN", "MUSIC_FOLDER", "LIBRARY_NAME", "REQUESTS_FOLDER", "ANALYZER"]
+KEYS = ["JUKEBOX_URL", "JUKEBOX_TOKEN", "MUSIC_FOLDER", "LIBRARY_NAME", "REQUESTS_FOLDER", "ANALYZER",
+        "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER"]
+
+
+# ---------------------------------------------------------------- the server's files, from either machine
+
+
+def ssh(cfg, command, **kw):
+    """Runs [command] (a list of words) on the server, quoted for its shell."""
+    return subprocess.run(["ssh", cfg["REMOTE"], " ".join(shlex.quote(c) for c in command)], stdin=subprocess.DEVNULL, **kw)
+
+
+def music_exists(cfg, relative):
+    path = str(Path(cfg["MUSIC_FOLDER"]) / relative)
+    if cfg.get("REMOTE"):
+        return ssh(cfg, ["test", "-e", path], capture_output=True).returncode == 0
+    return Path(path).exists()
+
+
+def music_tags(cfg, relative):
+    """The album tags of a file in the library (on the server)."""
+    path = str(Path(cfg["MUSIC_FOLDER"]) / relative)
+    if not cfg.get("REMOTE"):
+        return album_tags_from(path)
+    out = ssh(cfg, ["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", path], capture_output=True, text=True)
+    t = {k.lower(): v for k, v in ((json.loads(out.stdout or "{}").get("format") or {}).get("tags") or {}).items()} if out.returncode == 0 else {}
+    return tags_of(t)
+
+
+def send_to_server(cfg, rid):
+    """Copies request [rid]'s folder from the laptop into the server's waiting folder, then drops the local copy."""
+    local = Path(cfg["WORK_FOLDER"]) / str(rid)
+    remote = f"{cfg['REQUESTS_FOLDER'].rstrip('/')}/{rid}"
+    ssh(cfg, ["mkdir", "-p", remote], check=True, capture_output=True)
+    done = subprocess.run(["rsync", "-a", "--delete", "--exclude", ".*", f"{local}/", f"{cfg['REMOTE']}:{shlex.quote(remote)}/"],
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise RuntimeError(f"rsync to {cfg['REMOTE']} failed: {done.stderr.strip()[:300]}")
+    shutil.rmtree(local, ignore_errors=True)
 
 
 class Server:
@@ -322,8 +376,10 @@ def lyrics(client, title, artist, album, duration_ms):
 
 def album_tags_from(folder_file):
     """The album tags of a file already in the album, so a new song joins it (the scanner groups by album + year)."""
-    info = probe(folder_file) or {"tags": {}}
-    t = info["tags"]
+    return tags_of((probe(folder_file) or {"tags": {}})["tags"])
+
+
+def tags_of(t):
     return {
         "album": t.get("album"),
         "date": t.get("date") or t.get("year"),
@@ -378,13 +434,13 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     else:
         folder = safe_name(f"{album} ({year})" if year else album)
         review.update(destination="new", destinationFolder=folder)
-        if (Path(cfg["MUSIC_FOLDER"]) / folder).exists():
+        if music_exists(cfg, folder):
             notes.append(f"A folder called {folder} is already in the library; the songs will be added to it")
     if dry:
         review["tracks"] = [{"n": n, "file": "", "title": clean_title(t.get("name"), album)} for n, t in picked]
         return review, existing
 
-    work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
+    work = Path(cfg["WORK_FOLDER"]) / str(rid)
     shutil.rmtree(work, ignore_errors=True)
     raw = work / ".raw"
     raw.mkdir(parents=True)
@@ -401,8 +457,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     base_tags = {"album": album, "date": str(year) if year else None, "album_artist": composer, "composer": composer,
                  "genre": meta.get("language") or "Tamil"}
     if existing:
-        sample = Path(cfg["MUSIC_FOLDER"]) / existing["sampleFile"]
-        copied = {k: v for k, v in album_tags_from(sample).items() if v}
+        copied = {k: v for k, v in music_tags(cfg, existing["sampleFile"]).items() if v}
         base_tags.update(copied)
 
     out = []
@@ -499,7 +554,7 @@ def run(cfg, batch, dry):
             try:
                 review, existing = prepare(cfg, server, client, match, request, covered_by, notes, dry)
             except Exception as e:  # one bad request doesn't stop the batch
-                shutil.rmtree(Path(cfg["REQUESTS_FOLDER"]) / str(rid), ignore_errors=True)
+                shutil.rmtree(Path(cfg["WORK_FOLDER"]) / str(rid), ignore_errors=True)
                 report.append(f"failed   {label}: {e}")
                 continue
             if request["item"]["kind"] == "movie":
@@ -513,10 +568,17 @@ def run(cfg, batch, dry):
             report.append(line + "".join(f"\n           ! {n}" for n in notes))
             if dry:
                 continue
-            work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
+            work = Path(cfg["WORK_FOLDER"]) / str(rid)
             work.mkdir(parents=True, exist_ok=True)
             (work / "review.json").write_text(json.dumps({"request": rid, "kind": request["item"]["kind"], "review": review,
                                                           "match": match}, indent=1, ensure_ascii=False))
+            if cfg.get("REMOTE"):
+                log(f"  sending to {cfg['REMOTE']}")
+                try:
+                    send_to_server(cfg, rid)
+                except (RuntimeError, subprocess.CalledProcessError) as e:
+                    report[-1] = f"failed   {label}: {e} (the download is kept in {work})"
+                    continue
             server.call("POST", f"/admin/requests/{rid}/review", json=review)
             handed.append(rid)
     if handed:
@@ -690,6 +752,14 @@ def wait_in_background(cfg):
     print(f"Waiting for your decisions in the background (log: {out.name}). Check them on the Requests page.", flush=True)
 
 
+def start_remote_waiter(cfg):
+    """Starts the waiting half on the server, which files approved music while the laptop is off."""
+    done = ssh(cfg, [cfg["REMOTE_FULFIL"], "resume"], capture_output=True, text=True)
+    print((done.stdout or done.stderr).strip(), flush=True)
+    if done.returncode != 0:
+        print(f"Couldn't start the waiting half on {cfg['REMOTE']}; run: ssh {cfg['REMOTE']} {cfg['REMOTE_FULFIL']} resume")
+
+
 def status(cfg):
     rows = [r for r in Server(cfg).requests().values() if r.get("stage")]
     for r in rows:
@@ -726,17 +796,25 @@ def main():
     u.add_argument("log")
     args = p.parse_args()
     cfg = settings()
+    remote = cfg.get("REMOTE")
     if args.command == "run":
         handed = run(cfg, args.batch, args.dry_run)
         if handed and not args.dry_run:
-            wait(cfg) if args.foreground else wait_in_background(cfg)
+            if remote:
+                start_remote_waiter(cfg)
+            else:
+                wait(cfg) if args.foreground else wait_in_background(cfg)
     elif args.command == "resume":
-        wait_in_background(cfg)
+        start_remote_waiter(cfg) if remote else wait_in_background(cfg)
     elif args.command == "wait":
+        if remote:
+            sys.exit("The waiting half runs on the server: fulfil.py resume")
         wait(cfg)
     elif args.command == "status":
         status(cfg)
     elif args.command == "undo":
+        if remote:
+            sys.exit(f"Run undo on the server: ssh {remote} {cfg['REMOTE_FULFIL']} undo <log>")
         undo(cfg, args.log)
 
 
