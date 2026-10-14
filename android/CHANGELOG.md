@@ -8,10 +8,18 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
-## Unreleased
+## Requests, Filled (0.19.0)
 
-**Improved**
-- Requests: each one is tagged **Album** or **Song**, so you can tell at a glance what was asked for (app, website and Mac app).
+### New
+- **Requests get filled for you.** When a requested album or song is found, admins see it under Requests → Everyone's → **Ready to check**: the cover, who composed and wrote it, where it will go in the library, and every song with a play button, its length, quality and whether it has lyrics. Approve and it's in the library a minute later, with the people who asked told it's ready; reject and the download is thrown away. A song joins its album if the album is already in the library (app, website and Mac app).
+- **Lyrics come with new music.** Songs added from requests bring synced lyrics where they can be found, plain lyrics otherwise.
+
+### Improved
+- **Album or Song on every request**, so you can tell at a glance what was asked for.
+- While a request is being added, the people who asked see "Found · being added".
+
+### Server
+- Request fulfilment: admin review stage (schema 26), review endpoints, an admin-only stream of downloads waiting for a check, `jukebox user token` for scripts, and `scripts/requests/fulfil.py` (see docs/request-fulfilment.md). The analyzer checks for new songs at once when signalled.
 
 ## Saffron (0.18.1)
 
