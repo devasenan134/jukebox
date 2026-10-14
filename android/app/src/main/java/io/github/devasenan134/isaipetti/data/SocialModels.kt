@@ -474,9 +474,46 @@ data class MusicRequest(
     val mine: Boolean = false,
     /** Everyone who asked, by name. */
     val askedBy: List<String> = emptyList(),
+    /** While it's being filled: "review" (downloaded, waiting for an admin), "approved" or "rejected". */
+    val stage: String? = null,
+    /** What was downloaded, for admins to check. */
+    val review: RequestReview? = null,
+    /** Why the last check was rejected (admins). */
+    val reviewNote: String? = null,
 ) {
     val isOpen get() = status == "open"
 }
+
+/** A fulfilled request's download, waiting for an admin to listen and approve (docs/request-fulfilment.md). */
+@Serializable
+data class RequestReview(
+    val album: String,
+    val year: Int? = null,
+    val composer: String? = null,
+    val lyricists: String? = null,
+    val coverUrl: String? = null,
+    val source: String? = null,
+    val score: Double? = null,
+    /** "existing": joins an album in the library; "new": a new album folder. */
+    val destination: String = "new",
+    val destinationAlbumId: String? = null,
+    val destinationFolder: String? = null,
+    val tracks: List<ReviewTrack> = emptyList(),
+    val coveredBy: Long? = null,
+    val notes: List<String> = emptyList(),
+)
+
+@Serializable
+data class ReviewTrack(
+    val n: Int,
+    val file: String,
+    val title: String,
+    val singers: String? = null,
+    val durationMs: Long? = null,
+    val bitrate: Int? = null,
+    /** "synced", "plain" or "none". */
+    val lyrics: String = "none",
+)
 
 /** A catalog result, with its request if someone asked for it already. */
 @Serializable

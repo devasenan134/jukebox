@@ -84,6 +84,8 @@ class MusicRequestsTest {
         ),
     )
 
+    private val downloads = java.nio.file.Files.createTempDirectory("jukebox-requests-dl").toFile()
+
     private fun setUp(): Triple<MusicRequests, GrowingMusic, RecordingPush> {
         val db = Db(File.createTempFile("jukebox-requests", ".db").apply { delete(); deleteOnExit() }.path)
         runBlocking {
@@ -96,7 +98,7 @@ class MusicRequestsTest {
         }
         val music = GrowingMusic()
         val sender = RecordingPush()
-        val requests = MusicRequests(db, music, catalog, Push(db, sender), isAdmin = { it.id == 3L }, adminIds = { listOf(3L) })
+        val requests = MusicRequests(db, music, catalog, Push(db, sender), isAdmin = { it.id == 3L }, adminIds = { listOf(3L) }, requestsDir = downloads)
         return Triple(requests, music, sender)
     }
 
@@ -171,7 +173,57 @@ class MusicRequestsTest {
     }
 
     @Test
-    fun `declining, asking again and taking a request back`() = runBlocking {
+    fun `a download is checked by an admin, and a song that comes with its album follows the album`(): Unit = runBlocking {
+        val (requests, _, push) = setUp()
+        val album = requests.request(bob, "itunes-movie-21")
+        val song = requests.request(alice, "itunes-song-20")
+        val review = RequestReview(
+            "Anbe Aaruyire", 2005, "A.R.Rahman", destination = "new", destinationFolder = "Anbe Aaruyire (2005)",
+            tracks = listOf(ReviewTrack(1, "01 - Aararai Kodi.mp3", "Aararai Kodi", durationMs = 321_000, bitrate = 320, lyrics = "synced")),
+        )
+        File(downloads, "${album.id}").mkdirs()
+        File(downloads, "${album.id}/01 - Aararai Kodi.mp3").writeText("pretend mp3")
+
+        assertFailsWith<ApiError> { requests.submitReview(alice, album.id, review) } // admins (the script) only
+        assertFailsWith<ApiError> { requests.submitReview(admin, album.id, review.copy(tracks = listOf(ReviewTrack(1, "../secret.key", "x")))) }
+        assertEquals("review", requests.submitReview(admin, album.id, review).stage)
+        requests.submitReview(admin, song.id, review.copy(coveredBy = album.id))
+        requests.reviewsReady(admin, listOf(album.id, song.id))
+        assertEquals(listOf("Ready to check"), push.sent.filter { it.second["title"] == "Ready to check" }.map { it.second["title"] }) // one, for both
+
+        // Askers see it's being added, but not the download itself.
+        val mine = requests.mine(bob).single()
+        assertEquals("review" to null, mine.stage to mine.review)
+        assertEquals(321_000L, requests.all(admin).first { it.id == album.id }.review!!.tracks.single().durationMs)
+
+        assertEquals("pretend mp3", requests.reviewFile(admin, album.id, 1).readText())
+        assertFailsWith<ApiError> { requests.reviewFile(alice, album.id, 1) }
+        assertFailsWith<ApiError> { requests.reviewFile(admin, album.id, 2) }
+
+        assertFailsWith<ApiError> { requests.approve(alice, album.id) }
+        assertEquals("approved", requests.approve(admin, album.id).stage)
+        assertEquals("approved", requests.all(admin).first { it.id == song.id }.stage) // comes with it
+        assertFailsWith<ApiError> { requests.approve(admin, album.id) } // already decided
+    }
+
+    @Test
+    fun `a rejected download is cleared and the request waits again, with the note for admins`() = runBlocking {
+        val (requests) = setUp()
+        val r = requests.request(alice, "itunes-movie-21")
+        requests.submitReview(admin, r.id, RequestReview("Anbe Aaruyire", 1975))
+        val rejected = requests.reject(admin, r.id, "  That's the 1975 film  ")
+        assertEquals("rejected" to "That's the 1975 film", rejected.stage to rejected.reviewNote)
+        assertNull(requests.mine(alice).single().reviewNote)
+        val cleared = requests.clearReview(admin, r.id)
+        assertEquals(Triple("open", null, null), Triple(cleared.status, cleared.stage, cleared.review))
+        assertEquals("That's the 1975 film", cleared.reviewNote)
+        // Declining or completing ends any check.
+        requests.submitReview(admin, r.id, RequestReview("Anbe Aaruyire", 2005))
+        assertNull(requests.decline(admin, r.id, null).stage)
+    }
+
+    @Test
+    fun `declining, asking again and taking a request back`(): Unit = runBlocking {
         val (requests, _, push) = setUp()
         val movie = requests.request(alice, "itunes-movie-11")
         assertEquals("declined", requests.decline(admin, movie.id, "Nobody has it").status)

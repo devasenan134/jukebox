@@ -22,6 +22,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import org.slf4j.LoggerFactory
+import java.io.File
 import kotlin.math.abs
 
 private val log = LoggerFactory.getLogger("requests")
@@ -64,7 +65,56 @@ data class MusicRequestDto(
     val mine: Boolean = false,
     /** Everyone who asked for it, by name. */
     val askedBy: List<String> = emptyList(),
+    /**
+     * While it's being filled (status still "open"): "review" (downloaded, waiting for an admin's check),
+     * "approved" (being moved into the library) or "rejected" (being removed; then null again).
+     */
+    val stage: String? = null,
+    /** What was downloaded, for admins to check. */
+    val review: RequestReview? = null,
+    /** Why the last check was rejected (admins only). */
+    val reviewNote: String? = null,
 )
+
+/** A fulfilled request's download, written by the fulfil script, waiting in REQUESTS_DIR/<request id>/. */
+@Serializable
+data class RequestReview(
+    val album: String,
+    val year: Int? = null,
+    val composer: String? = null,
+    val lyricists: String? = null,
+    val coverUrl: String? = null,
+    /** Where it came from (the matched page), and how sure the matcher was. */
+    val source: String? = null,
+    val score: Double? = null,
+    /** "existing": joins [destinationAlbumId] in the library; "new": a new album folder. */
+    val destination: String = "new",
+    val destinationAlbumId: String? = null,
+    val destinationFolder: String? = null,
+    val tracks: List<ReviewTrack> = emptyList(),
+    /** A song whose album is filled by another request in the same batch: it comes with that one. */
+    val coveredBy: Long? = null,
+    /** Anything the script wants the admin to know ("320 kbps link failed, 128 kbps used"). */
+    val notes: List<String> = emptyList(),
+)
+
+@Serializable
+data class ReviewTrack(
+    val n: Int,
+    /** The file's name in the request's folder. */
+    val file: String,
+    val title: String,
+    val singers: String? = null,
+    val durationMs: Long? = null,
+    /** kbps. */
+    val bitrate: Int? = null,
+    /** "synced", "plain" or "none". */
+    val lyrics: String = "none",
+)
+
+@Serializable data class RejectReview(val note: String? = null)
+
+@Serializable data class ReviewsReady(val ids: List<Long>)
 
 /** A catalog result, with its request if someone already asked for it. */
 @Serializable
@@ -242,6 +292,8 @@ class MusicRequests(
     private val push: Push,
     private val isAdmin: suspend (UserDto) -> Boolean,
     private val adminIds: suspend () -> List<Long>,
+    /** Where the fulfil script leaves downloads for checking (read-only here); null: reviews can't be played. */
+    private val requestsDir: File? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mutex = Mutex()
@@ -309,6 +361,64 @@ class MusicRequests(
         update("DELETE FROM music_requests WHERE id = ? AND status = 'open' AND NOT EXISTS (SELECT 1 FROM music_request_askers WHERE request_id = ?)", id, id)
     }
 
+    /** The fulfil script hands in a download for checking. */
+    suspend fun submitReview(me: UserDto, id: Long, review: RequestReview): MusicRequestDto {
+        requireAdmin(me)
+        if (review.tracks.any { !SAFE_FILE.matches(it.file) }) throw ApiError(HttpStatusCode.BadRequest, "Bad file name")
+        val changed = db.tx {
+            update(
+                "UPDATE music_requests SET stage = 'review', review_json = ?, review_note = NULL, staged_at = ? WHERE id = ? AND status = 'open'",
+                json.encodeToString(RequestReview.serializer(), review), now(), id,
+            )
+        }
+        if (changed == 0) throw ApiError(HttpStatusCode.Conflict, "That request isn't open")
+        return db.tx { dto(id, me.id) }!!
+    }
+
+    /** After a batch is handed in: one notification to the admins, not one per request. */
+    suspend fun reviewsReady(me: UserDto, ids: List<Long>) {
+        requireAdmin(me)
+        val waiting = db.tx { ids.distinct().mapNotNull { dto(it, me.id) }.filter { it.stage == "review" && it.review?.coveredBy == null } }
+        if (waiting.isEmpty()) return
+        push.musicToCheck(adminIds(), waiting.size, label(waiting.first().item))
+    }
+
+    /** An admin listened and it's right: the fulfil script moves it into the library. Songs that come with it go too. */
+    suspend fun approve(me: UserDto, id: Long): MusicRequestDto = decide(me, id, "approved", null)
+
+    /** It's wrong: the fulfil script deletes the download and the request waits again, with the [note]. */
+    suspend fun reject(me: UserDto, id: Long, note: String?): MusicRequestDto = decide(me, id, "rejected", note?.trim()?.take(200)?.takeIf { it.isNotEmpty() })
+
+    private suspend fun decide(me: UserDto, id: Long, stage: String, note: String?): MusicRequestDto {
+        requireAdmin(me)
+        db.tx {
+            val changed = update("UPDATE music_requests SET stage = ?, review_note = ? WHERE id = ? AND status = 'open' AND stage = 'review'", stage, note, id)
+            if (changed == 0) throw ApiError(HttpStatusCode.Conflict, "That request isn't waiting for a check")
+            update(
+                "UPDATE music_requests SET stage = ?, review_note = ? WHERE status = 'open' AND stage = 'review' AND json_extract(review_json, '$.coveredBy') = ?",
+                stage, note, id,
+            )
+        }
+        log.info("${me.username} $stage request $id")
+        return db.tx { dto(id, me.id) }!!
+    }
+
+    /** The fulfil script removed a rejected download: the request is plainly waiting again. */
+    suspend fun clearReview(me: UserDto, id: Long): MusicRequestDto {
+        requireAdmin(me)
+        db.tx { update("UPDATE music_requests SET stage = NULL, review_json = NULL, staged_at = NULL WHERE id = ?", id) }
+        return db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
+    }
+
+    /** Track [n] of a download waiting for a check, to listen to. */
+    suspend fun reviewFile(me: UserDto, id: Long, n: Int): File {
+        requireAdmin(me)
+        val dir = requestsDir ?: throw ApiError(HttpStatusCode.NotFound, "Downloads can't be played on this server")
+        val review = db.tx { dto(id, me.id) }?.review ?: throw ApiError(HttpStatusCode.NotFound, "Nothing to check")
+        val track = review.tracks.firstOrNull { it.n == n } ?: throw ApiError(HttpStatusCode.NotFound, "No such track")
+        return File(File(dir, id.toString()), track.file).takeIf { it.isFile } ?: throw ApiError(HttpStatusCode.NotFound, "The file is gone")
+    }
+
     /** Your requests: waiting ones first, then ones answered in the last 90 days. */
     suspend fun mine(me: UserDto): List<MusicRequestDto> = db.tx {
         query(
@@ -316,7 +426,7 @@ class MusicRequests(
                WHERE a.user_id = ? AND (r.status = 'open' OR r.closed_at > ?)
                ORDER BY r.status = 'open' DESC, coalesce(r.closed_at, r.created_at) DESC""",
             me.id, now() - RECENT_MS,
-        ) { it.getLong(1) }.mapNotNull { dto(it, me.id) }
+        ) { it.getLong(1) }.mapNotNull { dto(it, me.id)?.copy(review = null, reviewNote = null) }
     }
 
     /** For admins: everything waiting (oldest first), then what was answered in the last 30 days. */
@@ -377,7 +487,7 @@ class MusicRequests(
             ?: throw ApiError(HttpStatusCode.Conflict, "It isn't in the library yet. New files are picked up at the next scan; try again then")
         val askers = db.tx {
             update(
-                "UPDATE music_requests SET status = 'done', album_id = ?, song_id = ?, note = NULL, closed_at = ? WHERE id = ?",
+                "UPDATE music_requests SET status = 'done', album_id = ?, song_id = ?, note = NULL, closed_at = ?, stage = NULL, review_json = NULL WHERE id = ?",
                 place.albumId, place.songId, now(), id,
             )
             askers(id)
@@ -392,7 +502,10 @@ class MusicRequests(
         val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
         val why = note?.trim()?.take(200)?.takeIf { it.isNotEmpty() }
         val askers = db.tx {
-            update("UPDATE music_requests SET status = 'declined', note = ?, album_id = NULL, song_id = NULL, closed_at = ? WHERE id = ?", why, now(), id)
+            update(
+                "UPDATE music_requests SET status = 'declined', note = ?, album_id = NULL, song_id = NULL, closed_at = ?, stage = NULL, review_json = NULL WHERE id = ?",
+                why, now(), id,
+            )
             askers(id)
         }
         push.musicDeclined(askers, label(request.item), why)
@@ -409,7 +522,7 @@ class MusicRequests(
         val askers = query(
             "SELECT u.id, u.display_name FROM music_request_askers a JOIN users u ON u.id = a.user_id WHERE a.request_id = ? ORDER BY a.asked_at", id,
         ) { it.getLong(1) to it.getString(2) }
-        return queryOne("SELECT item_json, status, created_at, closed_at, note, album_id, song_id FROM music_requests WHERE id = ?", id) {
+        return queryOne("SELECT item_json, status, created_at, closed_at, note, album_id, song_id, stage, review_json, review_note FROM music_requests WHERE id = ?", id) {
             MusicRequestDto(
                 id = id,
                 item = json.decodeFromString(CatalogItem.serializer(), it.getString(1)),
@@ -421,6 +534,9 @@ class MusicRequests(
                 songId = it.getString(7),
                 mine = askers.any { (asker, _) -> asker == userId },
                 askedBy = askers.map { (_, name) -> name },
+                stage = it.getString(8),
+                review = it.getString(9)?.let { r -> runCatching { json.decodeFromString(RequestReview.serializer(), r) }.getOrNull() },
+                reviewNote = it.getString(10),
             )
         }
     }
@@ -491,6 +607,8 @@ class MusicRequests(
 
     companion object {
         const val MAX_OPEN = 20
+        /** A file name in a request's folder: no folders, nothing hidden. */
+        private val SAFE_FILE = Regex("""^[^/\\\u0000.][^/\\\u0000]{0,200}$""")
         private val VERSION = Regex("""\b(cover|karaoke|slowed|reverb|lo-?fi|8d|sped up)\b""", RegexOption.IGNORE_CASE)
         private const val RECENT_MS = 90L * 24 * 60 * 60 * 1000
         private const val ADMIN_RECENT_MS = 30L * 24 * 60 * 60 * 1000

@@ -34,6 +34,8 @@ data class Config(
     val rescanEveryMinutes: Long = 60,
     /** The built web app (web/dist), served at /. Empty: no web app. */
     val webDir: String? = null,
+    /** Where the fulfil script leaves fulfilled requests for an admin to check (docs/request-fulfilment.md). */
+    val requestsDir: String? = null,
     /**
      * A Spotify app's id and secret (free at developer.spotify.com), for importing whole Spotify playlists with
      * their ISRCs. Without them, imports read Spotify's public page (the first 100 songs).
@@ -66,6 +68,7 @@ data class Config(
                 saavnIdMap = System.getenv("SAAVN_ID_MAP")?.takeIf { it.isNotBlank() },
                 fingerprints = System.getenv("FINGERPRINTS")?.lowercase() != "off",
                 rescanEveryMinutes = System.getenv("RESCAN_EVERY_MINUTES")?.toLongOrNull() ?: 60,
+                requestsDir = System.getenv("REQUESTS_DIR")?.takeIf { it.isNotBlank() },
                 webDir = System.getenv("WEB_DIR")?.takeIf { File(it, "index.html").isFile },
                 spotifyClientId = System.getenv("SPOTIFY_CLIENT_ID")?.takeIf { it.isNotBlank() },
                 spotifyClientSecret = System.getenv("SPOTIFY_CLIENT_SECRET")?.takeIf { it.isNotBlank() },

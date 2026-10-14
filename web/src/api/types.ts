@@ -302,6 +302,41 @@ export interface MusicRequest {
   songId?: string
   mine: boolean
   askedBy: string[]
+  /** While it's being filled: "review" (downloaded, waiting for an admin), "approved" or "rejected". */
+  stage?: string | null
+  /** What was downloaded (admins). */
+  review?: RequestReview | null
+  /** Why the last check was rejected (admins). */
+  reviewNote?: string | null
+}
+
+/** A fulfilled request's download, waiting for an admin to listen and approve (docs/request-fulfilment.md). */
+export interface RequestReview {
+  album: string
+  year?: number | null
+  composer?: string | null
+  lyricists?: string | null
+  coverUrl?: string | null
+  source?: string | null
+  score?: number | null
+  /** "existing": joins an album in the library; "new": a new album folder. */
+  destination: string
+  destinationAlbumId?: string | null
+  destinationFolder?: string | null
+  tracks: ReviewTrack[]
+  coveredBy?: number | null
+  notes: string[]
+}
+
+export interface ReviewTrack {
+  n: number
+  file: string
+  title: string
+  singers?: string | null
+  durationMs?: number | null
+  bitrate?: number | null
+  /** "synced", "plain" or "none". */
+  lyrics: string
 }
 
 export interface CatalogHit {

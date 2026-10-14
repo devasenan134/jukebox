@@ -625,6 +625,26 @@ a.nav-item:hover {
 .fab-play .icon {
   font-size: 32px;
 }
+/* A fulfilled request waiting for an admin's check (RequestsScreen). */
+.review-card {
+  margin: 0 8px 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+}
+.review-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.review-notes {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--primary);
+  font-size: 13px;
+}
 /* "Album" / "Song" on a request (RequestsScreen). */
 .kind-tag {
   flex: none;

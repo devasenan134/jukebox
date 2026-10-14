@@ -159,7 +159,7 @@ fun Application.jukeboxServer(
         roots = { musicLibrary?.roots().orEmpty() },
     )
     // Asking for music the library doesn't have (it needs the library, to know what's missing).
-    val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds) }
+    val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds, config.requestsDir?.let(::File)) }
     val listening = Listening(db)
     // Playlists from Spotify, Apple Music, YouTube or a file, matched to the library.
     val imports = music?.let { PlaylistImports(db, it, listening, requests, playlistReader) }
@@ -472,6 +472,16 @@ fun Application.jukeboxServer(
                     // The body is optional: the apps send none, the fulfil script says which album it filled.
                     val where = call.receiveText().takeIf { it.isNotBlank() }?.let { eventJson.decodeFromString(CompleteMusicRequest.serializer(), it) }
                     call.respond(requestsOn().complete(call.me(), call.longParam("id"), where))
+                }
+                // Fulfilled requests waiting for a check: the fulfil script hands them in, admins listen and decide.
+                post("/requests/reviews-ready") { requestsOn().reviewsReady(call.me(), call.receive<ReviewsReady>().ids); call.respond(HttpStatusCode.NoContent) }
+                post("/requests/{id}/review") { call.respond(requestsOn().submitReview(call.me(), call.longParam("id"), call.receive<RequestReview>())) }
+                delete("/requests/{id}/review") { call.respond(requestsOn().clearReview(call.me(), call.longParam("id"))) }
+                post("/requests/{id}/approve") { call.respond(requestsOn().approve(call.me(), call.longParam("id"))) }
+                post("/requests/{id}/reject") { call.respond(requestsOn().reject(call.me(), call.longParam("id"), call.receive<RejectReview>().note)) }
+                // Ends in /stream so the web's <audio> can sign in with ?token.
+                get("/requests/{id}/review/{n}/stream") {
+                    call.respondFile(requestsOn().reviewFile(call.me(), call.longParam("id"), call.parameters["n"]?.toIntOrNull() ?: 0))
                 }
                 post("/requests/{id}/decline") {
                     call.respond(requestsOn().decline(call.me(), call.longParam("id"), call.receive<DeclineMusicRequest>().note))

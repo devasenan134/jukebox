@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CatalogHit, CatalogItem, MusicRequest } from '../api/types'
 import { social } from '../api/social'
+import { pause as pausePlayer } from '../player/player'
 import { me } from '../social/social'
 import { useSession } from '../state/session'
 import { ScreenHeader, SectionTitle } from '../ui/components'
@@ -135,6 +136,10 @@ export function RequestsScreen() {
   const admin = useQuery({ queryKey: ['admin-access', user], queryFn: () => social.adminAccess(), enabled: user != null, staleTime: Infinity }).data?.isAdmin ?? false
   const [everyone, setEveryone] = useState(false)
   const list = useQuery({ queryKey: ['requests', everyone], queryFn: () => (everyone ? social.allMusicRequests() : social.musicRequests()), enabled: user != null })
+  // Admins: how many downloads wait for a check, on the "Everyone's" chip.
+  const all = useQuery({ queryKey: ['requests', true], queryFn: () => social.allMusicRequests(), enabled: user != null && admin })
+  const toCheck = (all.data ?? []).filter((r) => r.stage === 'review' && !r.review?.coveredBy)
+  const [rejecting, setRejecting] = useState<MusicRequest | null>(null)
   const client = useQueryClient()
   const [busy, setBusy] = useState<number | null>(null)
   const [declining, setDeclining] = useState<MusicRequest | null>(null)
@@ -147,6 +152,8 @@ export function RequestsScreen() {
       client.setQueryData(['requests', everyone], (old: MusicRequest[] | undefined) =>
         updated ? old?.map((x) => (x.id === r.id ? updated : x)) : old?.filter((x) => x.id !== r.id),
       )
+      // Approving or rejecting an album decides the songs that come with it too.
+      if (updated?.stage) void client.invalidateQueries({ queryKey: ['requests', true] })
     } catch (e) {
       toast((e as Error).message || "That didn't work", true)
     }
@@ -161,6 +168,7 @@ export function RequestsScreen() {
           {[false, true].map((v) => (
             <button key={String(v)} className={`chip${everyone === v ? ' selected' : ''}`} onClick={() => setEveryone(v)}>
               {v ? "Everyone's" : 'Mine'}
+              {v && toCheck.length > 0 && <span className="badge" style={{ position: 'static', marginLeft: 6 }}>{toCheck.length}</span>}
             </button>
           ))}
         </div>
@@ -175,7 +183,26 @@ export function RequestsScreen() {
         </div>
       ) : (
         <div style={{ padding: '0 8px' }}>
-          {list.data.map((r) => (
+          {everyone && list.data.some((r) => r.stage === 'review' && r.review && !r.review.coveredBy) && (
+            <>
+              <SectionTitle>Ready to check</SectionTitle>
+              <div className="body-small muted" style={{ padding: '0 8px 8px', marginTop: -6 }}>
+                Downloaded and tagged. Listen, then approve to move it into the library, or reject to delete it.
+              </div>
+              {list.data.filter((r) => r.stage === 'review' && r.review && !r.review.coveredBy).map((r) => (
+                <ReviewCard
+                  key={r.id}
+                  r={r}
+                  comesWith={list.data.filter((x) => x.review?.coveredBy === r.id)}
+                  busy={busy === r.id}
+                  onApprove={() => void act(r, () => social.approveMusicRequest(r.id))}
+                  onReject={() => { setNote(''); setRejecting(r) }}
+                />
+              ))}
+              <SectionTitle>All requests</SectionTitle>
+            </>
+          )}
+          {list.data.filter((r) => !(everyone && r.stage === 'review')).map((r) => (
             <RequestRow
               key={r.id}
               r={r}
@@ -188,6 +215,23 @@ export function RequestsScreen() {
             />
           ))}
         </div>
+      )}
+      {rejecting && (
+        <Dialog
+          title="Reject this download?"
+          onClose={() => setRejecting(null)}
+          actions={
+            <>
+              <button className="btn text" onClick={() => setRejecting(null)}>Cancel</button>
+              <button className="btn" onClick={() => { const r = rejecting; setRejecting(null); void act(r, () => social.rejectMusicRequest(r.id, note.trim() || null)) }}>Reject</button>
+            </>
+          }
+        >
+          <p style={{ marginTop: 0 }}>The download is deleted and the request waits again, so it can be matched again. Nobody is told.</p>
+          <div className="field">
+            <input value={note} maxLength={200} placeholder="What was wrong (optional)" onChange={(e) => setNote(e.target.value)} aria-label="What was wrong (optional)" />
+          </div>
+        </Dialog>
       )}
       {declining && (
         <Dialog
@@ -224,7 +268,10 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
   const [status, color] =
     r.status === 'done' ? ['In the library · click to open', 'var(--primary)']
       : r.status === 'declined' ? [`Couldn't get it${r.note ? `: ${r.note}` : ''}`, 'var(--error)']
-        : [`Waiting · asked ${ago(r.requestedAt)}`, 'var(--on-surface-variant)']
+        : r.stage === 'approved' ? [showAskers ? 'Approved · moving into the library' : 'Found · being added', 'var(--primary)']
+          : r.stage === 'review' ? [r.review?.coveredBy ? `Comes with request ${r.review.coveredBy}` : 'Found · being added', 'var(--primary)']
+            : r.stage === 'rejected' ? ['Rejected · removing the download', 'var(--on-surface-variant)']
+              : [`Waiting · asked ${ago(r.requestedAt)}${showAskers && r.reviewNote ? ` · last download rejected: ${r.reviewNote}` : ''}`, 'var(--on-surface-variant)']
   return (
     <div className="list-row" onClick={onOpen} style={{ display: 'block', padding: '8px', cursor: onOpen ? 'pointer' : 'default' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -242,7 +289,7 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
         </div>
         {onCancel && <IconButton icon="close" label="Take back the request" disabled={busy} onClick={(e) => { e.stopPropagation(); onCancel() }} />}
       </div>
-      {(onDone || onDecline) && (
+      {(onDone || onDecline) && !r.stage && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
           {onDecline && <button className="btn text" style={{ flex: 'none' }} disabled={busy} onClick={onDecline}>Can't find</button>}
           {onDone && <button className="btn" style={{ flex: 'none' }} disabled={busy} onClick={onDone}>Added</button>}
@@ -250,6 +297,103 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
       )}
     </div>
   )
+}
+
+/** One shared player for listening to downloads, so starting one track stops the other (and the main player). */
+let reviewAudio: HTMLAudioElement | null = null
+
+/** A fulfilled request's download: what it is, where it goes, each track to listen to, then approve or reject. */
+function ReviewCard({ r, comesWith, busy, onApprove, onReject }: {
+  r: MusicRequest
+  comesWith: MusicRequest[]
+  busy: boolean
+  onApprove: () => void
+  onReject: () => void
+}) {
+  const review = r.review!
+  const [playing, setPlaying] = useState<number | null>(null)
+  const mine = useRef(false)
+  useEffect(() => () => { if (mine.current) reviewAudio?.pause() }, [])
+  const play = (n: number) => {
+    if (!reviewAudio) reviewAudio = new Audio()
+    const a = reviewAudio
+    if (playing === n && !a.paused) {
+      a.pause()
+      setPlaying(null)
+      return
+    }
+    pausePlayer()
+    a.onended = a.onpause = () => setPlaying(null)
+    a.onerror = () => { setPlaying(null); toast("Couldn't play it") }
+    a.src = social.reviewStreamUrl(r.id, n)
+    mine.current = true
+    void a.play().then(() => {
+      // The other card's handlers are replaced: this card now owns the player.
+      a.onended = a.onpause = () => setPlaying(null)
+      setPlaying(n)
+    }).catch(() => setPlaying(null))
+  }
+  const where = review.destination === 'existing'
+    ? `Joins ${review.destinationFolder ?? 'its album'} in the library`
+    : `New album: ${review.destinationFolder ?? review.album}`
+  return (
+    <div className="review-card">
+      <div style={{ display: 'flex', gap: 14 }}>
+        {review.coverUrl ? (
+          <img src={review.coverUrl} alt="" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 6, flexShrink: 0, background: 'var(--surface-container-high)' }} />
+        ) : (
+          <div style={{ width: 72, height: 72, borderRadius: 6, background: 'var(--surface-container-high)', flexShrink: 0 }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <div className="title-medium ellipsis">{review.album}{review.year ? ` (${review.year})` : ''}</div>
+            <span className={`kind-tag${r.item.kind === 'movie' ? ' album' : ''}`}>{r.item.kind === 'movie' ? 'Album' : 'Song'}</span>
+          </div>
+          <div className="body-small muted ellipsis">{[review.composer && `Music ${review.composer}`, review.lyricists && `Lyrics ${review.lyricists}`].filter(Boolean).join(' · ')}</div>
+          <div className="body-small muted ellipsis">Asked for {label(r.item)}{r.item.year ? ` · ${r.item.year}` : ''} by {r.askedBy.join(', ')}</div>
+          <div className="body-small primary-text">{where}</div>
+        </div>
+      </div>
+      {review.notes.length > 0 && (
+        <ul className="review-notes">
+          {review.notes.map((n, i) => <li key={i}>{n}</li>)}
+        </ul>
+      )}
+      <div style={{ marginTop: 8 }}>
+        {review.tracks.map((t) => (
+          <div key={t.n} className="review-track">
+            <IconButton icon={playing === t.n ? 'pause' : 'play_arrow'} label={playing === t.n ? 'Pause' : `Play ${t.title}`} onClick={() => play(t.n)} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="body-medium ellipsis">{t.n}. {t.title}</div>
+              <div className="body-small muted ellipsis">
+                {[t.singers, t.durationMs ? clock(t.durationMs) : null, t.bitrate ? `${t.bitrate} kbps` : null].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            <span className={`kind-tag${t.lyrics === 'none' ? '' : ' album'}`}>{t.lyrics === 'synced' ? 'Synced lyrics' : t.lyrics === 'plain' ? 'Lyrics' : 'No lyrics'}</span>
+          </div>
+        ))}
+      </div>
+      {comesWith.length > 0 && (
+        <div className="body-small muted" style={{ marginTop: 6 }}>
+          Also closes {comesWith.map((c) => `“${c.item.title}” for ${c.askedBy.join(', ')}`).join('; ')}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+        {review.source && (
+          <a className="body-small" href={review.source} target="_blank" rel="noreferrer" style={{ marginRight: 'auto' }}>
+            Matched page{review.score != null ? ` · score ${Math.round(review.score)}` : ''}
+          </a>
+        )}
+        <button className="btn text" style={{ flex: 'none', marginLeft: review.source ? undefined : 'auto' }} disabled={busy} onClick={onReject}>Reject</button>
+        <button className="btn" style={{ flex: 'none' }} disabled={busy} onClick={onApprove}>Approve</button>
+      </div>
+    </div>
+  )
+}
+
+function clock(ms: number) {
+  const s = Math.round(ms / 1000)
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
 function ago(millis: number): string {

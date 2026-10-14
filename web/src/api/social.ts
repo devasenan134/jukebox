@@ -136,6 +136,10 @@ export const social = {
   allMusicRequests: () => get<MusicRequest[]>('/admin/requests'),
   completeMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/done`),
   declineMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/decline`, { note }),
+  approveMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/approve`),
+  rejectMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/reject`, { note }),
+  /** A downloaded track to listen to before approving (an <audio> can't send headers, so the token rides along). */
+  reviewStreamUrl: (id: number, n: number) => `${SOCIAL_BASE}/admin/requests/${id}/review/${n}/stream?token=${enc(session().social?.token ?? '')}`,
 
   /** Sends a bug report or a feature request; the server turns it into a public GitHub issue. */
   sendFeedback: (kind: 'bug' | 'feature', title: string, description: string, deviceInfo: string | null) =>

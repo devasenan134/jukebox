@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -491,6 +491,14 @@ class Db(private val path: String) {
 
         // Tracks ScoreSplitter moved from a soundtrack to its album's background score (so the move can be undone),
         // and a person's own photo (people-photos/ in the data folder).
+        // Fulfilled requests waiting for an admin's check (docs/request-fulfilment.md).
+        val SCHEMA_V26 = """
+            ALTER TABLE music_requests ADD COLUMN stage TEXT;
+            ALTER TABLE music_requests ADD COLUMN review_json TEXT;
+            ALTER TABLE music_requests ADD COLUMN review_note TEXT;
+            ALTER TABLE music_requests ADD COLUMN staged_at INTEGER
+        """.trimIndent()
+
         val SCHEMA_V25 = """
             CREATE TABLE score_moves (
                 track_id TEXT PRIMARY KEY,

@@ -24,3 +24,4 @@ firebase-key.json
 /analyzer/data/
 .DS_Store
 *.log
+__pycache__/

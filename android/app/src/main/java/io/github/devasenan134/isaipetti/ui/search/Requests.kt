@@ -41,6 +41,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -216,7 +217,9 @@ fun RequestsScreen(nav: Nav) {
     var list by remember { mutableStateOf<List<MusicRequest>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var declining by remember { mutableStateOf<MusicRequest?>(null) }
+    var rejecting by remember { mutableStateOf<MusicRequest?>(null) }
     var busy by remember { mutableStateOf<Long?>(null) }
+    val reviewPlayer = rememberReviewPlayer()
 
     LaunchedEffect(everyone, reload) {
         runCatching { if (everyone) app.social.api.allMusicRequests() else app.social.api.musicRequests() }
@@ -230,7 +233,11 @@ fun RequestsScreen(nav: Nav) {
         busy = request.id
         scope.launch {
             runCatching { action() }
-                .onSuccess { updated -> if (updated != null) replace(updated) else list = list?.filter { it.id != request.id } }
+                .onSuccess { updated ->
+                    if (updated != null) replace(updated) else list = list?.filter { it.id != request.id }
+                    // Approving or rejecting an album decides the songs that come with it too.
+                    if (updated?.stage != null) reload++
+                }
                 .onFailure { Toast.makeText(context, it.message ?: "That didn't work", Toast.LENGTH_LONG).show() }
             busy = null
         }
@@ -254,6 +261,28 @@ fun RequestsScreen(nav: Nav) {
                 }) { Text("Tell them") }
             },
             dismissButton = { TextButton(onClick = { declining = null }) { Text("Cancel") } },
+        )
+    }
+
+    rejecting?.let { request ->
+        var note by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { rejecting = null },
+            title = { Text("Reject this download?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("The download is deleted and the request waits again, so it can be matched again. Nobody is told.")
+                    OutlinedTextField(note, { note = it.take(200) }, label = { Text("What was wrong (optional)") }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    rejecting = null
+                    reviewPlayer.stop()
+                    act(request) { app.social.api.rejectMusicRequest(request.id, note.ifBlank { null }) }
+                }) { Text("Reject") }
+            },
+            dismissButton = { TextButton(onClick = { rejecting = null }) { Text("Cancel") } },
         )
     }
 
@@ -283,15 +312,41 @@ fun RequestsScreen(nav: Nav) {
                 modifier = Modifier.padding(16.dp),
             )
             else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                items(shown, key = { it.id }) { request ->
+                val toCheck = if (everyone) shown.filter { it.stage == "review" && it.review != null && it.review.coveredBy == null } else emptyList()
+                if (toCheck.isNotEmpty()) {
+                    item(key = "check-title") {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Text("Ready to check", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Downloaded and tagged. Listen, then approve to move it into the library, or reject to delete it.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(toCheck, key = { "check-${it.id}" }) { request ->
+                        ReviewCard(
+                            request,
+                            comesWith = shown.filter { it.review?.coveredBy == request.id },
+                            player = reviewPlayer,
+                            busy = busy == request.id,
+                            onApprove = { reviewPlayer.stop(); act(request) { app.social.api.approveMusicRequest(request.id) } },
+                            onReject = { rejecting = request },
+                        )
+                    }
+                    item(key = "all-title") {
+                        Text("All requests", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                    }
+                }
+                items(shown.filter { !(everyone && it.stage == "review") }, key = { it.id }) { request ->
                     RequestRow(
                         request,
                         showAskers = everyone,
                         busy = busy == request.id,
                         onOpen = { request.albumId?.let(nav.openAlbum) },
                         onCancel = if (!everyone && request.isOpen) ({ act(request) { app.social.api.cancelMusicRequest(request.id); null } }) else null,
-                        onDone = if (everyone && request.isOpen) ({ act(request) { app.social.api.completeMusicRequest(request.id) } }) else null,
-                        onDecline = if (everyone && request.isOpen) ({ declining = request }) else null,
+                        onDone = if (everyone && request.isOpen && request.stage == null) ({ act(request) { app.social.api.completeMusicRequest(request.id) } }) else null,
+                        onDecline = if (everyone && request.isOpen && request.stage == null) ({ declining = request }) else null,
                     )
                 }
             }
@@ -336,10 +391,15 @@ private fun RequestRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val (status, color) = when (request.status) {
-                    "done" -> "In the library · tap to open" to MaterialTheme.colorScheme.primary
-                    "declined" -> ("Couldn't get it" + (request.note?.let { ": $it" } ?: "")) to MaterialTheme.colorScheme.error
-                    else -> "Waiting · asked ${ago(request.requestedAt)}" to MaterialTheme.colorScheme.onSurfaceVariant
+                val colors = MaterialTheme.colorScheme
+                val (status, color) = when {
+                    request.status == "done" -> "In the library · tap to open" to colors.primary
+                    request.status == "declined" -> ("Couldn't get it" + (request.note?.let { ": $it" } ?: "")) to colors.error
+                    request.stage == "approved" -> (if (showAskers) "Approved · moving into the library" else "Found · being added") to colors.primary
+                    request.stage == "review" -> (request.review?.coveredBy?.let { "Comes with request $it" } ?: "Found · being added") to colors.primary
+                    request.stage == "rejected" -> "Rejected · removing the download" to colors.onSurfaceVariant
+                    else -> ("Waiting · asked ${ago(request.requestedAt)}" +
+                        (request.reviewNote?.takeIf { showAskers }?.let { " · last download rejected: $it" } ?: "")) to colors.onSurfaceVariant
                 }
                 Text(status, style = MaterialTheme.typography.bodySmall, color = color, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (showAskers && request.askedBy.isNotEmpty()) {
@@ -359,18 +419,191 @@ private fun RequestRow(
     }
 }
 
+/**
+ * Plays downloads waiting for a check, one at a time, straight from the server (signed in with a header).
+ * Your music pauses while one plays and carries on after.
+ */
+class ReviewPlayer(private val context: android.content.Context) {
+    private val app = context.applicationContext as io.github.devasenan134.isaipetti.IsaipettiApp
+    private var player: android.media.MediaPlayer? = null
+    private var resumeMusic = false
+
+    /** (request id, track number) playing or loading. */
+    var current by mutableStateOf<Pair<Long, Int>?>(null)
+        private set
+    var loading by mutableStateOf(false)
+        private set
+
+    fun toggle(requestId: Long, n: Int) {
+        if (current == requestId to n) { stop(); return }
+        stop()
+        val (url, headers) = app.social.api.reviewStream(requestId, n) ?: return
+        current = requestId to n
+        loading = true
+        val mp = android.media.MediaPlayer()
+        player = mp
+        runCatching {
+            mp.setDataSource(context, android.net.Uri.parse(url), headers)
+            mp.setOnPreparedListener {
+                if (player !== mp) return@setOnPreparedListener
+                loading = false
+                pauseMusic()
+                it.start()
+            }
+            mp.setOnCompletionListener { if (player === mp) stop() }
+            mp.setOnErrorListener { _, _, _ ->
+                if (player === mp) { stop(); Toast.makeText(context, "Couldn't play it", Toast.LENGTH_SHORT).show() }
+                true
+            }
+            mp.prepareAsync()
+        }.onFailure { stop(); Toast.makeText(context, it.message ?: "Couldn't play it", Toast.LENGTH_SHORT).show() }
+    }
+
+    fun stop() {
+        player?.release()
+        player = null
+        current = null
+        loading = false
+        if (resumeMusic && !app.player.nowPlaying.value.isPlaying) app.player.togglePlay()
+        resumeMusic = false
+    }
+
+    private fun pauseMusic() {
+        val inJam = app.social.listen.joined.value != null
+        if (!inJam && app.player.nowPlaying.value.isPlaying) {
+            app.player.togglePlay()
+            resumeMusic = true
+        }
+    }
+}
+
+@Composable
+private fun rememberReviewPlayer(): ReviewPlayer {
+    val context = LocalContext.current
+    val player = remember { ReviewPlayer(context) }
+    DisposableEffect(player) { onDispose { player.stop() } }
+    return player
+}
+
+/** A fulfilled request's download: what it is, where it goes, each track to listen to, then approve or reject. */
+@Composable
+private fun ReviewCard(
+    request: MusicRequest,
+    comesWith: List<MusicRequest>,
+    player: ReviewPlayer,
+    busy: Boolean,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    val review = request.review ?: return
+    val colors = MaterialTheme.colorScheme
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surfaceContainer)
+            .border(1.dp, colors.outlineVariant, RoundedCornerShape(12.dp))
+            .padding(14.dp),
+    ) {
+        Row {
+            AsyncImage(
+                model = review.coverUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(72.dp).clip(RoundedCornerShape(6.dp)).background(colors.surfaceVariant),
+            )
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        review.album + (review.year?.let { " ($it)" } ?: ""),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    KindTag(request.item.isMovie, Modifier.padding(start = 8.dp))
+                }
+                val credits = listOfNotNull(review.composer?.let { "Music $it" }, review.lyricists?.let { "Lyrics $it" }).joinToString(" · ")
+                if (credits.isNotEmpty()) Text(credits, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "Asked for ${request.item.label} by ${request.askedBy.joinToString()}",
+                    style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    if (review.destination == "existing") "Joins ${review.destinationFolder ?: "its album"} in the library"
+                    else "New album: ${review.destinationFolder ?: review.album}",
+                    style = MaterialTheme.typography.bodySmall, color = colors.primary,
+                )
+            }
+        }
+        review.notes.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = colors.primary, modifier = Modifier.padding(top = 6.dp)) }
+        Spacer(Modifier.height(6.dp))
+        review.tracks.forEach { t ->
+            val playing = player.current == request.id to t.n
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { player.toggle(request.id, t.n) }) {
+                    if (playing && player.loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Icon(
+                        androidx.compose.ui.res.painterResource(if (playing) io.github.devasenan134.isaipetti.R.drawable.ic_pause else io.github.devasenan134.isaipetti.R.drawable.ic_play),
+                        contentDescription = if (playing) "Stop" else "Play ${t.title}",
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("${t.n}. ${t.title}", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        listOfNotNull(t.singers, t.durationMs?.let(::clock), t.bitrate?.let { "$it kbps" }).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                LabelTag(
+                    when (t.lyrics) { "synced" -> "Synced lyrics"; "plain" -> "Lyrics"; else -> "No lyrics" },
+                    highlighted = t.lyrics != "none",
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+        if (comesWith.isNotEmpty()) {
+            Text(
+                "Also closes " + comesWith.joinToString("; ") { "“${it.item.title}” for ${it.askedBy.joinToString()}" },
+                style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            review.source?.let { source ->
+                TextButton(onClick = { runCatching { uri.openUri(source) } }) {
+                    Text("Matched page" + (review.score?.let { " · score ${it.toInt()}" } ?: ""), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onReject, enabled = !busy) { Text("Reject") }
+            Button(onClick = onApprove, enabled = !busy) { Text("Approve") }
+        }
+    }
+}
+
+private fun clock(ms: Long): String {
+    val s = (ms + 500) / 1000
+    return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
+}
+
 /** "Album" or "Song", so a request's kind shows at a glance. */
 @Composable
-private fun KindTag(album: Boolean, modifier: Modifier = Modifier) {
+private fun KindTag(album: Boolean, modifier: Modifier = Modifier) = LabelTag(if (album) "Album" else "Song", album, modifier)
+
+/** A small tag: filled in the accent colour when [highlighted], outlined otherwise. */
+@Composable
+private fun LabelTag(text: String, highlighted: Boolean, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(4.dp)
     val colors = MaterialTheme.colorScheme
     Text(
-        if (album) "Album" else "Song",
+        text,
         style = MaterialTheme.typography.labelSmall,
-        color = if (album) colors.primary else colors.onSurfaceVariant,
+        color = if (highlighted) colors.primary else colors.onSurfaceVariant,
+        maxLines = 1,
         modifier = modifier
             .clip(shape)
-            .then(if (album) Modifier.background(colors.primary.copy(alpha = 0.18f)) else Modifier.border(1.dp, colors.outline, shape))
+            .then(if (highlighted) Modifier.background(colors.primary.copy(alpha = 0.18f)) else Modifier.border(1.dp, colors.outline, shape))
             .padding(horizontal = 7.dp, vertical = 1.dp),
     )
 }

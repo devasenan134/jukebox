@@ -14,6 +14,7 @@ the music and Jukebox's database; it writes nothing but its own features.db, whi
 
 Commands:
     python analyze.py watch            analyze new and changed songs, then check again every few minutes
+                                       (or at once on SIGUSR1: docker kill -s USR1 jukebox-analyzer)
     python analyze.py once             analyze new and changed songs, then stop
     python analyze.py sample 60        analyze 60 random songs (for trying it out)
     python analyze.py report           show which songs fit each description best
@@ -71,6 +72,8 @@ PROMPTS = {
 }
 
 stopping = False
+# SIGUSR1 (the request fulfil script, after new songs are scanned): check now instead of at the next interval.
+check_now = False
 
 
 def on_stop(*_):
@@ -339,8 +342,15 @@ def report(db):
 
 
 def main():
+    global check_now
     signal.signal(signal.SIGTERM, on_stop)
     signal.signal(signal.SIGINT, on_stop)
+
+    def on_check_now(*_):
+        global check_now
+        check_now = True
+
+    signal.signal(signal.SIGUSR1, on_check_now)
     command = sys.argv[1] if len(sys.argv) > 1 else "watch"
     db = open_features()
     if command == "report":
@@ -366,9 +376,10 @@ def main():
             except Exception as e:
                 print(f"Check failed, trying again later: {e}", flush=True)
             for _ in range(CHECK_MINUTES * 60):
-                if stopping:
+                if stopping or check_now:
                     break
                 time.sleep(1)
+            check_now = False
 
 
 if __name__ == "__main__":

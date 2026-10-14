@@ -141,6 +141,15 @@ class SocialApi(
     suspend fun allMusicRequests(): List<MusicRequest> = get("/admin/requests")
     suspend fun completeMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/done", Unit)
     suspend fun declineMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/decline", NoteBody(note))
+    suspend fun approveMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/approve", Unit)
+    suspend fun rejectMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/reject", NoteBody(note))
+
+    /** A downloaded track to listen to before approving: its address and the sign-in header. */
+    fun reviewStream(id: Long, n: Int): Pair<String, Map<String, String>>? {
+        val base = baseUrl() ?: return null
+        val token = token() ?: return null
+        return "$base/admin/requests/$id/review/$n/stream" to mapOf("Authorization" to "Bearer $token")
+    }
     suspend fun followedMixes(): List<Mix> = get("/mixes/followed")
     suspend fun followMix(id: String) = send<Unit>("PUT", "/mixes/${enc(id)}/follow", "")
     suspend fun unfollowMix(id: String) = send<Unit>("DELETE", "/mixes/${enc(id)}/follow", null)

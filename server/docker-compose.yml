@@ -9,6 +9,7 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       - DB_PATH=/data/jukebox.db
+      - REQUESTS_DIR=/requests
       - FIREBASE_KEY_FILE=/secrets/firebase-key.json
       - FIREBASE_APP_CONFIG=/secrets/google-services.json
       - FEATURES_DB=/features/features.db
@@ -21,6 +22,8 @@ services:
       # Your music folder, read-only. LIBRARIES in .env says what's in it (as seen inside the container,
       # under /music).
       - ${MUSIC_FOLDER:-./no-music}:/music:ro
+      # Optional: where scripts/requests/fulfil.py leaves downloads for an admin to check (read-only here).
+      - ${REQUESTS_FOLDER:-./no-requests}:/requests:ro
       - ${SIGNALS_FOLDER:-./no-signals}:/signals:ro  # optional: songs.csv with JioSaavn ids for files
     ports:
       - "127.0.0.1:${HOST_PORT:-8095}:8095"  # only this machine; put HTTPS (reverse proxy or tunnel) in front

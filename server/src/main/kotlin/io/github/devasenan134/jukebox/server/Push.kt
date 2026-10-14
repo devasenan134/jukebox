@@ -198,6 +198,15 @@ class Push(private val db: Db, private val sender: PushSender) {
         mapOf("type" to "musicReady", "albumId" to albumId, "title" to "It's in the library", "body" to "♪ $label is ready to play"),
     )
 
+    /** Fulfilled requests are downloaded and waiting for an admin to listen and approve. */
+    suspend fun musicToCheck(adminIds: List<Long>, count: Int, label: String) = notify(
+        adminIds,
+        mapOf(
+            "type" to "musicRequest", "title" to "Ready to check",
+            "body" to if (count == 1) "$label is downloaded: listen and approve" else "$count requests are downloaded: listen and approve",
+        ),
+    )
+
     suspend fun musicDeclined(userIds: List<Long>, label: String, note: String?) = notify(
         userIds,
         mapOf("type" to "musicDeclined", "title" to "Couldn't get $label", "body" to (note ?: "It couldn't be found this time. Sorry!")),
