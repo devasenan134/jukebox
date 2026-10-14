@@ -15,6 +15,7 @@ Fills music requests from the matcher's JSON (docs/request-fulfilment.md). Two h
     fulfil.py run batch.json [--dry-run]   download, check, tag and hand in each request for an admin's
                                            check, then wait in the background for the decisions
     fulfil.py resume                       act on decisions left over (after a reboot), same waiting
+    fulfil.py resend                       send downloads left on the laptop after a failed rsync, hand them in
     fulfil.py status                       what's waiting for a check, approved or rejected
     fulfil.py undo <log.jsonl>             take music filed by a run back out of the library
 
@@ -895,8 +896,13 @@ def act(cfg, server, waiting_for):
     for rid in sorted(waiting_for):
         r = requests.get(rid)
         work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
-        if not r or r["status"] != "open" or not r.get("stage"):
-            shutil.rmtree(work, ignore_errors=True)  # closed, declined or cleared meanwhile: nothing to file
+        if not r or r["status"] != "open":
+            shutil.rmtree(work, ignore_errors=True)  # closed or declined meanwhile: nothing to file
+            continue
+        if not r.get("stage"):
+            # Not handed in yet: most likely still arriving from the laptop (rsync). Only a day-old one is a leftover.
+            if work.exists() and time.time() - work.stat().st_mtime > 86400:
+                shutil.rmtree(work, ignore_errors=True)
             continue
         if r["stage"] == "rejected":
             shutil.rmtree(work, ignore_errors=True)
@@ -1019,6 +1025,42 @@ def wait_in_background(cfg):
     print(f"Waiting for your decisions in the background (log: {out.name}). Check them on the Requests page.", flush=True)
 
 
+def resend(cfg):
+    """Hands in downloads that are ready but weren't handed in (an rsync that failed): sends them again, no download."""
+    server = Server(cfg)
+    requests = server.requests()
+    ready = sorted((p for p in Path(cfg["WORK_FOLDER"]).glob("*/review.json")), key=lambda p: int(p.parent.name))
+    if not ready:
+        say(f"Nothing waiting to be sent in {cfg['WORK_FOLDER']}.")
+        return []
+    if cfg.get("REMOTE"):
+        say(f"Connecting to {cfg['REMOTE']} (if it asks for a password, this is the only time)…")
+        if not connect(cfg):
+            sys.exit(f"Couldn't connect to {cfg['REMOTE']} with ssh; check that `ssh {cfg['REMOTE']}` works.")
+    handed = []
+    for saved in ready:
+        rid = int(saved.parent.name)
+        review = json.loads(saved.read_text())["review"]
+        r = requests.get(rid)
+        if not r or r["status"] != "open" or r.get("stage"):
+            say(f"  #{rid}: not waiting any more ({(r or {}).get('status')}, {(r or {}).get('stage')}); left in {saved.parent}")
+            continue
+        if cfg.get("REMOTE"):
+            say(f"  #{rid} {review.get('album')}: sending…", end="")
+            try:
+                send_to_server(cfg, rid)
+            except (RuntimeError, subprocess.CalledProcessError) as e:
+                say(f" ✗ {e}")
+                continue
+            say(" ✓")
+        server.call("POST", f"/admin/requests/{rid}/review", json=review)
+        handed.append(rid)
+        say(f"  #{rid}: ✓ handed in · waiting for your check")
+    if handed:
+        server.call("POST", "/admin/requests/reviews-ready", json={"ids": handed})
+    return handed
+
+
 def start_remote_waiter(cfg):
     """Starts the waiting half on the server, which files approved music while the laptop is off."""
     say(f"Starting the filing half on {cfg['REMOTE']}…", end="")
@@ -1061,6 +1103,7 @@ def main():
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--foreground", action="store_true", help="wait for the decisions here instead of in the background")
     sub.add_parser("resume")
+    sub.add_parser("resend", help="send downloads left on the laptop (after a failed rsync) and hand them in")
     sub.add_parser("wait")
     sub.add_parser("status")
     u = sub.add_parser("undo")
@@ -1079,6 +1122,14 @@ def main():
         finally:
             if remote:
                 disconnect(cfg)
+    elif args.command == "resend":
+        handed = resend(cfg)
+        if handed and remote:
+            start_remote_waiter(cfg)
+        elif handed:
+            wait_in_background(cfg)
+        if remote:
+            disconnect(cfg)
     elif args.command == "resume":
         if remote:
             if not connect(cfg):
