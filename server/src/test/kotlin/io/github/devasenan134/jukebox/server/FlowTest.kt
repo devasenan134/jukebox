@@ -834,6 +834,12 @@ class FlowTest {
         val client = createClient { install(ContentNegotiation) { json(eventJson) } }
         val alice = client.login("alice")
         val bob = client.login("bob")
+        // Likes are of real playlists (a deleted one leaves your library): bob's two public ones.
+        kotlinx.coroutines.runBlocking {
+            Db(dbPath).tx {
+                listOf("pl1", "pl2").forEach { update("INSERT INTO playlists (id, owner_id, name, public, created_at, changed_at) VALUES (?, ?, ?, 1, 0, 0)", it, bob.user.id, it) }
+            }
+        }
         suspend fun like(session: SessionResponse, ref: PlaylistRef) =
             client.put("/likes/playlists") { bearerAuth(session.sessionToken); contentType(ContentType.Application.Json); setBody(ref) }.status
 

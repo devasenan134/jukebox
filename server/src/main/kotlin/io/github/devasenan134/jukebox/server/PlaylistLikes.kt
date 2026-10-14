@@ -15,11 +15,17 @@ data class PlaylistRef(val id: String, val name: String = "", val coverArt: Stri
 class PlaylistLikes(private val db: Db) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** Newest likes first. */
+    /**
+     * Newest likes first. A liked playlist its owner deleted (or that went with its owner's account) is forgotten;
+     * one made private again is left out while it is.
+     */
     suspend fun list(userId: Long): List<PlaylistRef> = db.tx {
-        query("SELECT playlist_json FROM liked_playlists WHERE user_id = ? ORDER BY liked_at DESC", userId) {
-            json.decodeFromString(PlaylistRef.serializer(), it.getString(1))
-        }
+        update("DELETE FROM liked_playlists WHERE user_id = ? AND playlist_id NOT IN (SELECT id FROM playlists)", userId)
+        query(
+            """SELECT l.playlist_json FROM liked_playlists l JOIN playlists p ON p.id = l.playlist_id
+               WHERE l.user_id = ? AND (p.public = 1 OR p.owner_id = ?) ORDER BY l.liked_at DESC""",
+            userId, userId,
+        ) { json.decodeFromString(PlaylistRef.serializer(), it.getString(1)) }
     }
 
     suspend fun like(userId: Long, playlist: PlaylistRef) {

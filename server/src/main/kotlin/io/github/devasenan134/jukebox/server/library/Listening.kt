@@ -130,6 +130,8 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
     suspend fun delete(userId: Long, id: String) = db.tx {
         own(userId, id)
         update("DELETE FROM playlists WHERE id = ?", id)
+        // Gone for everyone who liked it too, or it would stay in their library and fail to open.
+        update("DELETE FROM liked_playlists WHERE playlist_id = ?", id)
         event(userId, "playlist_deleted") { put("playlist", id) }
     }
 
