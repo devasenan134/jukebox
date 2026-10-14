@@ -510,7 +510,9 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     meta = match.get("metadata") or {}
     best = match.get("best_match") or {}
     base = best.get("url") or ""
-    album = clean_album(best.get("title") or request["item"]["movie"])
+    # Named after the request (the catalog's name, which the library uses too: "Vishwaroopam II"), not the matched
+    # page's title ("Vishwaroopam 2 2").
+    album = clean_album(request["item"]["movie"] or best.get("title") or "")
     year = year_of(match)
     composer = people(meta.get("music") or "")
     lyricists = people(meta.get("lyricists") or "")
@@ -652,7 +654,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
                 notes.append(f"{title}: {quality[8:]} kbps file is {problem}")
                 dest.unlink(missing_ok=True)
                 continue
-            if quality == "download320" and info["bitrate"] < 256:
+            if quality == "download320" and info["bitrate"] < 224:  # masstamilan's "320" files are often ~250 kbps VBR
                 notes.append(f"{title}: the 320 kbps file is really {info['bitrate']} kbps")
             if quality == "download128":
                 notes.append(f"{title}: only the 128 kbps file worked")
