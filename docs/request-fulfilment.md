@@ -36,6 +36,11 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
   only its score, and the review card warns when a songs request was matched to a score page (or the other way).
 - **An album already in the library:** only the songs (or score pieces) it doesn't have are downloaded; if it has them
   all, the request is closed with that album.
+- **Named after the request** (the catalog's name, which the library uses), not the matched page's title.
+- **Other versions left out:** karaoke, remix, EDM, lo-fi, slowed/reverb, 8D, sped-up, mash-up and DJ-mix tracks
+  aren't downloaded with an album unless the request is for one; a song request matched to a version is flagged.
+- **Lyrics:** LRCLIB (synced first, then plain), else JioSaavn's plain lyrics; only lyrics in the song's language's
+  script (or English letters) count, so another language's song of the same name isn't used.
 - **Admins correct things** on the Requests page: "Change" on a download picks the album it joins; "Match album"
   closes an open request with an album from the library; "Change album" / "Reopen" fix a closed one.
 

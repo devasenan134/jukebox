@@ -45,6 +45,7 @@ Needs ffmpeg and ffprobe (and rsync + ssh on the laptop).
 
 import argparse
 import fcntl
+import html
 import ipaddress
 import json
 import os
@@ -281,6 +282,11 @@ SCORE_ALBUM = re.compile(r"\b(bgm|bgms|ost|background\s+(score|music)|original\s
 SCORE_TRACK = re.compile(r"\b(bgm|theme\s+music|background\s+(score|music)|instrumental|original\s+score)\b", re.I)
 
 
+# Other versions of a song that pages list beside it; an album download leaves them out unless they were asked for.
+# ("Reprise" and "Unplugged" stay: films have real reprise songs.)
+VERSION = re.compile(r"\b(karaoke|remix|edm|lo-?fi|slowed|reverb|8d|sped\s*up|mash-?up|dj\s*mix)\b", re.I)
+
+
 def score_base(title):
     """"Remo Special BGM Additional" → "Remo": the album whose background score this is."""
     t = re.sub(r"\b(original|background|score|music|bgms?|ost|special|additional|songs?|tracks?|soundtrack|and|\+)\b", " ", title, flags=re.I)
@@ -463,27 +469,81 @@ def tag(src, dest, tags, cover=None):
     subprocess.run(cmd + [str(dest)], check=True, capture_output=True, stdin=subprocess.DEVNULL)
 
 
-def lyrics(client, title, artist, album, duration_ms):
-    """Synced (LRC) or plain lyrics from LRCLIB: ("synced", text), ("plain", text) or ("none", None)."""
+# Each language's own script (Unicode block); lyrics in another Indian script are another language's song of the
+# same name ("Kanave Kanave" from the Hindi David). English letters are fine for any language.
+SCRIPTS = {"tamil": (0x0B80, 0x0BFF), "malayalam": (0x0D00, 0x0D7F), "telugu": (0x0C00, 0x0C7F), "hindi": (0x0900, 0x097F),
+           "kannada": (0x0C80, 0x0CFF)}
+
+
+def in_language(text, language):
+    """Whether [text] is written in [language]'s script or in English letters, not in another Indian script."""
+    own = SCRIPTS.get(language)
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters or not own:
+        return True
+    foreign = sum(1 for ch in letters if ord(ch) >= 0x0900 and not own[0] <= ord(ch) <= own[1])
+    return foreign < len(letters) * 0.2
+
+
+def lyrics(client, title, artist, album, duration_ms, language="tamil"):
+    """Lyrics for a song: LRCLIB's synced (LRC) or plain, else JioSaavn's plain text, in the song's language.
+    ("synced", text), ("plain", text) or ("none", None)."""
     secs = round((duration_ms or 0) / 1000)
-    found = None
+    def ask(path, params):
+        """One LRCLIB lookup (tried twice: it's sometimes slow); [] if it has nothing or can't be reached."""
+        for attempt in range(2):
+            try:
+                r = client.get(f"{LRCLIB}/api/{path}", params=params, timeout=30)
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                body = r.json()
+                return body if isinstance(body, list) else [body]
+            except (httpx.HTTPError, ValueError):
+                time.sleep(2)
+        return []
+
+    found = ask("get", {"track_name": title, "artist_name": artist.split(",")[0].strip(), "album_name": album, "duration": secs})
+    found += [x for x in ask("search", {"track_name": title, "album_name": album})
+              if not secs or abs((x.get("duration") or 0) - secs) <= 3]
+    # LRCLIB often knows a Tamil song but has no words for it: an entry only counts with lyrics.
+    synced = next((x["syncedLyrics"] for x in found if x.get("syncedLyrics") and in_language(x["syncedLyrics"], language)), None)
+    if synced:
+        return "synced", synced
+    plain = next((x["plainLyrics"] for x in found if x.get("plainLyrics") and in_language(x["plainLyrics"], language)), None)
+    if plain:
+        return "plain", plain
+    text = saavn_lyrics(client, title, album, secs)
+    return ("plain", text) if text and in_language(text, language) else ("none", None)
+
+
+SAAVN = os.environ.get("SAAVN_URL", "https://www.jiosaavn.com/api.php")
+
+
+def saavn_lyrics(client, title, album, secs):
+    """JioSaavn's lyrics (plain text) for the song called [title] on [album], about [secs] long; None if it has none."""
+    def call(**params):
+        params.update(_format="json", _marker="0", api_version="4", ctx="web6dot0")
+        r = client.get(SAAVN, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        r.raise_for_status()
+        return r.json()
+
+    def bare(text):  # "Kanave Kanave (From &quot;David&quot;)" → "kanavekanave"
+        return loose(re.sub(r"\s*\(from[^)]*\)", "", html.unescape(text or ""), flags=re.I))
+
     try:
-        r = client.get(f"{LRCLIB}/api/get", params={"track_name": title, "artist_name": artist.split(",")[0].strip(),
-                                                    "album_name": album, "duration": secs}, timeout=20)
-        if r.status_code == 200:
-            found = r.json()
-        else:
-            r = client.get(f"{LRCLIB}/api/search", params={"track_name": title, "album_name": album}, timeout=20)
-            if r.status_code == 200:
-                close = [x for x in r.json() if not secs or abs((x.get("duration") or 0) - secs) <= 3]
-                found = next((x for x in close if x.get("syncedLyrics")), close[0] if close else None)
-    except (httpx.HTTPError, ValueError):
-        return "none", None
-    if found and found.get("syncedLyrics"):
-        return "synced", found["syncedLyrics"]
-    if found and found.get("plainLyrics"):
-        return "plain", found["plainLyrics"]
-    return "none", None
+        results = call(__call="search.getResults", q=f"{title} {album}", n=10, p=1).get("results") or []
+        for hit in results:
+            more = hit.get("more_info") or {}
+            if (more.get("has_lyrics") == "true" and bare(hit.get("title")) == bare(title)
+                    and bare(more.get("album")).startswith(bare(album))
+                    and (not secs or abs(int(more.get("duration") or 0) - secs) <= 3)):
+                text = call(__call="lyrics.getLyrics", lyrics_id=hit["id"]).get("lyrics") or ""
+                text = html.unescape(re.sub(r"<br\s*/?>", "\n", text)).strip()
+                return text or None
+    except (httpx.HTTPError, ValueError, KeyError):
+        pass
+    return None
 
 
 # ---------------------------------------------------------------- handing in
@@ -547,8 +607,14 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
             raise RuntimeError("a song request without matched_song")
         position = next((i for i, t in enumerate(tracks) if key(t.get("name")) == key(song.get("name"))), None)
         picked = [(position + 1 if position is not None else 1, song)]
+        if VERSION.search(song.get("name") or "") and not VERSION.search(request["item"]["title"] or ""):
+            notes.append(f"The match is a version (\"{song.get('name')}\"), not the song that was asked for")
     else:
         picked = list(enumerate(tracks, 1))
+        versions = [t for n, t in picked if VERSION.search(t.get("name") or "")]
+        if versions and len(versions) < len(picked) and not VERSION.search(request["item"]["movie"] or ""):
+            picked = [(n, t) for n, t in picked if not VERSION.search(t.get("name") or "")]
+            notes.append(f"Left out {len(versions)} other version(s): " + ", ".join(clean_title(t.get("name"), album) for t in versions))
         if total and len(tracks) != total:
             notes.append(f"The page lists {len(tracks)} songs, the album should have {total}")
     if not picked:
@@ -673,7 +739,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
         live(f"{head} tagging…")
         tag(dest, work / f"{name}.mp3", tags, cover)
         live(f"{head} looking for lyrics…")
-        kind, text = lyrics(client, title, singers, album, info["durationMs"])
+        kind, text = lyrics(client, title, singers, album, info["durationMs"], language)
         if text:
             (work / f"{name}.{'lrc' if kind == 'synced' else 'txt'}").write_text(text.rstrip() + "\n", encoding="utf-8")
         size = (work / f"{name}.mp3").stat().st_size
