@@ -8,6 +8,19 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Requests, Sorted (0.19.1)
+
+### New
+- **Requests in sections.** Mine and Everyone's each have All, Open, Closed and Not found, with counts.
+- **Request again.** Anything that couldn't be found can be asked for again with one tap.
+- **Fix a request's album (admins).** "Match album" closes a request with any album from the library, "Change album" points a closed one at the right album, and "Change" on a download waiting for a check picks the album it joins.
+
+### Fixed
+- Old requests (closed before the switch from Navidrome) open their album again when tapped.
+
+### Server
+- Fulfilled requests are filed by language (Malayalam, Telugu and Hindi get their own libraries beside Tamil), background score goes beside its album the way the rest of the library has it, and songs an album already has aren't downloaded again.
+
 ## Requests, Filled (0.19.0)
 
 ### New

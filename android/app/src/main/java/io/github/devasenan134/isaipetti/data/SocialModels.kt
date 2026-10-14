@@ -498,7 +498,12 @@ data class RequestReview(
     val destination: String = "new",
     val destinationAlbumId: String? = null,
     val destinationFolder: String? = null,
+    val suggestedFolder: String? = null,
+    val destinationChosen: Boolean = false,
+    val scoreFolder: String? = null,
     val tracks: List<ReviewTrack> = emptyList(),
+    /** Songs the album already has, left out of the download. */
+    val skipped: List<String> = emptyList(),
     val coveredBy: Long? = null,
     val notes: List<String> = emptyList(),
 )
@@ -513,6 +518,8 @@ data class ReviewTrack(
     val bitrate: Int? = null,
     /** "synced", "plain" or "none". */
     val lyrics: String = "none",
+    /** Background score: filed under the album's background score. */
+    val score: Boolean = false,
 )
 
 /** A catalog result, with its request if someone asked for it already. */

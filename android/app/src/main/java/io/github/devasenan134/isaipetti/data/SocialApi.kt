@@ -139,7 +139,12 @@ class SocialApi(
     suspend fun cancelMusicRequest(id: Long) = send<Unit>("DELETE", "/requests/$id", null)
     /** Admins: everyone's requests, and answering them (done means it's in the library now). */
     suspend fun allMusicRequests(): List<MusicRequest> = get("/admin/requests")
-    suspend fun completeMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/done", Unit)
+    /** "Added": with an album (and song), closes it with that one, or points a closed request at the right album. */
+    suspend fun completeMusicRequest(id: Long, albumId: String? = null, songId: String? = null): MusicRequest =
+        if (albumId == null) post("/admin/requests/$id/done", Unit) else post("/admin/requests/$id/done", AlbumBody(albumId, songId))
+
+    /** Where a download waiting for a check goes: an album in the library, or (null) a new album. */
+    suspend fun setReviewDestination(id: Long, albumId: String?): MusicRequest = post("/admin/requests/$id/destination", DestinationBody(albumId))
     suspend fun declineMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/decline", NoteBody(note))
     suspend fun approveMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/approve", Unit)
     suspend fun rejectMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/reject", NoteBody(note))
@@ -364,6 +369,8 @@ class SocialApi(
     @Serializable private data class ImportCreateBody(val name: String, val songIds: List<String>)
     @Serializable private data class ImportRequestBody(val title: String, val artist: String?, val album: String?, val catalogId: String?)
     @Serializable private data class NoteBody(val note: String?)
+    @Serializable private data class AlbumBody(val albumId: String, val songId: String? = null)
+    @Serializable private data class DestinationBody(val albumId: String?)
     @Serializable private data class SongRequestBody(val song: SongRef, val mode: String)
     @Serializable private data class SongRequestAnswer(val accept: Boolean)
 }

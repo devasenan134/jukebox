@@ -12,6 +12,7 @@ services:
     volumes:
       - ${JUKEBOX_DATA}:/jukebox:ro       # Jukebox's data folder, to see which songs exist
       - ${MUSIC_FOLDER}:/music:ro         # the same music folder Jukebox reads
+      - ${LIBRARY_ROOT:-./no-library}:/library:ro  # optional: the folder holding the language libraries, as in Jukebox
       - ${ANALYZER_DATA}:/data            # features.db (Jukebox reads it) and the model
     cpus: ${ANALYZER_CPUS:-4}             # leaves room for Jukebox and everything else
     mem_limit: 3g

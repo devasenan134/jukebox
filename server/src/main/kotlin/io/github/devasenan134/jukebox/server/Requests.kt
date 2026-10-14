@@ -91,7 +91,15 @@ data class RequestReview(
     val destination: String = "new",
     val destinationAlbumId: String? = null,
     val destinationFolder: String? = null,
+    /** The new folder the script suggested, to go back to after picking an album. */
+    val suggestedFolder: String? = null,
+    /** An admin picked the destination: the script files it there, without looking again. */
+    val destinationChosen: Boolean = false,
+    /** Where tracks marked [ReviewTrack.score] go (the album's "(Original Background Score)" folder). */
+    val scoreFolder: String? = null,
     val tracks: List<ReviewTrack> = emptyList(),
+    /** Songs the album already has in the library, left out of the download. */
+    val skipped: List<String> = emptyList(),
     /** A song whose album is filled by another request in the same batch: it comes with that one. */
     val coveredBy: Long? = null,
     /** Anything the script wants the admin to know ("320 kbps link failed, 128 kbps used"). */
@@ -110,6 +118,8 @@ data class ReviewTrack(
     val bitrate: Int? = null,
     /** "synced", "plain" or "none". */
     val lyrics: String = "none",
+    /** Background score (theme music, BGM): filed under the album's background score. */
+    val score: Boolean = false,
 )
 
 @Serializable data class RejectReview(val note: String? = null)
@@ -145,7 +155,12 @@ data class RequestPlace(
     val library: String? = null,
     val folder: String? = null,
     val sampleFile: String? = null,
+    /** The album's songs, so a download can leave out the ones it already has. */
+    val songs: List<String> = emptyList(),
 )
+
+/** An admin picks where a download goes: an album in the library, or (null) a new album folder. */
+@Serializable data class ReviewDestination(val albumId: String? = null)
 
 /** Where songs and movies that aren't in the library are found. Tests use a pretend one. */
 interface Catalog {
@@ -420,25 +435,25 @@ class MusicRequests(
     }
 
     /** Your requests: waiting ones first, then ones answered in the last 90 days. */
-    suspend fun mine(me: UserDto): List<MusicRequestDto> = db.tx {
+    suspend fun mine(me: UserDto): List<MusicRequestDto> = repaired(db.tx {
         query(
             """SELECT r.id FROM music_requests r JOIN music_request_askers a ON a.request_id = r.id
                WHERE a.user_id = ? AND (r.status = 'open' OR r.closed_at > ?)
                ORDER BY r.status = 'open' DESC, coalesce(r.closed_at, r.created_at) DESC""",
             me.id, now() - RECENT_MS,
         ) { it.getLong(1) }.mapNotNull { dto(it, me.id)?.copy(review = null, reviewNote = null) }
-    }
+    })
 
     /** For admins: everything waiting (oldest first), then what was answered in the last 30 days. */
     suspend fun all(me: UserDto): List<MusicRequestDto> {
         requireAdmin(me)
-        return db.tx {
+        return repaired(db.tx {
             query(
                 """SELECT id FROM music_requests WHERE status = 'open' OR closed_at > ?
                    ORDER BY status = 'open' DESC, CASE WHEN status = 'open' THEN created_at ELSE -closed_at END""",
                 now() - ADMIN_RECENT_MS,
             ) { it.getLong(1) }.mapNotNull { dto(it, me.id) }
-        }
+        })
     }
 
     /**
@@ -447,11 +462,12 @@ class MusicRequests(
      * real [year] and [composer], and one of them has to agree: a same-named film from another year by
      * someone else is another film. [title] is the song to look for (default: the requested song).
      */
-    suspend fun place(me: UserDto, id: Long, year: Int?, composer: String?, title: String?): RequestPlace {
+    suspend fun place(me: UserDto, id: Long, year: Int?, composer: String?, title: String?, albumId: String? = null, movie: String? = null): RequestPlace {
         requireAdmin(me)
         val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
         val library = shelf() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "The library isn't loaded yet")
-        val movie = library.findAlbum(request.item.movie, year, composer)
+        // [movie]: the album's name when the request's isn't it ("Remo Special (Original Background Score…)" is Remo's score).
+        val movie = (if (albumId != null) library.album(albumId) else library.findAlbum(movie?.takeIf { it.isNotBlank() } ?: request.item.movie, year, composer))
             ?: throw ApiError(HttpStatusCode.NotFound, "That album isn't in the library")
         val songTitle = title?.takeIf { it.isNotBlank() } ?: request.item.title.takeIf { request.item.kind == "song" }
         val songId = songTitle?.let { t -> Fuzzy.words(t).let { words -> movie.songs.firstOrNull { same(words, it.second) }?.first } }
@@ -459,8 +475,9 @@ class MusicRequests(
         val files = db.read {
             query(
                 """SELECT l.name, f.path FROM files f JOIN tracks t ON t.id = f.track_id JOIN releases r ON r.id = t.release_id
-                   JOIN libraries l ON l.id = f.library_id WHERE r.album_id = ? AND f.missing_since IS NULL ORDER BY f.path""",
-                movie.id,
+                   JOIN libraries l ON l.id = f.library_id WHERE (r.album_id = ? OR r.id = ?) AND f.missing_since IS NULL ORDER BY f.path""",
+                // A background score is listed by its release's id.
+                movie.id, movie.id,
             ) { it.getString(1) to it.getString(2) }
         }
         val folder = files.groupBy { (lib, path) -> lib to path.substringBeforeLast('/', "") }.maxByOrNull { it.value.size }
@@ -472,7 +489,40 @@ class MusicRequests(
             library = folder?.key?.first,
             folder = folder?.key?.second,
             sampleFile = folder?.value?.first()?.second,
+            songs = movie.songTitles,
         )
+    }
+
+    /** An admin picks where a download waiting for a check goes: [albumId] in the library, or a new album (null). */
+    suspend fun setDestination(me: UserDto, id: Long, albumId: String?): MusicRequestDto {
+        requireAdmin(me)
+        val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
+        val review = request.review?.takeIf { request.stage == "review" } ?: throw ApiError(HttpStatusCode.Conflict, "That request isn't waiting for a check")
+        val suggested = review.suggestedFolder ?: review.destinationFolder.takeIf { review.destination == "new" }
+        val changed = if (albumId == null) {
+            review.copy(destination = "new", destinationAlbumId = null, destinationFolder = suggested, suggestedFolder = suggested, destinationChosen = true)
+        } else {
+            val place = place(me, id, null, null, null, albumId)
+            if (place.folder == null) throw ApiError(HttpStatusCode.Conflict, "That album's files can't be found")
+            review.copy(destination = "existing", destinationAlbumId = place.albumId, destinationFolder = place.folder, suggestedFolder = suggested, destinationChosen = true)
+        }
+        db.tx { update("UPDATE music_requests SET review_json = ? WHERE id = ?", json.encodeToString(RequestReview.serializer(), changed), id) }
+        return db.tx { dto(id, me.id) }!!
+    }
+
+    /**
+     * Requests closed before the library's ids changed (moving off Navidrome) point at albums that no longer exist,
+     * so tapping them did nothing: find their album again and save it.
+     */
+    private suspend fun repaired(list: List<MusicRequestDto>): List<MusicRequestDto> {
+        if (list.none { it.status == "done" }) return list
+        val library = shelf() ?: return list
+        return list.map { r ->
+            if (r.status != "done" || (r.albumId != null && library.place(r.albumId, null) != null)) return@map r
+            val place = library.find(r.item) ?: return@map r
+            db.tx { update("UPDATE music_requests SET album_id = ?, song_id = ? WHERE id = ?", place.albumId, place.songId, r.id) }
+            r.copy(albumId = place.albumId, songId = place.songId)
+        }
     }
 
     /**
@@ -488,11 +538,12 @@ class MusicRequests(
         val askers = db.tx {
             update(
                 "UPDATE music_requests SET status = 'done', album_id = ?, song_id = ?, note = NULL, closed_at = ?, stage = NULL, review_json = NULL WHERE id = ?",
-                place.albumId, place.songId, now(), id,
+                place.albumId, place.songId, if (request.status == "done") request.closedAt ?: now() else now(), id,
             )
             askers(id)
         }
-        push.musicReady(askers, label(request.item), place.albumId)
+        // Pointing a closed request at the right album isn't news to the people who asked.
+        if (request.status != "done") push.musicReady(askers, label(request.item), place.albumId)
         return db.tx { dto(id, me.id) }!!
     }
 
@@ -561,12 +612,18 @@ class MusicRequests(
     private class Shelf(snapshot: LibrarySnapshot) {
         val version = snapshot.version
 
-        class Movie(val id: String, val title: String, val words: List<String>, val year: Int, val composer: List<String>, val songs: List<Pair<String, List<String>>>)
+        class Movie(
+            val id: String, val title: String, val words: List<String>, val year: Int, val composer: List<String>,
+            val songs: List<Pair<String, List<String>>>, val songTitles: List<String>,
+        )
 
         val movies = snapshot.byAlbum.map { (id, list) ->
             val songs = list.map { snapshot.songs[it] }.filter { !it.karaoke }
             val first = snapshot.songs[list.first()]
-            Movie(id, first.album, Fuzzy.words(first.album), list.maxOf { snapshot.songs[it].year }, Fuzzy.words(first.composer?.name.orEmpty()), songs.map { it.id to Fuzzy.words(it.title) })
+            Movie(
+                id, first.album, Fuzzy.words(first.album), list.maxOf { snapshot.songs[it].year }, Fuzzy.words(first.composer?.name.orEmpty()),
+                songs.map { it.id to Fuzzy.words(it.title) }, songs.map { it.title }.distinct(),
+            )
         }
         private val byId = movies.associateBy { it.id }
 
@@ -578,6 +635,8 @@ class MusicRequests(
                 .filter { m -> (year != null && m.year > 0 && abs(m.year - year) <= 1) || same(by, m.composer) }
                 .minByOrNull { m -> if (year != null && m.year > 0) abs(m.year - year) else 99 }
         }
+
+        fun album(albumId: String): Movie? = byId[albumId]
 
         /** [albumId] (and [songId] on it), if they're in the library. */
         fun place(albumId: String, songId: String?): Place? {

@@ -323,7 +323,11 @@ export interface RequestReview {
   destination: string
   destinationAlbumId?: string | null
   destinationFolder?: string | null
+  suggestedFolder?: string | null
+  destinationChosen?: boolean
+  scoreFolder?: string | null
   tracks: ReviewTrack[]
+  skipped?: string[]
   coveredBy?: number | null
   notes: string[]
 }
@@ -337,6 +341,8 @@ export interface ReviewTrack {
   bitrate?: number | null
   /** "synced", "plain" or "none". */
   lyrics: string
+  /** Background score: filed under the album's background score. */
+  score?: boolean
 }
 
 export interface CatalogHit {

@@ -22,6 +22,8 @@ services:
       # Your music folder, read-only. LIBRARIES in .env says what's in it (as seen inside the container,
       # under /music).
       - ${MUSIC_FOLDER:-./no-music}:/music:ro
+      # Optional: the folder holding more libraries (one per language: /library/malayalam…), named in LIBRARIES.
+      - ${LIBRARY_ROOT:-./no-library}:/library:ro
       # Optional: where scripts/requests/fulfil.py leaves downloads for an admin to check (read-only here).
       - ${REQUESTS_FOLDER:-./no-requests}:/requests:ro
       - ${SIGNALS_FOLDER:-./no-signals}:/signals:ro  # optional: songs.csv with JioSaavn ids for files

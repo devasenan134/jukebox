@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { CatalogHit, CatalogItem, MusicRequest } from '../api/types'
+import type { CatalogHit, CatalogItem, MovieHit, MusicRequest } from '../api/types'
 import { social } from '../api/social'
 import { pause as pausePlayer } from '../player/player'
 import { me } from '../social/social'
 import { useSession } from '../state/session'
-import { ScreenHeader, SectionTitle } from '../ui/components'
+import { Cover, ScreenHeader, SectionTitle } from '../ui/components'
 import { Dialog, ErrorBox, Icon, IconButton, Loading, toast } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
@@ -144,6 +144,9 @@ export function RequestsScreen() {
   const [busy, setBusy] = useState<number | null>(null)
   const [declining, setDeclining] = useState<MusicRequest | null>(null)
   const [note, setNote] = useState('')
+  const [show, setShow] = useState<Show>('all')
+  /** Picking an album: to close (or relink) a request with, or as a download's destination. */
+  const [matching, setMatching] = useState<{ r: MusicRequest; forDownload: boolean } | null>(null)
 
   const act = async (r: MusicRequest, action: () => Promise<MusicRequest | null>) => {
     setBusy(r.id)
@@ -183,7 +186,14 @@ export function RequestsScreen() {
         </div>
       ) : (
         <div style={{ padding: '0 8px' }}>
-          {everyone && list.data.some((r) => r.stage === 'review' && r.review && !r.review.coveredBy) && (
+          <div className="chips" style={{ padding: '0 8px 8px' }}>
+            {SHOWS.map(([key, name]) => (
+              <button key={key} className={`chip${show === key ? ' selected' : ''}`} onClick={() => setShow(key)}>
+                {name} <span className="muted" style={{ marginLeft: 4 }}>{list.data.filter((r) => shows(key, r)).length}</span>
+              </button>
+            ))}
+          </div>
+          {everyone && (show === 'all' || show === 'open') && list.data.some((r) => r.stage === 'review' && r.review && !r.review.coveredBy) && (
             <>
               <SectionTitle>Ready to check</SectionTitle>
               <div className="body-small muted" style={{ padding: '0 8px 8px', marginTop: -6 }}>
@@ -197,24 +207,42 @@ export function RequestsScreen() {
                   busy={busy === r.id}
                   onApprove={() => void act(r, () => social.approveMusicRequest(r.id))}
                   onReject={() => { setNote(''); setRejecting(r) }}
+                  onChangeDestination={() => setMatching({ r, forDownload: true })}
                 />
               ))}
-              <SectionTitle>All requests</SectionTitle>
+              <SectionTitle>{SHOWS.find(([k]) => k === show)![1]} requests</SectionTitle>
             </>
           )}
-          {list.data.filter((r) => !(everyone && r.stage === 'review')).map((r) => (
+          {list.data.filter((r) => shows(show, r) && !(everyone && r.stage === 'review' && !r.review?.coveredBy)).map((r) => (
             <RequestRow
               key={r.id}
               r={r}
               showAskers={everyone}
               busy={busy === r.id}
               onOpen={r.status === 'done' && r.albumId ? () => nav.openAlbum(r.albumId!) : undefined}
-              onCancel={!everyone && isOpen(r) ? () => void act(r, async () => { await social.cancelMusicRequest(r.id); return null }) : undefined}
-              onDone={everyone && isOpen(r) ? () => void act(r, () => social.completeMusicRequest(r.id)) : undefined}
-              onDecline={everyone && isOpen(r) ? () => { setNote(''); setDeclining(r) } : undefined}
+              onCancel={!everyone && isOpen(r) && !r.stage ? () => void act(r, async () => { await social.cancelMusicRequest(r.id); return null }) : undefined}
+              onDone={everyone && isOpen(r) && !r.stage ? () => void act(r, () => social.completeMusicRequest(r.id)) : undefined}
+              onDecline={everyone && isOpen(r) && r.stage !== 'review' ? () => { setNote(''); setDeclining(r) } : undefined}
+              onMatch={everyone && (isOpen(r) || r.status === 'done') && r.stage !== 'review' ? () => setMatching({ r, forDownload: false }) : undefined}
+              onAgain={r.status === 'declined' ? () => void act(r, () => social.requestMusic(r.item.id)) : undefined}
             />
           ))}
+          {list.data.filter((r) => shows(show, r)).length === 0 && (
+            <div className="body-medium muted" style={{ padding: '8px 8px 16px' }}>Nothing here.</div>
+          )}
         </div>
+      )}
+      {matching && (
+        <AlbumPicker
+          r={matching.r}
+          forDownload={matching.forDownload}
+          onClose={() => setMatching(null)}
+          onPick={(album) => {
+            const { r, forDownload } = matching
+            setMatching(null)
+            void act(r, () => (forDownload ? social.setReviewDestination(r.id, album?.id ?? null) : social.completeMusicRequest(r.id, album!.id)))
+          }}
+        />
       )}
       {rejecting && (
         <Dialog
@@ -254,7 +282,61 @@ export function RequestsScreen() {
   )
 }
 
-function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }: {
+type Show = 'all' | 'open' | 'closed' | 'notfound'
+const SHOWS: [Show, string][] = [['all', 'All'], ['open', 'Open'], ['closed', 'Closed'], ['notfound', 'Not found']]
+const shows = (show: Show, r: MusicRequest) =>
+  show === 'all' || (show === 'open' && r.status === 'open') || (show === 'closed' && r.status === 'done') || (show === 'notfound' && r.status === 'declined')
+
+/**
+ * Picks an album from the library: to close a request with (or point a closed one at the right album), or as where
+ * a download goes ([forDownload]: "New album instead" is offered too).
+ */
+function AlbumPicker({ r, forDownload, onPick, onClose }: {
+  r: MusicRequest
+  forDownload: boolean
+  onPick: (album: MovieHit | null) => void
+  onClose: () => void
+}) {
+  const [q, setQ] = useState(r.review?.album ?? r.item.movie)
+  const found = useQuery({ queryKey: ['album-pick', q.trim()], queryFn: () => social.search(q.trim()), enabled: q.trim().length >= 2, staleTime: 60_000 })
+  const albums = found.data?.movies ?? []
+  return (
+    <Dialog
+      title={forDownload ? 'Where does it go?' : r.status === 'done' ? 'Point it at another album' : 'Which album is it?'}
+      onClose={onClose}
+      actions={
+        <>
+          {forDownload && <button className="btn text" onClick={() => onPick(null)}>New album instead</button>}
+          <button className="btn text" onClick={onClose}>Cancel</button>
+        </>
+      }
+    >
+      <p className="body-small muted" style={{ marginTop: 0 }}>
+        {forDownload
+          ? 'The download joins the album you pick, with its tags, when you approve it.'
+          : `Closes ${label(r.item)} with the album you pick${r.status === 'done' ? '' : '; the people who asked are told'}.`}
+      </p>
+      <div className="field">
+        <input value={q} autoFocus onChange={(e) => setQ(e.target.value)} placeholder="Search the library" aria-label="Search the library" />
+      </div>
+      <div style={{ maxHeight: 320, overflowY: 'auto', marginTop: 8 }}>
+        {found.isFetching && albums.length === 0 && <Loading />}
+        {!found.isFetching && q.trim().length >= 2 && albums.length === 0 && <div className="body-small muted">No albums found.</div>}
+        {albums.map((a) => (
+          <div key={a.id} className="list-row" onClick={() => onPick(a)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 4px', cursor: 'pointer' }}>
+            <Cover coverArt={a.coverArt} size={150} corner={4} style={{ width: 44, height: 44 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="body-medium ellipsis">{a.name}</div>
+              <div className="body-small muted ellipsis">{[a.year, a.composer, `${a.songCount} songs`].filter(Boolean).join(' · ')}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Dialog>
+  )
+}
+
+function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline, onMatch, onAgain }: {
   r: MusicRequest
   showAskers: boolean
   busy: boolean
@@ -262,6 +344,8 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
   onCancel?: () => void
   onDone?: () => void
   onDecline?: () => void
+  onMatch?: () => void
+  onAgain?: () => void
 }) {
   const item = r.item
   const movie = item.kind === 'movie'
@@ -289,9 +373,11 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
         </div>
         {onCancel && <IconButton icon="close" label="Take back the request" disabled={busy} onClick={(e) => { e.stopPropagation(); onCancel() }} />}
       </div>
-      {(onDone || onDecline) && !r.stage && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 6 }}>
+      {(onDone || onDecline || onMatch || onAgain) && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+          {onAgain && <button className="btn tonal" style={{ flex: 'none' }} disabled={busy} onClick={onAgain}>Request again</button>}
           {onDecline && <button className="btn text" style={{ flex: 'none' }} disabled={busy} onClick={onDecline}>Can't find</button>}
+          {onMatch && <button className={`btn ${r.status === 'done' ? 'text' : 'tonal'}`} style={{ flex: 'none' }} disabled={busy} onClick={onMatch}>{r.status === 'done' ? 'Change album' : 'Match album'}</button>}
           {onDone && <button className="btn" style={{ flex: 'none' }} disabled={busy} onClick={onDone}>Added</button>}
         </div>
       )}
@@ -303,12 +389,13 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline }
 let reviewAudio: HTMLAudioElement | null = null
 
 /** A fulfilled request's download: what it is, where it goes, each track to listen to, then approve or reject. */
-function ReviewCard({ r, comesWith, busy, onApprove, onReject }: {
+function ReviewCard({ r, comesWith, busy, onApprove, onReject, onChangeDestination }: {
   r: MusicRequest
   comesWith: MusicRequest[]
   busy: boolean
   onApprove: () => void
   onReject: () => void
+  onChangeDestination: () => void
 }) {
   const review = r.review!
   const [playing, setPlaying] = useState<number | null>(null)
@@ -351,7 +438,16 @@ function ReviewCard({ r, comesWith, busy, onApprove, onReject }: {
           </div>
           <div className="body-small muted ellipsis">{[review.composer && `Music ${review.composer}`, review.lyricists && `Lyrics ${review.lyricists}`].filter(Boolean).join(' · ')}</div>
           <div className="body-small muted ellipsis">Asked for {label(r.item)}{r.item.year ? ` · ${r.item.year}` : ''} by {r.askedBy.join(', ')}</div>
-          <div className="body-small primary-text">{where}</div>
+          <div className="body-small primary-text">
+            {where}{' '}
+            <button className="link-button" disabled={busy} onClick={onChangeDestination}>Change</button>
+          </div>
+          {review.tracks.some((t) => t.score) && review.scoreFolder && (
+            <div className="body-small muted ellipsis">Background score → {review.scoreFolder}</div>
+          )}
+          {(review.skipped?.length ?? 0) > 0 && (
+            <div className="body-small muted">Already in the library, not downloaded: {review.skipped!.join(', ')}</div>
+          )}
         </div>
       </div>
       {review.notes.length > 0 && (
@@ -369,6 +465,7 @@ function ReviewCard({ r, comesWith, busy, onApprove, onReject }: {
                 {[t.singers, t.durationMs ? clock(t.durationMs) : null, t.bitrate ? `${t.bitrate} kbps` : null].filter(Boolean).join(' · ')}
               </div>
             </div>
+            {t.score && <span className="kind-tag">Score</span>}
             <span className={`kind-tag${t.lyrics === 'none' ? '' : ' album'}`}>{t.lyrics === 'synced' ? 'Synced lyrics' : t.lyrics === 'plain' ? 'Lyrics' : 'No lyrics'}</span>
           </div>
         ))}

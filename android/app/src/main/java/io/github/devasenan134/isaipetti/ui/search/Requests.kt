@@ -218,6 +218,9 @@ fun RequestsScreen(nav: Nav) {
     var error by remember { mutableStateOf<String?>(null) }
     var declining by remember { mutableStateOf<MusicRequest?>(null) }
     var rejecting by remember { mutableStateOf<MusicRequest?>(null) }
+    var show by rememberSaveable { mutableStateOf("all") }
+    /** Picking an album: to close (or relink) a request with, or (forDownload) as a download's destination. */
+    var matching by remember { mutableStateOf<Pair<MusicRequest, Boolean>?>(null) }
     var busy by remember { mutableStateOf<Long?>(null) }
     val reviewPlayer = rememberReviewPlayer()
 
@@ -286,6 +289,20 @@ fun RequestsScreen(nav: Nav) {
         )
     }
 
+    matching?.let { (request, forDownload) ->
+        AlbumPicker(
+            request, forDownload,
+            onClose = { matching = null },
+            onPick = { album ->
+                matching = null
+                act(request) {
+                    if (forDownload) app.social.api.setReviewDestination(request.id, album?.id)
+                    else app.social.api.completeMusicRequest(request.id, album!!.id)
+                }
+            },
+        )
+    }
+
     Column {
         ScreenHeader("Requests", onBack = nav.back) {
             IconButton(onClick = { reload++ }) { Icon(Icons.Filled.Refresh, contentDescription = "Refresh") }
@@ -312,7 +329,21 @@ fun RequestsScreen(nav: Nav) {
                 modifier = Modifier.padding(16.dp),
             )
             else -> LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-                val toCheck = if (everyone) shown.filter { it.stage == "review" && it.review != null && it.review.coveredBy == null } else emptyList()
+                item(key = "shows") {
+                    androidx.compose.foundation.lazy.LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(SHOWS) { (key, name) ->
+                            androidx.compose.material3.FilterChip(
+                                selected = show == key,
+                                onClick = { show = key },
+                                label = { Text("$name ${shown.count { shows(key, it) }}") },
+                            )
+                        }
+                    }
+                }
+                val toCheck = if (everyone && (show == "all" || show == "open")) shown.filter { it.stage == "review" && it.review != null && it.review.coveredBy == null } else emptyList()
                 if (toCheck.isNotEmpty()) {
                     item(key = "check-title") {
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -332,21 +363,28 @@ fun RequestsScreen(nav: Nav) {
                             busy = busy == request.id,
                             onApprove = { reviewPlayer.stop(); act(request) { app.social.api.approveMusicRequest(request.id) } },
                             onReject = { rejecting = request },
+                            onChangeDestination = { matching = request to true },
                         )
                     }
                     item(key = "all-title") {
-                        Text("All requests", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                        Text("${SHOWS.first { it.first == show }.second} requests", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                     }
                 }
-                items(shown.filter { !(everyone && it.stage == "review") }, key = { it.id }) { request ->
+                val rows = shown.filter { shows(show, it) && !(everyone && it.stage == "review" && it.review?.coveredBy == null) }
+                if (rows.isEmpty()) item(key = "none") {
+                    Text("Nothing here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+                }
+                items(rows, key = { it.id }) { request ->
                     RequestRow(
                         request,
                         showAskers = everyone,
                         busy = busy == request.id,
                         onOpen = { request.albumId?.let(nav.openAlbum) },
-                        onCancel = if (!everyone && request.isOpen) ({ act(request) { app.social.api.cancelMusicRequest(request.id); null } }) else null,
+                        onCancel = if (!everyone && request.isOpen && request.stage == null) ({ act(request) { app.social.api.cancelMusicRequest(request.id); null } }) else null,
                         onDone = if (everyone && request.isOpen && request.stage == null) ({ act(request) { app.social.api.completeMusicRequest(request.id) } }) else null,
-                        onDecline = if (everyone && request.isOpen && request.stage == null) ({ declining = request }) else null,
+                        onDecline = if (everyone && request.isOpen && request.stage != "review") ({ declining = request }) else null,
+                        onMatch = if (everyone && (request.isOpen || request.status == "done") && request.stage != "review") ({ matching = request to false }) else null,
+                        onAgain = if (request.status == "declined") ({ act(request) { app.social.api.requestMusic(request.item.id) } }) else null,
                     )
                 }
             }
@@ -363,6 +401,8 @@ private fun RequestRow(
     onCancel: (() -> Unit)?,
     onDone: (() -> Unit)?,
     onDecline: (() -> Unit)?,
+    onMatch: (() -> Unit)? = null,
+    onAgain: (() -> Unit)? = null,
 ) {
     val item = request.item
     Column(
@@ -410,9 +450,17 @@ private fun RequestRow(
                 IconButton(onClick = onCancel, enabled = !busy) { Icon(Icons.Filled.Close, contentDescription = "Take back the request") }
             }
         }
-        if (onDone != null || onDecline != null) {
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+        if (onDone != null || onDecline != null || onMatch != null || onAgain != null) {
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            ) {
+                onAgain?.let { FilledTonalButton(onClick = it, enabled = !busy) { Text("Request again") } }
                 onDecline?.let { TextButton(onClick = it, enabled = !busy) { Text("Can't find") } }
+                onMatch?.let {
+                    if (request.status == "done") TextButton(onClick = it, enabled = !busy) { Text("Change album") }
+                    else FilledTonalButton(onClick = it, enabled = !busy) { Text("Match album") }
+                }
                 onDone?.let { Button(onClick = it, enabled = !busy) { Text("Added") } }
             }
         }
@@ -494,6 +542,7 @@ private fun ReviewCard(
     busy: Boolean,
     onApprove: () -> Unit,
     onReject: () -> Unit,
+    onChangeDestination: () -> Unit,
 ) {
     val review = request.review ?: return
     val colors = MaterialTheme.colorScheme
@@ -530,11 +579,22 @@ private fun ReviewCard(
                     "Asked for ${request.item.label} by ${request.askedBy.joinToString()}",
                     style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    if (review.destination == "existing") "Joins ${review.destinationFolder ?: "its album"} in the library"
-                    else "New album: ${review.destinationFolder ?: review.album}",
-                    style = MaterialTheme.typography.bodySmall, color = colors.primary,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (review.destination == "existing") "Joins ${review.destinationFolder ?: "its album"} in the library"
+                        else "New album: ${review.destinationFolder ?: review.album}",
+                        style = MaterialTheme.typography.bodySmall, color = colors.primary, modifier = Modifier.weight(1f, fill = false),
+                    )
+                    TextButton(onClick = onChangeDestination, enabled = !busy, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("Change", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (review.tracks.any { it.score } && review.scoreFolder != null) {
+                    Text("Background score → ${review.scoreFolder}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
+                if (review.skipped.isNotEmpty()) {
+                    Text("Already in the library, not downloaded: ${review.skipped.joinToString()}", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                }
             }
         }
         review.notes.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = colors.primary, modifier = Modifier.padding(top = 6.dp)) }
@@ -556,6 +616,7 @@ private fun ReviewCard(
                         style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
+                if (t.score) LabelTag("Score", highlighted = false, modifier = Modifier.padding(start = 8.dp))
                 LabelTag(
                     when (t.lyrics) { "synced" -> "Synced lyrics"; "plain" -> "Lyrics"; else -> "No lyrics" },
                     highlighted = t.lyrics != "none",
@@ -580,6 +641,70 @@ private fun ReviewCard(
             Button(onClick = onApprove, enabled = !busy) { Text("Approve") }
         }
     }
+}
+
+private val SHOWS = listOf("all" to "All", "open" to "Open", "closed" to "Closed", "notfound" to "Not found")
+
+private fun shows(show: String, r: MusicRequest) = when (show) {
+    "open" -> r.status == "open"
+    "closed" -> r.status == "done"
+    "notfound" -> r.status == "declined"
+    else -> true
+}
+
+/**
+ * Picks an album from the library: to close a request with (or point a closed one at the right album), or as where
+ * a download goes ([forDownload]: "New album instead" is offered too).
+ */
+@Composable
+private fun AlbumPicker(request: MusicRequest, forDownload: Boolean, onPick: (io.github.devasenan134.isaipetti.data.MovieHit?) -> Unit, onClose: () -> Unit) {
+    val app = LocalApp.current
+    var query by remember { mutableStateOf(request.review?.album ?: request.item.movie) }
+    var found by remember { mutableStateOf<List<io.github.devasenan134.isaipetti.data.MovieHit>?>(null) }
+    LaunchedEffect(query) {
+        val q = query.trim()
+        if (q.length < 2) { found = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(250)
+        found = runCatching { app.social.api.search(q).movies }.getOrDefault(emptyList())
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text(if (forDownload) "Where does it go?" else if (request.status == "done") "Point it at another album" else "Which album is it?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (forDownload) "The download joins the album you pick, with its tags, when you approve it."
+                    else "Closes ${request.item.label} with the album you pick" + (if (request.status == "done") "." else "; the people who asked are told."),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(query, { query = it }, label = { Text("Search the library") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                val albums = found
+                when {
+                    albums == null -> CircularProgressIndicator(Modifier.size(24.dp))
+                    albums.isEmpty() -> Text("No albums found.", style = MaterialTheme.typography.bodySmall)
+                    else -> LazyColumn(Modifier.height(300.dp)) {
+                        items(albums, key = { it.id }) { a ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onPick(a) }.padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                io.github.devasenan134.isaipetti.ui.components.Cover(a.coverArt, Modifier.size(44.dp), size = 150, corner = 4.dp)
+                                Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                    Text(a.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        listOfNotNull(a.year?.toString(), a.composer, "${a.songCount} songs").joinToString(" · "),
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+        dismissButton = if (forDownload) ({ TextButton(onClick = { onPick(null) }) { Text("New album instead") } }) else null,
+    )
 }
 
 private fun clock(ms: Long): String {

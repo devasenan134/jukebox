@@ -134,7 +134,11 @@ export const social = {
   requestMusic: (catalogId: string) => post<MusicRequest>('/requests', { id: catalogId }),
   cancelMusicRequest: (id: number) => send<void>('DELETE', `/requests/${id}`),
   allMusicRequests: () => get<MusicRequest[]>('/admin/requests'),
-  completeMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/done`),
+  /** "Added": with an album (and song), closes it with that one, or points a closed request at the right album. */
+  completeMusicRequest: (id: number, albumId?: string, songId?: string) =>
+    post<MusicRequest>(`/admin/requests/${id}/done`, albumId ? { albumId, songId } : undefined),
+  /** Where a download waiting for a check goes: an album in the library, or (null) a new album. */
+  setReviewDestination: (id: number, albumId: string | null) => post<MusicRequest>(`/admin/requests/${id}/destination`, { albumId }),
   declineMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/decline`, { note }),
   approveMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/approve`),
   rejectMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/reject`, { note }),

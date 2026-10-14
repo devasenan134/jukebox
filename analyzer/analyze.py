@@ -127,19 +127,21 @@ def jukebox_songs():
     db = catalog()
     try:
         rows = db.execute(
-            "SELECT f.recording_id, f.path, f.size, f.mtime, f.duration_ms FROM files f "
-            "JOIN recordings r ON r.id = f.recording_id "
+            "SELECT f.recording_id, f.path, f.size, f.mtime, f.duration_ms, l.path FROM files f "
+            "JOIN recordings r ON r.id = f.recording_id JOIN libraries l ON l.id = f.library_id "
             "WHERE f.missing_since IS NULL AND r.merged_into IS NULL "
             "ORDER BY f.recording_id, coalesce(f.bitrate, 0) DESC, f.id"
         ).fetchall()
     finally:
         db.close()
     songs = {}
-    for recording, path, size, mtime, duration_ms in rows:
+    for recording, path, size, mtime, duration_ms, library in rows:
         if recording in songs:
             continue
-        # Jukebox keeps paths relative to its music folder, which is MUSIC_DIR here.
-        songs[recording] = (os.path.join(MUSIC_DIR, path), f"{size}-{mtime}", (duration_ms or 0) / 1000)
+        # Jukebox keeps paths relative to each library's folder, as Jukebox sees it (/music, /library/malayalam…);
+        # this container mounts them at the same places. The main library is MUSIC_DIR here.
+        root = MUSIC_DIR if library in ("/music", MUSIC_DIR) or not os.path.isdir(library) else library
+        songs[recording] = (os.path.join(root, path), f"{size}-{mtime}", (duration_ms or 0) / 1000)
     return songs
 
 

@@ -466,7 +466,7 @@ fun Application.jukeboxServer(
                 get("/requests") { call.respond(requestsOn().all(call.me())) }
                 get("/requests/{id}/place") {
                     val q = call.request.queryParameters
-                    call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200)))
+                    call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200), q["albumId"]?.take(64), q["movie"]?.take(200)))
                 }
                 post("/requests/{id}/done") {
                     // The body is optional: the apps send none, the fulfil script says which album it filled.
@@ -477,6 +477,9 @@ fun Application.jukeboxServer(
                 post("/requests/reviews-ready") { requestsOn().reviewsReady(call.me(), call.receive<ReviewsReady>().ids); call.respond(HttpStatusCode.NoContent) }
                 post("/requests/{id}/review") { call.respond(requestsOn().submitReview(call.me(), call.longParam("id"), call.receive<RequestReview>())) }
                 delete("/requests/{id}/review") { call.respond(requestsOn().clearReview(call.me(), call.longParam("id"))) }
+                post("/requests/{id}/destination") {
+                    call.respond(requestsOn().setDestination(call.me(), call.longParam("id"), call.receive<ReviewDestination>().albumId?.take(64)))
+                }
                 post("/requests/{id}/approve") { call.respond(requestsOn().approve(call.me(), call.longParam("id"))) }
                 post("/requests/{id}/reject") { call.respond(requestsOn().reject(call.me(), call.longParam("id"), call.receive<RejectReview>().note)) }
                 // Ends in /stream so the web's <audio> can sign in with ?token.

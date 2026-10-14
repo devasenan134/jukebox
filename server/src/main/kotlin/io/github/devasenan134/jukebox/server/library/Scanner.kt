@@ -66,14 +66,19 @@ class Scanner(
 
     private class Found(val path: String, val file: File, val size: Long, val mtime: Long)
 
-    suspend fun scan(library: LibraryDef): ScanReport = withContext(Dispatchers.IO) {
+    /**
+     * Scans [library]'s folder. [nested]: other libraries' folders inside it (a language's own folder,
+     * `…/malayalam` inside the Tamil one), which belong to those libraries and are left out here.
+     */
+    suspend fun scan(library: LibraryDef, nested: Set<File> = emptySet()): ScanReport = withContext(Dispatchers.IO) {
         val started = clock()
         val root = File(library.path)
         require(root.isDirectory) { "Not a folder: ${library.path}" }
         val libId = db.tx { libraryId(library) }
         val scanId = db.tx { insert("INSERT INTO scans (started_at, info) VALUES (?, ?)", started, library.name) }
 
-        val found = root.walkTopDown().onEnter { !it.name.startsWith(".") }
+        val skip = nested.map { it.canonicalFile }.toSet()
+        val found = root.walkTopDown().onEnter { !it.name.startsWith(".") && (it == root || it.canonicalFile !in skip) }
             .filter { it.isFile && it.extension.lowercase() in audioExtensions && !it.name.startsWith(".") }
             .map { Found(it.relativeTo(root).path, it, it.length(), it.lastModified()) }
             .toList()

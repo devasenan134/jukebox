@@ -223,6 +223,35 @@ class MusicRequestsTest {
     }
 
     @Test
+    fun `an admin picks the album a download joins, relinks a closed request, and old album ids get repaired`(): Unit = runBlocking {
+        val (requests, music, push) = setUp()
+        val r = requests.request(bob, "itunes-movie-21")
+        requests.submitReview(admin, r.id, RequestReview("Anbe Aaruyire", 2005, destination = "new", destinationFolder = "Anbe Aaruyire (2005)"))
+        music.songs = music.songs + LibrarySong("x1", "Aararai Kodi", "Anbe Aaruyire", "m2005", "", emptyList(), null, 2005, 300, "Tamil", 0, false)
+
+        assertFailsWith<ApiError> { requests.setDestination(alice, r.id, "m2005") }
+        // No files on disk in this test, so the album's folder can't be found.
+        assertFailsWith<ApiError> { requests.setDestination(admin, r.id, "m2005") }
+        val back = requests.setDestination(admin, r.id, null).review!!
+        assertEquals(Triple("new", "Anbe Aaruyire (2005)", true), Triple(back.destination, back.destinationFolder, back.destinationChosen))
+        assertEquals(listOf("Aararai Kodi"), requests.place(admin, r.id, null, null, null, albumId = "m2005").songs)
+
+        // Closed by hand with an album, then pointed at another: only the first tells Bob.
+        requests.complete(admin, r.id, CompleteMusicRequest("m2005"))
+        requests.complete(admin, r.id, CompleteMusicRequest("m1"))
+        assertEquals(1, push.sent.count { it.second["type"] == "musicReady" })
+        assertEquals("m1", requests.all(admin).first { it.id == r.id }.albumId)
+
+        // A request closed back when the ids were Navidrome's points at nothing: it's found again.
+        val kadal = requests.request(alice, "itunes-movie-11")
+        music.songs = music.songs + LibrarySong("k1", "Nenjukkulle", "Kadal", "m-kadal", "", emptyList(), null, 2012, 300, "Tamil", 0, false)
+        requests.complete(admin, kadal.id)
+        val db = requests.javaClass.getDeclaredField("db").apply { isAccessible = true }.get(requests) as Db
+        db.tx { update("UPDATE music_requests SET album_id = 'navidrome-id' WHERE id = ?", kadal.id) }
+        assertEquals("m-kadal", requests.mine(alice).first { it.id == kadal.id }.albumId)
+    }
+
+    @Test
     fun `declining, asking again and taking a request back`(): Unit = runBlocking {
         val (requests, _, push) = setUp()
         val movie = requests.request(alice, "itunes-movie-11")

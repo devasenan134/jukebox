@@ -68,7 +68,10 @@ class MusicLibrary(
         scanning = true
         queued = false
         try {
-            libraries.mapNotNull { l -> runCatching { scanner.scan(l) }.onFailure { log.error("Scanning {} failed", l.name, it) }.getOrNull() }
+            libraries.mapNotNull { l ->
+                val nested = libraries.filter { it !== l }.map { File(it.path) }.toSet()
+                runCatching { scanner.scan(l, nested) }.onFailure { log.error("Scanning {} failed", l.name, it) }.getOrNull()
+            }
                 .also {
                     refreshRoots()
                     runCatching { people.run() }.onFailure { log.error("Merging people failed", it) }

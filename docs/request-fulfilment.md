@@ -20,17 +20,32 @@ there didn't help), so the downloading half runs on the MacBook and the waiting 
 Other commands: `fulfil.py run <json> --dry-run` (nothing downloaded), `fulfil.py resume` (starts the waiting half
 again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/jukebox/requests/undo/<time>.jsonl`.
 
+## How music is filed
+
+- **By language** (`metadata.language`): each language is its own library beside Tamil, in
+  `/mnt/ugreen/NAS/MusicLibrary/<language>` (`malayalam`, `telugu`, `hindi`); Tamil stays in `tamil/jiosaavn_m4a`.
+  Jukebox sees them at `/library/<language>` (LIBRARIES) and the analyzer at the same paths.
+- **Background score** goes beside its album like the rest of the library: `<Album> (<Year>) (Original Background
+  Score)/`, album tag `<Album> (Original Background Score)`. A whole score album ("X BGM", "X Special BGM Additional",
+  "X OST") is filed as X's score; theme music / BGM / instrumental tracks inside an album go there too.
+- **An album already in the library**: only the songs it doesn't have are downloaded; if it has them all (or the
+  requested song), the request is simply closed with that album.
+- **Admins can correct things** on the Requests page: "Change" on a download picks the album it joins (or a new
+  one); "Match album" closes any open request with an album from the library; "Change album" fixes a closed one.
+
 ## Setup (once)
 
-MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`, or
-`curl -O https://raw.githubusercontent.com/devasenan134/jukebox/main/scripts/requests/fulfil.py`); `ssh craftingtable`
-working; `~/.config/jukebox-fulfil.env` (chmod 600) from `craftingtable:~/jukebox-fulfil-laptop.env`:
-`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER` and `REQUESTS_FOLDER` (the Mac mini's
-paths), `LIBRARY_NAME=tamil`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
+MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`); `ssh craftingtable`
+working (`ssh-copy-id craftingtable` to stop password prompts); `~/.config/jukebox-fulfil.env` (chmod 600):
+`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil/jiosaavn_m4a`,
+`MUSIC_ROOT=/mnt/ugreen/NAS/MusicLibrary`, `LIBRARY_NAME=tamil`, `LANGUAGES=malayalam,telugu,hindi`,
+`REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
 
-Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys), `REQUESTS_FOLDER` + `REQUESTS_DIR=/requests` in `.env`,
-the read-only mount in the live `docker-compose.yml`, and `~/.config/jukebox-fulfil.env` with `JUKEBOX_URL=http://127.0.0.1:8098`,
-its own token, `MUSIC_FOLDER`, `LIBRARY_NAME`, `REQUESTS_FOLDER`, `ANALYZER=jukebox-analyzer`.
+Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys); in `.env` `REQUESTS_FOLDER`, `REQUESTS_DIR=/requests`,
+`LIBRARY_ROOT=/mnt/ugreen/NAS/MusicLibrary` and the language libraries in `LIBRARIES`
+(`malayalam=/library/malayalam:film:malayalam;…`); the live `docker-compose.yml` mounts `/requests` and `/library`
+read-only; the analyzer's `.env` has `LIBRARY_ROOT` too. `~/.config/jukebox-fulfil.env` as on the MacBook but
+`JUKEBOX_URL=http://127.0.0.1:8098`, no `REMOTE*`, and `ANALYZER=jukebox-analyzer`.
 Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).
 
 ## Decided (2026-10-13)

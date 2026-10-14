@@ -625,6 +625,16 @@ a.nav-item:hover {
 .fab-play .icon {
   font-size: 32px;
 }
+/* A text-only button inside a line of text ("Change"). */
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
 /* A fulfilled request waiting for an admin's check (RequestsScreen). */
 .review-card {
   margin: 0 8px 12px;
