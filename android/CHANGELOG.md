@@ -8,6 +8,18 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Songs or Score (0.19.2)
+
+### New
+- **Reopen (admins).** A request closed with the wrong album can be opened again from its Closed row; nobody is told.
+
+### Fixed
+- **Search's "Not in the library"** no longer offers albums that are already there under another name: a background score album filed as its film's score, a re-release with a later year, or a request that was already filled. It still offers a film's songs when the library has only its background score.
+
+### Server
+- Requests filled from masstamilan go to their own folder per language (`tamil/masstamilan`, `malayalam/masstamilan`, …), and a song for an album JioSaavn already has still joins that album.
+- Background score and songs are told apart when filling and matching requests, and a songs request matched to a score page (or the other way round) is flagged on the review card.
+
 ## Requests, Sorted (0.19.1)
 
 ### New

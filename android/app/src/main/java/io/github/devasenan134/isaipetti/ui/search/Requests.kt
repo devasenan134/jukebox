@@ -385,6 +385,7 @@ fun RequestsScreen(nav: Nav) {
                         onDecline = if (everyone && request.isOpen && request.stage != "review") ({ declining = request }) else null,
                         onMatch = if (everyone && (request.isOpen || request.status == "done") && request.stage != "review") ({ matching = request to false }) else null,
                         onAgain = if (request.status == "declined") ({ act(request) { app.social.api.requestMusic(request.item.id) } }) else null,
+                        onReopen = if (everyone && request.status == "done") ({ act(request) { app.social.api.reopenMusicRequest(request.id) } }) else null,
                     )
                 }
             }
@@ -403,6 +404,7 @@ private fun RequestRow(
     onDecline: (() -> Unit)?,
     onMatch: (() -> Unit)? = null,
     onAgain: (() -> Unit)? = null,
+    onReopen: (() -> Unit)? = null,
 ) {
     val item = request.item
     Column(
@@ -450,12 +452,13 @@ private fun RequestRow(
                 IconButton(onClick = onCancel, enabled = !busy) { Icon(Icons.Filled.Close, contentDescription = "Take back the request") }
             }
         }
-        if (onDone != null || onDecline != null || onMatch != null || onAgain != null) {
+        if (onDone != null || onDecline != null || onMatch != null || onAgain != null || onReopen != null) {
             androidx.compose.foundation.layout.FlowRow(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
             ) {
                 onAgain?.let { FilledTonalButton(onClick = it, enabled = !busy) { Text("Request again") } }
+                onReopen?.let { TextButton(onClick = it, enabled = !busy) { Text("Reopen") } }
                 onDecline?.let { TextButton(onClick = it, enabled = !busy) { Text("Can't find") } }
                 onMatch?.let {
                     if (request.status == "done") TextButton(onClick = it, enabled = !busy) { Text("Change album") }

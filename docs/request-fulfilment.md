@@ -22,28 +22,35 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 
 ## How music is filed
 
-- **By language** (`metadata.language`): each language is its own library beside Tamil, in
-  `/mnt/ugreen/NAS/MusicLibrary/<language>` (`malayalam`, `telugu`, `hindi`); Tamil stays in `tamil/jiosaavn_m4a`.
-  Jukebox sees them at `/library/<language>` (LIBRARIES) and the analyzer at the same paths.
-- **Background score** goes beside its album like the rest of the library: `<Album> (<Year>) (Original Background
-  Score)/`, album tag `<Album> (Original Background Score)`. A whole score album ("X BGM", "X Special BGM Additional",
-  "X OST") is filed as X's score; theme music / BGM / instrumental tracks inside an album go there too.
-- **An album already in the library**: only the songs it doesn't have are downloaded; if it has them all (or the
-  requested song), the request is simply closed with that album.
-- **Admins can correct things** on the Requests page: "Change" on a download picks the album it joins (or a new
-  one); "Match album" closes any open request with an album from the library; "Change album" fixes a closed one.
+- **Its own folder per source and language:** downloads go to `MusicLibrary/<language>/masstamilan/`
+  (`tamil/masstamilan`, `malayalam/masstamilan`, …), never into `tamil/jiosaavn_m4a`. The language is the matcher's
+  `metadata.language` (not always right: it said Tamil for Premam). `tamil-masstamilan` is a library that adds to
+  the Tamil albums (LIBRARIES' fourth part, `:tamil`), so a song for an album JioSaavn already has goes to
+  `tamil/masstamilan/<that album's folder name>/` with that album's tags and shows up in the same album.
+- **Background score vs songs:** a score album ("X BGM", "X Special BGM Additional", "X OST", "… (Original Background
+  Score)") is filed as X's score: `<Album> (<Year>) (Original Background Score)/`, album tag `<Album> (Original
+  Background Score)`. Inside a songs album, only tracks that say so ("Theme Music", "BGM", "Instrumental",
+  "Background Score") go there; Jukebox's own score detection (title and sound) still runs after each scan, and
+  `data/score-overrides.txt` (`song: <path>` / `score: <path>`) corrects it by hand.
+- **A request for the songs isn't filled by the score:** search keeps offering "Vishwaroopam II" while the library has
+  only its score, and the review card warns when a songs request was matched to a score page (or the other way).
+- **An album already in the library:** only the songs (or score pieces) it doesn't have are downloaded; if it has them
+  all, the request is closed with that album.
+- **Admins correct things** on the Requests page: "Change" on a download picks the album it joins; "Match album"
+  closes an open request with an album from the library; "Change album" / "Reopen" fix a closed one.
 
 ## Setup (once)
 
 MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`); `ssh craftingtable`
 working (`ssh-copy-id craftingtable` to stop password prompts); `~/.config/jukebox-fulfil.env` (chmod 600):
 `JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil/jiosaavn_m4a`,
-`MUSIC_ROOT=/mnt/ugreen/NAS/MusicLibrary`, `LIBRARY_NAME=tamil`, `LANGUAGES=malayalam,telugu,hindi`,
+`MUSIC_ROOT=/mnt/ugreen/NAS/MusicLibrary`, `LIBRARY_NAME=tamil`,
+`LIBRARY_FOLDERS=tamil-masstamilan=tamil/masstamilan,malayalam=malayalam/masstamilan,telugu=telugu/masstamilan,hindi=hindi/masstamilan`,
 `REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
 
 Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys); in `.env` `REQUESTS_FOLDER`, `REQUESTS_DIR=/requests`,
 `LIBRARY_ROOT=/mnt/ugreen/NAS/MusicLibrary` and the language libraries in `LIBRARIES`
-(`malayalam=/library/malayalam:film:malayalam;…`); the live `docker-compose.yml` mounts `/requests` and `/library`
+(`tamil-masstamilan=/library/tamil/masstamilan:film:tamil:tamil;malayalam=/library/malayalam/masstamilan:film:malayalam;…`); the live `docker-compose.yml` mounts `/requests` and `/library`
 read-only; the analyzer's `.env` has `LIBRARY_ROOT` too. `~/.config/jukebox-fulfil.env` as on the MacBook but
 `JUKEBOX_URL=http://127.0.0.1:8098`, no `REMOTE*`, and `ANALYZER=jukebox-analyzer`.
 Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).

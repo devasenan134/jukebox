@@ -139,6 +139,8 @@ export const social = {
     post<MusicRequest>(`/admin/requests/${id}/done`, albumId ? { albumId, songId } : undefined),
   /** Where a download waiting for a check goes: an album in the library, or (null) a new album. */
   setReviewDestination: (id: number, albumId: string | null) => post<MusicRequest>(`/admin/requests/${id}/destination`, { albumId }),
+  /** A wrongly closed request waits again (nobody is told). */
+  reopenMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/reopen`),
   declineMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/decline`, { note }),
   approveMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/approve`),
   rejectMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/reject`, { note }),

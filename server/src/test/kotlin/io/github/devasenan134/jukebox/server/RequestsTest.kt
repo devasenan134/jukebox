@@ -162,8 +162,8 @@ class MusicRequestsTest {
         assertEquals("m2005", requests.place(admin, album.id, null, "A.R.Rahman", null).albumId) // the composer is enough
         assertNull(requests.place(admin, album.id, 2005, null, null).songId)
 
-        // The catalog's 2013 / "A.R. Rahman & Vaali" don't find it, so the script says where it is.
-        assertFailsWith<ApiError> { requests.complete(admin, album.id) }
+        // The catalog's 2013 is a re-release's year, but the library's composer is among its artists ("A.R. Rahman & Vaali").
+        assertEquals("m2005", requests.complete(admin, album.id).albumId)
         assertFailsWith<ApiError> { requests.complete(admin, song.id, CompleteMusicRequest("m2005", "old1")) } // not on that album
         assertFailsWith<ApiError> { requests.complete(admin, song.id, CompleteMusicRequest("nope")) }
         val done = requests.complete(admin, song.id, CompleteMusicRequest(place.albumId, place.songId))
@@ -249,6 +249,51 @@ class MusicRequestsTest {
         val db = requests.javaClass.getDeclaredField("db").apply { isAccessible = true }.get(requests) as Db
         db.tx { update("UPDATE music_requests SET album_id = 'navidrome-id' WHERE id = ?", kadal.id) }
         assertEquals("m-kadal", requests.mine(alice).first { it.id == kadal.id }.albumId)
+    }
+
+    @Test
+    fun `search knows a score album, a re-release and a filled request are in the library, and a remake isn't`(): Unit = runBlocking {
+        val items = listOf(
+            CatalogItem("itunes-movie-30", "movie", "Remo Special (Original Background Score + Additional Song)", "Remo Special (Original Background Score + Additional Song)", 2016, "Anirudh Ravichander"),
+            CatalogItem("itunes-movie-31", "movie", "Pichaikkaran", "Pichaikkaran", 2021, "Vijay Antony"),
+            CatalogItem("itunes-movie-32", "movie", "Anbe Aaruyire", "Anbe Aaruyire", 2013, "A.R. Rahman & Vaali"),
+            CatalogItem("itunes-movie-33", "movie", "Vishwaroopam II", "Vishwaroopam II", 2018, "Ghibran"),
+        )
+        val db = Db(File.createTempFile("jukebox-search", ".db").apply { delete(); deleteOnExit() }.path)
+        db.tx { update("INSERT INTO users (id, username, display_name, created_at) VALUES (3, 'admin', 'Admin', 0)") }
+        val music = GrowingMusic().apply {
+            songs = listOf(
+                LibrarySong("r1", "Remo Nee Kadhalan", "Remo", "m-remo", "", emptyList(), Person("p-ani", "Anirudh"), 2016, 240, "Tamil", 0, false),
+                LibrarySong("r2", "First Sight", "Remo (Original Background Score)", "m-remo-score", "", emptyList(), Person("p-ani", "Anirudh"), 2016, 120, "Tamil", 0, false, score = true),
+                LibrarySong("p1", "Nooru Samigal", "Pichaikkaran", "m-pichai", "", emptyList(), Person("p-va", "Vijay Antony"), 2016, 240, "Tamil", 0, false),
+                LibrarySong("a1", "Neeyum Naanum", "Anbe Aaruyire", "m-1975", "", emptyList(), Person("p-msv", "M. S. Viswanathan"), 1975, 240, "Tamil", 0, false),
+                LibrarySong("v1", "Your Sinless Eyes", "Vishwaroopam (Original Background Score)", "m-v1", "", emptyList(), Person("p-gh", "Ghibran"), 2013, 240, "Tamil", 0, false, score = true),
+                LibrarySong("v2", "Dark Is My Day", "Vishwaroopam II (Original Background Score)", "m-v2-score", "", emptyList(), Person("p-gh", "Ghibran"), 2018, 240, "Tamil", 0, false, score = true),
+            )
+        }
+        val requests = MusicRequests(db, music, object : Catalog {
+            override suspend fun search(query: String) = items
+            override suspend fun lookup(id: String) = items.firstOrNull { it.id == id }
+        }, Push(db, NoPush), isAdmin = { true }, adminIds = { listOf(3L) })
+        fun shown(q: String) = runBlocking { requests.search(admin, q).movies.map { it.item.id } }
+
+        assertEquals(emptyList(), shown("remo")) // filed as Remo's background score
+        assertEquals(emptyList(), shown("pichaikkaran")) // 2021 is a re-release of the 2016 film, by the same composer
+        assertEquals(listOf("itunes-movie-32"), shown("anbe aaruyire")) // the library's is the 1975 film by someone else
+        assertEquals(listOf("itunes-movie-33"), shown("vishwaroopam")) // only the sequel's score is here, not its songs
+
+        // Filled and closed, though the library's name for it doesn't match: not offered again.
+        val r = requests.request(admin, "itunes-movie-33")
+        requests.complete(admin, r.id, CompleteMusicRequest("m-v2-score"))
+        assertEquals(emptyList(), shown("vishwaroopam"))
+
+        // That was the score, not the songs: reopened, it's offered again, and nobody was told twice.
+        val reopened = requests.reopen(admin, r.id)
+        assertEquals(Triple("open", null, null), Triple(reopened.status, reopened.albumId, reopened.closedAt))
+        assertFailsWith<ApiError> { requests.reopen(admin, r.id) }
+        assertEquals(listOf("itunes-movie-33"), shown("vishwaroopam"))
+        assertEquals(true, requests.place(admin, r.id, 2018, "Ghibran", null, score = true).score)
+        assertFailsWith<ApiError> { requests.place(admin, r.id, 2018, "Ghibran", null) } // no songs album yet
     }
 
     @Test

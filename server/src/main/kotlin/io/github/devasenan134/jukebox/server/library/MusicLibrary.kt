@@ -30,7 +30,8 @@ data class LibraryStatus(
  * The music folders, scanned when the server starts (and every [rescanEveryMinutes]), with the slow
  * fingerprint pass running in the background in between.
  *
- * Settings (environment): LIBRARIES="name=path:kind:language;..." (kind "film" or "album"),
+ * Settings (environment): LIBRARIES="name=path:kind:language[:albums of];..." (kind "film" or "album"; the
+ * fourth part names another library whose albums this one's files add to),
  * SAAVN_ID_MAP=a CSV with path and saavn_id columns (paths inside the library), FINGERPRINTS=off to skip
  * the background pass.
  */
@@ -127,7 +128,10 @@ class MusicLibrary(
         fun parse(setting: String?): List<LibraryDef> = setting.orEmpty().split(';').map(String::trim).filter { '=' in it }.map { entry ->
             val name = entry.substringBefore('=').trim()
             val parts = entry.substringAfter('=').split(':')
-            LibraryDef(name, parts[0].trim(), parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: "album", parts.getOrNull(2)?.trim()?.ifEmpty { null })
+            LibraryDef(
+                name, parts[0].trim(), parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: "album", parts.getOrNull(2)?.trim()?.ifEmpty { null },
+                albumsOf = parts.getOrNull(3)?.trim()?.ifEmpty { null },
+            )
         }
 
         /** A CSV with a header naming "path" and "saavn_id" columns (like the collectors' songs.csv). */

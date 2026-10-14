@@ -157,6 +157,8 @@ data class RequestPlace(
     val sampleFile: String? = null,
     /** The album's songs, so a download can leave out the ones it already has. */
     val songs: List<String> = emptyList(),
+    /** It's a background score's own entry, not the film's songs. */
+    val score: Boolean = false,
 )
 
 /** An admin picks where a download goes: an album in the library, or (null) a new album folder. */
@@ -331,7 +333,10 @@ class MusicRequests(
             .map { same -> same.firstOrNull { !it.compilation } ?: same.first() }
             .filter { library.find(it) == null }
         val requests = db.tx { requestsByKey(found.map(::matchKey), me.id) }
-        fun hits(kind: String, max: Int) = found.filter { it.kind == kind }.take(max).map { CatalogHit(it, requests[matchKey(it)]?.takeIf { r -> r.status != "done" }) }
+        // A request that was filled is in the library, even when the library calls it something else (a BGM album
+        // filed as its film's background score): it isn't offered again.
+        fun hits(kind: String, max: Int) = found.filter { it.kind == kind && requests[matchKey(it)]?.status != "done" }.take(max)
+            .map { CatalogHit(it, requests[matchKey(it)]) }
         return CatalogResults(movies = hits("movie", 10), songs = hits("song", 20))
     }
 
@@ -462,25 +467,30 @@ class MusicRequests(
      * real [year] and [composer], and one of them has to agree: a same-named film from another year by
      * someone else is another film. [title] is the song to look for (default: the requested song).
      */
-    suspend fun place(me: UserDto, id: Long, year: Int?, composer: String?, title: String?, albumId: String? = null, movie: String? = null): RequestPlace {
+    suspend fun place(
+        me: UserDto, id: Long, year: Int?, composer: String?, title: String?, albumId: String? = null, movie: String? = null, score: Boolean = false,
+    ): RequestPlace {
         requireAdmin(me)
         val request = db.tx { dto(id, me.id) } ?: throw ApiError(HttpStatusCode.NotFound, "No such request")
         val library = shelf() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "The library isn't loaded yet")
         // [movie]: the album's name when the request's isn't it ("Remo Special (Original Background Score…)" is Remo's score).
-        val movie = (if (albumId != null) library.album(albumId) else library.findAlbum(movie?.takeIf { it.isNotBlank() } ?: request.item.movie, year, composer))
+        val movie = (if (albumId != null) library.album(albumId) else library.findAlbum(movie?.takeIf { it.isNotBlank() } ?: request.item.movie, year, composer, score))
             ?: throw ApiError(HttpStatusCode.NotFound, "That album isn't in the library")
         val songTitle = title?.takeIf { it.isNotBlank() } ?: request.item.title.takeIf { request.item.kind == "song" }
         val songId = songTitle?.let { t -> Fuzzy.words(t).let { words -> movie.songs.firstOrNull { same(words, it.second) }?.first } }
         // The folder most of its files are in (a disc or two can sit in subfolders).
         val files = db.read {
             query(
-                """SELECT l.name, f.path FROM files f JOIN tracks t ON t.id = f.track_id JOIN releases r ON r.id = t.release_id
+                """SELECT l.name, f.path, r.kind = 'score' FROM files f JOIN tracks t ON t.id = f.track_id JOIN releases r ON r.id = t.release_id
                    JOIN libraries l ON l.id = f.library_id WHERE (r.album_id = ? OR r.id = ?) AND f.missing_since IS NULL ORDER BY f.path""",
                 // A background score is listed by its release's id.
                 movie.id, movie.id,
-            ) { it.getString(1) to it.getString(2) }
+            ) { Triple(it.getString(1), it.getString(2), it.getBoolean(3)) }
         }
-        val folder = files.groupBy { (lib, path) -> lib to path.substringBeforeLast('/', "") }.maxByOrNull { it.value.size }
+        // The songs' folder rather than the background score's (Remo's score has more files than its songs);
+        // for a background score itself, its own folder.
+        val songs = files.filterNot { it.third }.ifEmpty { files }
+        val folder = songs.groupBy { (lib, path) -> lib to path.substringBeforeLast('/', "") }.maxByOrNull { it.value.size }
         return RequestPlace(
             albumId = movie.id,
             album = movie.title,
@@ -490,6 +500,7 @@ class MusicRequests(
             folder = folder?.key?.second,
             sampleFile = folder?.value?.first()?.second,
             songs = movie.songTitles,
+            score = movie.isScore,
         )
     }
 
@@ -544,6 +555,20 @@ class MusicRequests(
         }
         // Pointing a closed request at the right album isn't news to the people who asked.
         if (request.status != "done") push.musicReady(askers, label(request.item), place.albumId)
+        return db.tx { dto(id, me.id) }!!
+    }
+
+    /** An admin closed it with the wrong album: it waits again, as if never answered (nobody is told). */
+    suspend fun reopen(me: UserDto, id: Long): MusicRequestDto {
+        requireAdmin(me)
+        val changed = db.tx {
+            update(
+                "UPDATE music_requests SET status = 'open', album_id = NULL, song_id = NULL, note = NULL, closed_at = NULL, stage = NULL, review_json = NULL WHERE id = ? AND status != 'open'",
+                id,
+            )
+        }
+        if (changed == 0) throw ApiError(HttpStatusCode.Conflict, "That request is already open")
+        log.info("${me.username} reopened request $id")
         return db.tx { dto(id, me.id) }!!
     }
 
@@ -615,7 +640,12 @@ class MusicRequests(
         class Movie(
             val id: String, val title: String, val words: List<String>, val year: Int, val composer: List<String>,
             val songs: List<Pair<String, List<String>>>, val songTitles: List<String>,
-        )
+            /** A background score (its own entry in the library), not the film's songs. */
+            val isScore: Boolean = false,
+        ) {
+            /** The film's name as words, without words about the album's kind ("(Original Background Score)"). */
+            val core = movieWords(title)
+        }
 
         val movies = snapshot.byAlbum.map { (id, list) ->
             val songs = list.map { snapshot.songs[it] }.filter { !it.karaoke }
@@ -623,16 +653,20 @@ class MusicRequests(
             Movie(
                 id, first.album, Fuzzy.words(first.album), list.maxOf { snapshot.songs[it].year }, Fuzzy.words(first.composer?.name.orEmpty()),
                 songs.map { it.id to Fuzzy.words(it.title) }, songs.map { it.title }.distinct(),
+                isScore = list.all { snapshot.songs[it].score },
             )
         }
         private val byId = movies.associateBy { it.id }
 
         /** The album called [title] from [year] (±1) or by [composer]; the closest year first. */
-        fun findAlbum(title: String, year: Int?, composer: String?): Movie? {
-            val words = Fuzzy.words(title)
+        fun findAlbum(title: String, year: Int?, composer: String?, score: Boolean = false): Movie? {
+            val words = movieWords(title)
             val by = Fuzzy.words(composer.orEmpty())
-            return movies.filter { same(words, it.words) }
-                .filter { m -> (year != null && m.year > 0 && abs(m.year - year) <= 1) || same(by, m.composer) }
+            // The film's songs aren't its background score: a songs album is only found as songs. For a score, its
+            // own entry if the library has one, else the songs album it goes beside.
+            return movies.filter { same(words, it.core) && (score || !it.isScore) }
+                .sortedBy { if (score && it.isScore) 0 else 1 }
+                .filter { m -> (year != null && m.year > 0 && abs(m.year - year) <= 1) || same(by, m.composer) || composedBy(m.composer, by) }
                 .minByOrNull { m -> if (year != null && m.year > 0) abs(m.year - year) else 99 }
         }
 
@@ -646,13 +680,16 @@ class MusicRequests(
         }
 
         fun find(item: CatalogItem): Place? {
-            val words = Fuzzy.words(item.movie)
-            val candidates = movies.filter { same(words, it.words) }
+            val words = movieWords(item.movie)
+            // Asked for the songs: the score alone doesn't have them. Asked for the score: only a score is it.
+            val wantScore = isScoreTitle(item.movie) || (item.kind == "song" && isScoreTitle(item.title))
+            val candidates = movies.filter { same(words, it.core) && it.isScore == wantScore }
             if (item.kind == "movie") {
-                // A remake has the same name: the year (or, if the catalog's year is a re-release, the composer) tells them apart.
+                // A remake has the same name: the year tells them apart, or, when the catalog's year is a re-release's
+                // ("Pichaikkaran", 2021 for the 2016 film), the library's composer being among the catalog's artists.
                 val artist = Fuzzy.words(item.artist.orEmpty())
                 val movie = candidates.firstOrNull { m ->
-                    item.year == null || m.year <= 0 || abs(m.year - item.year) <= 1 || same(artist, m.composer)
+                    item.year == null || m.year <= 0 || abs(m.year - item.year) <= 1 || composedBy(m.composer, artist)
                 } ?: return null
                 return Place(movie.id, null)
             }
@@ -674,6 +711,21 @@ class MusicRequests(
 
         /** The same names, however spelled: each has to match the other. */
         fun same(a: List<String>, b: List<String>) = a.isNotEmpty() && b.isNotEmpty() && Fuzzy.match(a, b) >= 0.85 && Fuzzy.match(b, a) >= 0.85
+
+        /** All of the library's [composer] is in the catalog's [artist] ("A. R. Rahman" in "A.R. Rahman & Vaali"). */
+        fun composedBy(composer: List<String>, artist: List<String>) = composer.isNotEmpty() && artist.isNotEmpty() && Fuzzy.match(composer, artist) >= 0.85
+
+        /** Words that name what kind of album it is, not which film: "Remo Special (Original Background Score + Additional Song)" is Remo. */
+        private val KIND_WORDS = Regex("""\b(original|background|score|bgms?|ost|special|additional|songs?|soundtrack|theme|music|motion|picture)\b""", RegexOption.IGNORE_CASE)
+
+        private val SCORE_TITLE = Regex("""\b(background\s+(score|music)|bgms?|ost|original\s+score)\b""", RegexOption.IGNORE_CASE)
+
+        /** "Remo Special (Original Background Score + …)", "Kaithi BGM": a background score, not the film's songs. */
+        fun isScoreTitle(title: String) = SCORE_TITLE.containsMatchIn(title)
+
+        /** A movie's name as words, without bracketed parts or words about the album's kind. */
+        fun movieWords(title: String): List<String> =
+            Fuzzy.words(title.replace(KIND_WORDS, " ")).ifEmpty { Fuzzy.words(title) }
 
         /** One key per song or movie, whatever catalog entry it came from. */
         fun matchKey(item: CatalogItem) = listOf(item.kind, Fuzzy.key(item.title), Fuzzy.key(item.movie)).joinToString("|")

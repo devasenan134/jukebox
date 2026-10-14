@@ -145,6 +145,8 @@ class SocialApi(
 
     /** Where a download waiting for a check goes: an album in the library, or (null) a new album. */
     suspend fun setReviewDestination(id: Long, albumId: String?): MusicRequest = post("/admin/requests/$id/destination", DestinationBody(albumId))
+    /** A wrongly closed request waits again (nobody is told). */
+    suspend fun reopenMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/reopen", Unit)
     suspend fun declineMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/decline", NoteBody(note))
     suspend fun approveMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/approve", Unit)
     suspend fun rejectMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/reject", NoteBody(note))

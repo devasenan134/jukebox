@@ -225,6 +225,7 @@ export function RequestsScreen() {
               onDecline={everyone && isOpen(r) && r.stage !== 'review' ? () => { setNote(''); setDeclining(r) } : undefined}
               onMatch={everyone && (isOpen(r) || r.status === 'done') && r.stage !== 'review' ? () => setMatching({ r, forDownload: false }) : undefined}
               onAgain={r.status === 'declined' ? () => void act(r, () => social.requestMusic(r.item.id)) : undefined}
+              onReopen={everyone && r.status === 'done' ? () => void act(r, () => social.reopenMusicRequest(r.id)) : undefined}
             />
           ))}
           {list.data.filter((r) => shows(show, r)).length === 0 && (
@@ -336,7 +337,7 @@ function AlbumPicker({ r, forDownload, onPick, onClose }: {
   )
 }
 
-function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline, onMatch, onAgain }: {
+function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline, onMatch, onAgain, onReopen }: {
   r: MusicRequest
   showAskers: boolean
   busy: boolean
@@ -346,6 +347,7 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline, 
   onDecline?: () => void
   onMatch?: () => void
   onAgain?: () => void
+  onReopen?: () => void
 }) {
   const item = r.item
   const movie = item.kind === 'movie'
@@ -373,9 +375,10 @@ function RequestRow({ r, showAskers, busy, onOpen, onCancel, onDone, onDecline, 
         </div>
         {onCancel && <IconButton icon="close" label="Take back the request" disabled={busy} onClick={(e) => { e.stopPropagation(); onCancel() }} />}
       </div>
-      {(onDone || onDecline || onMatch || onAgain) && (
+      {(onDone || onDecline || onMatch || onAgain || onReopen) && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
           {onAgain && <button className="btn tonal" style={{ flex: 'none' }} disabled={busy} onClick={onAgain}>Request again</button>}
+          {onReopen && <button className="btn text" style={{ flex: 'none' }} disabled={busy} onClick={onReopen}>Reopen</button>}
           {onDecline && <button className="btn text" style={{ flex: 'none' }} disabled={busy} onClick={onDecline}>Can't find</button>}
           {onMatch && <button className={`btn ${r.status === 'done' ? 'text' : 'tonal'}`} style={{ flex: 'none' }} disabled={busy} onClick={onMatch}>{r.status === 'done' ? 'Change album' : 'Match album'}</button>}
           {onDone && <button className="btn" style={{ flex: 'none' }} disabled={busy} onClick={onDone}>Added</button>}

@@ -29,8 +29,10 @@ Settings: ~/.config/jukebox-fulfil.env (KEY=value lines, chmod 600):
     MUSIC_FOLDER     the main library's folder on the server (the one mounted at /music)
     LIBRARY_NAME     its name in LIBRARIES (tamil)
     MUSIC_ROOT       the folder holding every library (/mnt/ugreen/NAS/MusicLibrary); default MUSIC_FOLDER
-    LANGUAGES        other languages, each a library in MUSIC_ROOT/<language> (malayalam,telugu,hindi →
-                     MUSIC_ROOT/malayalam …); music goes by the matcher's language
+    LIBRARY_FOLDERS  every library's folder inside MUSIC_ROOT, as in LIBRARIES:
+                     tamil=tamil/jiosaavn_m4a,tamil-masstamilan=tamil/masstamilan,malayalam-masstamilan=malayalam/masstamilan
+    SOURCE           where downloads come from (masstamilan): music in <language> goes to the library
+                     "<language>-<SOURCE>" (its own folder), by the matcher's language
     REQUESTS_FOLDER  where downloads wait on the server (mounted read-only in the container as REQUESTS_DIR)
     ANALYZER         server: the analyzer's container (jukebox-analyzer), woken after a scan; blank: don't
   laptop only:
@@ -103,7 +105,7 @@ def settings():
                 k, v = line.split("=", 1)
                 values[k.strip()] = v.strip().strip('"')
     values.update({k: v for k, v in os.environ.items() if k in KEYS})
-    optional = {"ANALYZER", "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER", "LANGUAGES", "MUSIC_ROOT"}
+    optional = {"ANALYZER", "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER", "LANGUAGES", "MUSIC_ROOT", "LIBRARY_FOLDERS", "SOURCE"}
     missing = [k for k in KEYS if k not in optional and not values.get(k)]
     if values.get("REMOTE") and not values.get("REMOTE_FULFIL"):
         missing.append("REMOTE_FULFIL")
@@ -113,8 +115,11 @@ def settings():
     values["ROOT"] = (values.get("MUSIC_ROOT") or values["MUSIC_FOLDER"]).rstrip("/")
     main = os.path.relpath(values["MUSIC_FOLDER"].rstrip("/"), values["ROOT"])
     values["FOLDERS"] = {values["LIBRARY_NAME"]: "" if main == "." else main}
+    for entry in [x.strip() for x in (values.get("LIBRARY_FOLDERS") or "").split(",") if "=" in x]:
+        name, folder = entry.split("=", 1)
+        values["FOLDERS"][name.strip().lower()] = folder.strip().strip("/")
     for language in [x.strip().lower() for x in (values.get("LANGUAGES") or "").split(",") if x.strip()]:
-        values["FOLDERS"].setdefault(language, language)
+        values["FOLDERS"].setdefault(language, language)  # older settings: MUSIC_ROOT/<language>
     # Where downloads are put together: the waiting folder itself on the server, a staging folder on the laptop.
     values["WORK_FOLDER"] = (os.path.expanduser(values.get("STAGING_FOLDER") or "~/.cache/jukebox-fulfil")
                              if values.get("REMOTE") else values["REQUESTS_FOLDER"])
@@ -122,12 +127,35 @@ def settings():
 
 
 KEYS = ["JUKEBOX_URL", "JUKEBOX_TOKEN", "MUSIC_FOLDER", "LIBRARY_NAME", "REQUESTS_FOLDER", "ANALYZER",
-        "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER", "LANGUAGES", "MUSIC_ROOT"]
+        "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER", "LANGUAGES", "MUSIC_ROOT", "LIBRARY_FOLDERS", "SOURCE"]
 
 
 def libraries(cfg):
     """The libraries music can go to: the main one and one per language."""
     return list(cfg["FOLDERS"])
+
+
+def language_of(library):
+    """"tamil-masstamilan" → "tamil"."""
+    return library.split("-", 1)[0]
+
+
+def target(cfg, language):
+    """The library music in [language] is filed into: "<language>-<SOURCE>" if there's one, else the language's own."""
+    for name in (f"{language}-{cfg.get('SOURCE') or 'masstamilan'}", language):
+        if name in cfg["FOLDERS"]:
+            return name
+    return None
+
+
+def filing_folder(cfg, place):
+    """Where songs joining [place]'s album go: a folder of the same name in the library downloads are filed into,
+    with the album's own tags, so the scanner adds them to that album. For a background score's own entry, the
+    songs' folder name it sits beside."""
+    name = os.path.basename(place["folder"])
+    if place.get("score"):
+        name = re.sub(r"\s*\(original background score\)\s*$", "", name, flags=re.I)
+    return in_library(cfg, target(cfg, language_of(place["library"])) or place["library"], name)
 
 
 def in_library(cfg, library, path):
@@ -206,8 +234,9 @@ class Server:
     def requests(self):
         return {r["id"]: r for r in self.call("GET", "/admin/requests")}
 
-    def place(self, rid, year=None, composer=None, title=None, album_id=None, movie=None):
-        params = {k: v for k, v in {"year": year, "composer": composer, "title": title, "albumId": album_id, "movie": movie}.items() if v}
+    def place(self, rid, year=None, composer=None, title=None, album_id=None, movie=None, score=False):
+        params = {k: v for k, v in {"year": year, "composer": composer, "title": title, "albumId": album_id, "movie": movie,
+                                    "score": "true" if score else None}.items() if v}
         try:
             place = self.call("GET", f"/admin/requests/{rid}/place", params=params)
         except ServerError as e:
@@ -247,6 +276,7 @@ class ServerError(Exception):
 # "<Album> (Original Background Score)", which the scanner files as the album's score.
 SCORE = " (Original Background Score)"
 SCORE_ALBUM = re.compile(r"\b(bgm|bgms|ost|background\s+(score|music)|original\s+score)\b", re.I)
+# Only what says so: "Pichaikkaran (Theme Music)" is score, "Hridayam - Theme" (a song) and "Anti Bikili Theme Song" aren't.
 SCORE_TRACK = re.compile(r"\b(bgm|theme\s+music|background\s+(score|music)|instrumental|original\s+score)\b", re.I)
 
 
@@ -485,15 +515,20 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     lyricists = people(meta.get("lyricists") or "")
     cover_url = urljoin(base, meta.get("poster") or best.get("poster") or "") or None
     is_song = request["item"]["kind"] == "song"
-    language = (meta.get("language") or "").strip().lower() or cfg["LIBRARY_NAME"]
-    if language not in libraries(cfg):
-        notes.append(f"{language.title()} has no library of its own (LANGUAGES); it goes with {cfg['LIBRARY_NAME'].title()}")
-        language = cfg["LIBRARY_NAME"]
+    language = (meta.get("language") or "").strip().lower() or language_of(cfg["LIBRARY_NAME"])
+    if not target(cfg, language):
+        notes.append(f"{language.title()} has no library of its own (LIBRARY_FOLDERS); it goes with {language_of(cfg['LIBRARY_NAME']).title()}")
+        language = language_of(cfg["LIBRARY_NAME"])
+    into = target(cfg, language)
     tracks = match.get("tracks") or []
     total = int(meta.get("track_count") or len(tracks) or 0)
 
     # A whole album of background score ("Vishwaroopam II BGM") is filed as that album's score.
     score_album = not is_song and bool(SCORE_ALBUM.search(best.get("title") or ""))
+    asked_score = bool(SCORE_ALBUM.search(request["item"]["movie"] or ""))
+    if not is_song and score_album != asked_score:
+        notes.append("The request is for the film's background score, but the match is its songs" if asked_score else
+                     "The request is for the film's songs, but the match is its background score: reject it unless that's what was wanted")
     if score_album:
         album = score_base(album)
     review = {"album": album, "year": year, "composer": composer or None, "lyricists": lyricists or None,
@@ -522,21 +557,23 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
 
     # Where it goes: the album's own folder if it's in the library (same title, and its year or composer).
     title_for_place = clean_title(picked[0][1].get("name"), album) if is_song else None
-    place = server.place(rid, year, composer, title_for_place, movie=album if score_album else None)
+    place = server.place(rid, year, composer, title_for_place, movie=album if score_album else None, score=score_album)
     existing = None
-    suggested = in_library(cfg, language, safe_name(f"{album} ({year})" if year else album))
+    suggested = in_library(cfg, into, safe_name(f"{album} ({year})" if year else album))
     if place and place.get("folder") is None:
         place = None  # in the library, but its files can't be found: file it as a new album
-    if place and place.get("library") != language:
-        notes.append(f"Found {album} in the {place['library'].title()} library though the page says {language.title()}; it joins that album")
+    if place and language_of(place["library"]) != language:
+        notes.append(f"Found {album} in the {language_of(place['library']).title()} library though the page says {language.title()}; it joins that album")
     if place:
         existing = place
-        review.update(destination="existing", destinationAlbumId=place["albumId"], destinationFolder=place["folder"],
-                      suggestedFolder=suggested, scoreFolder=place["folder"] + SCORE)
+        folder = filing_folder(cfg, place)
+        review.update(destination="existing", destinationAlbumId=place["albumId"], destinationFolder=folder,
+                      suggestedFolder=suggested, scoreFolder=folder + SCORE)
         # Already there: a song that's in the album, or every song of the album, needs no download.
         if is_song and place.get("songId"):
             return review, existing, "already"
-        if not score_album:
+        if not score_album or place.get("score"):
+            # Songs (or, for a score, background pieces) the album already has aren't downloaded again.
             have = {loose(t) for t in place.get("songs") or []}
             kept = [(n, t) for n, t in picked if loose(clean_title(t.get("name"), album)) not in have]
             review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
@@ -547,7 +584,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
         review.update(destination="new", destinationFolder=suggested, suggestedFolder=suggested, scoreFolder=suggested + SCORE)
         if music_exists(cfg, suggested):
             notes.append(f"A folder called {suggested} is already in the library; the songs will be added to it")
-    say(f"      goes to   {'joins ' + review['destinationFolder'] + ' (already in the library)' if existing else 'new folder ' + review['destinationFolder']}"
+    say(f"      goes to   {'joins ' + os.path.basename(existing['folder']) + ' (already in the library), into ' + review['destinationFolder'] if existing else 'new folder ' + review['destinationFolder']}"
         + (f", as its background score ({review['scoreFolder']})" if score_album else ""))
     if review.get("skipped"):
         say(f"      skipping  {len(review['skipped'])} already in the library: {', '.join(review['skipped'])}")
@@ -792,7 +829,7 @@ def move_in(cfg, rid, review, existing_place, undo):
     work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
     music = Path(cfg["ROOT"])
     if existing_place:
-        folder = existing_place["folder"]
+        folder = filing_folder(cfg, existing_place)
         # The album's own tags win, so the songs join it (also when the admin picked it, or it arrived since).
         copied = {k: v for k, v in music_tags(cfg, existing_place["sampleFile"]).items() if v and k != "composer"}
         for t in review["tracks"]:
@@ -833,6 +870,12 @@ def move_in(cfg, rid, review, existing_place, undo):
         undo.write(json.dumps({"request": rid, "file": str(target.relative_to(music))}) + "\n")
         undo.flush()
     return folder
+
+
+def is_score_request(review):
+    """A request filled with background score only (it closes with the score's own entry)."""
+    tracks = review.get("tracks") or []
+    return bool(tracks) and all(t.get("score") for t in tracks)
 
 
 def matched_title(cfg, rid):
@@ -882,7 +925,8 @@ def act(cfg, server, waiting_for):
             elif review.get("destinationChosen"):
                 place = None  # the admin chose a new album
             else:
-                place = server.place(rid, review.get("year"), review.get("composer"), first_title, movie=review.get("album"))
+                place = server.place(rid, review.get("year"), review.get("composer"), first_title, movie=review.get("album"),
+                                     score=is_score_request(review))
             if place and place.get("folder") is None:
                 place = None
             try:
@@ -917,7 +961,8 @@ def act(cfg, server, waiting_for):
         if review.get("destination") == "existing" and review.get("destinationAlbumId"):
             place = server.place(rid, title=title, album_id=review["destinationAlbumId"])
         else:
-            place = server.place(rid, review.get("year"), review.get("composer"), title, movie=review.get("album"))
+            place = server.place(rid, review.get("year"), review.get("composer"), title, movie=review.get("album"),
+                                 score=is_score_request(review))
         if not place or (song and not place.get("songId")):
             tries = int((work / ".close_tries").read_text()) + 1 if (work / ".close_tries").exists() else 1
             (work / ".close_tries").write_text(str(tries))

@@ -466,7 +466,7 @@ fun Application.jukeboxServer(
                 get("/requests") { call.respond(requestsOn().all(call.me())) }
                 get("/requests/{id}/place") {
                     val q = call.request.queryParameters
-                    call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200), q["albumId"]?.take(64), q["movie"]?.take(200)))
+                    call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200), q["albumId"]?.take(64), q["movie"]?.take(200), q["score"] == "true"))
                 }
                 post("/requests/{id}/done") {
                     // The body is optional: the apps send none, the fulfil script says which album it filled.
@@ -486,6 +486,7 @@ fun Application.jukeboxServer(
                 get("/requests/{id}/review/{n}/stream") {
                     call.respondFile(requestsOn().reviewFile(call.me(), call.longParam("id"), call.parameters["n"]?.toIntOrNull() ?: 0))
                 }
+                post("/requests/{id}/reopen") { call.respond(requestsOn().reopen(call.me(), call.longParam("id"))) }
                 post("/requests/{id}/decline") {
                     call.respond(requestsOn().decline(call.me(), call.longParam("id"), call.receive<DeclineMusicRequest>().note))
                 }

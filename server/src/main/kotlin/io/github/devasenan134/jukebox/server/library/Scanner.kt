@@ -20,7 +20,11 @@ import java.security.SecureRandom
 import java.sql.Connection
 
 /** A music folder to scan. [kind] "film": its albums are films (soundtracks, scores, singles); "album": plain albums. */
-data class LibraryDef(val name: String, val path: String, val kind: String = "album", val language: String? = null)
+/**
+ * A music folder. [albumsOf]: another library whose albums this one's files belong to, so a folder of extra files
+ * (requests filled from another source: `tamil/masstamilan` beside `tamil/jiosaavn_m4a`) adds to the same albums.
+ */
+data class LibraryDef(val name: String, val path: String, val kind: String = "album", val language: String? = null, val albumsOf: String? = null)
 
 @Serializable
 data class ScanReport(
@@ -75,6 +79,8 @@ class Scanner(
         val root = File(library.path)
         require(root.isDirectory) { "Not a folder: ${library.path}" }
         val libId = db.tx { libraryId(library) }
+        // Albums are grouped per library, or with the library this one adds to.
+        val albumLib = library.albumsOf?.let { name -> db.tx { queryOne("SELECT id FROM libraries WHERE name = ?", name) { it.getLong(1) } } } ?: libId
         val scanId = db.tx { insert("INSERT INTO scans (started_at, info) VALUES (?, ?)", started, library.name) }
 
         val skip = nested.map { it.canonicalFile }.toSet()
@@ -122,7 +128,7 @@ class Scanner(
             val existing = known[f.path]
             val movedFrom = if (existing == null) movedFile(f, p, gone)?.also { gone.remove(it); moved++ } else null
             runCatching {
-                db.tx { save(library, libId, f, p, existing ?: movedFrom, folderCovers, recredited) }
+                db.tx { save(library, libId, albumLib, f, p, existing ?: movedFrom, folderCovers, recredited) }
             }.onFailure { log.warn("Couldn't add {}", f.path, it); unreadable++ }
                 .onSuccess { if (existing != null) updated++ else if (movedFrom == null) added++ }
         }
@@ -156,7 +162,7 @@ class Scanner(
 
     /** Writes one file into the catalog: its recording, album, release, track, people, lyrics and cover. */
     private fun Connection.save(
-        library: LibraryDef, libId: Long, f: Found, p: Probed, existing: Known?, folderCovers: HashMap<String, String?>, recredited: MutableSet<String>,
+        library: LibraryDef, libId: Long, albumLib: Long, f: Found, p: Probed, existing: Known?, folderCovers: HashMap<String, String?>, recredited: MutableSet<String>,
     ) {
         val now = clock()
         val titleTag = p.tag("title") ?: f.file.nameWithoutExtension.replace(Regex("""^\d+(-\d+)?\s*-\s*"""), "")
@@ -176,12 +182,12 @@ class Scanner(
         // The album and the release this track belongs to.
         val (albumTitle, isScore) = Names.album(p.tag("album") ?: f.file.parentFile?.name ?: "Unknown album")
         val year = Names.year(p.tag("date", "year", "originaldate"))
-        val albumKey = "$libId|${Fuzzy.key(albumTitle)}|${year ?: ""}"
+        val albumKey = "$albumLib|${Fuzzy.key(albumTitle)}|${year ?: ""}"
         val albumId = queryOne("SELECT id FROM albums WHERE group_key = ?", albumKey) { it.getString(1) }?.also {
             update("UPDATE albums SET title = ?, sort_title = ?, updated_at = ? WHERE id = ?", albumTitle, Names.sortTitle(albumTitle), now, it)
         } ?: newId().also {
             insert("""INSERT INTO albums (id, library_id, title, sort_title, year, kind, group_key, created_at, updated_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", it, libId, albumTitle, Names.sortTitle(albumTitle), year,
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", it, albumLib, albumTitle, Names.sortTitle(albumTitle), year,
                 if (library.kind == "film") "film" else "album", albumKey, now, now)
         }
         val subtitle = p.tag("discsubtitle", "setsubtitle", "tsst")
