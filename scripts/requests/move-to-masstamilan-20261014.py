@@ -8,6 +8,7 @@ One-off move to the per-source layout (run on the Mac mini, after the 0.19.2 ser
 
 1. Moves what fulfil.py filed on 2026-10-13 (and the tidy-up moved) into those folders. Folders it made are moved
    whole; from albums JioSaavn already had, only its mp3s (and their lyrics) move, into a folder of the same name.
+   Pichaikkaran's downloaded theme music duplicates JioSaavn's and goes to the trash.
 2. Marks two tracks as songs, not background score (data/score-overrides.txt): Hridayam's theme and Remo's
    Veshangalil Poiyillai.
 3. Points Jukebox at the new folders (LIBRARIES in .env, with a backup) and restarts it, which rescans.
@@ -53,8 +54,7 @@ for d in (TM, MM, f"{ROOT}/telugu/masstamilan", f"{ROOT}/hindi/masstamilan"):
 
 # 1a. Folders fulfil.py made: moved whole (they hold only its downloads).
 whole = [(T, TM, d) for d in ["Anbe Aaruyire (2005)", "Annamalai (1992)", "Sarvam (2009)",
-                              "Vishwaroopam II (2018) (Original Background Score)", "Remo (2016) (Original Background Score)",
-                              "Pichaikkaran (2016) (Original Background Score)"]]
+                              "Vishwaroopam II (2018) (Original Background Score)", "Remo (2016) (Original Background Score)"]]
 whole += [(ML, MM, d) for d in ["Hridayam (2022)", "Premam (2015)", "Sarvam Maya (2025)"]]
 for src, dst, d in whole:
     if os.path.isdir(f"{src}/{d}") and any(f.endswith(".m4a") for f in os.listdir(f"{src}/{d}")):
@@ -70,6 +70,13 @@ for album, stems in [("Pichaikkaran (2016)", ["02 - Nenjorathil (Female)"]), ("R
                 mv(f"{T}/{album}/{stem}{ext}", f"{TM}/{album}/{stem}{ext}")
     if os.path.exists(f"{T}/{album}/cover.jpg") and not os.path.exists(f"{TM}/{album}/cover.jpg"):
         shutil.copy(f"{T}/{album}/cover.jpg", f"{TM}/{album}/cover.jpg")
+
+# 1c. JioSaavn already had Pichaikkaran's theme music (01 - … .m4a): the downloaded copy goes to the trash.
+TRASH = f"{JUKEBOX}/requests/trash/20261014/Pichaikkaran (2016) (Original Background Score)"
+for ext in (".mp3", ".txt", ".lrc"):
+    f = f"{T}/Pichaikkaran (2016) (Original Background Score)/06 - Pichaikkaran (Theme Music){ext}"
+    if os.path.exists(f):
+        mv(f, f"{TRASH}/06 - Pichaikkaran (Theme Music){ext}")
 
 # 2. Songs, whatever the background score rules say (paths inside their library).
 overrides = f"{JUKEBOX}/data/score-overrides.txt"
