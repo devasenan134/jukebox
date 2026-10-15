@@ -131,8 +131,12 @@ class SocialApi(
     /** Reads a playlist link (Spotify, Apple Music, YouTube) or an exported file's text, and finds its songs in the library. */
     suspend fun importPreview(url: String? = null, text: String? = null, name: String? = null): ImportPreview =
         post("/imports/preview", ImportPreviewBody(url, text, name))
-    /** Saves an imported playlist with these songs (in this order). */
-    suspend fun importCreate(name: String, songIds: List<String>): ImportCreated = post("/imports", ImportCreateBody(name, songIds))
+    /** Saves an imported playlist with these songs (in this order): the library's, and ones it doesn't have to keep greyed out. */
+    suspend fun importCreate(name: String, items: List<ImportItem>): ImportCreated = post("/imports", ImportCreateBody(name, items))
+    /** A playlist's songs the library doesn't have (kept from an import); ones that arrived are filled in first. */
+    suspend fun playlistMissing(id: String): PlaylistMissing = get("/playlists/${enc(id)}/missing")
+    suspend fun requestMissing(id: String, missingId: Long): MissingSong = post("/playlists/${enc(id)}/missing/$missingId/request", Unit)
+    suspend fun removeMissing(id: String, missingId: Long) = send<Unit>("DELETE", "/playlists/${enc(id)}/missing/$missingId", null)
     /** Requests a song of an imported playlist that isn't in the library. */
     suspend fun importRequest(track: ImportedTrack): MusicRequest =
         post("/imports/request", ImportRequestBody(track.title, track.artists.firstOrNull(), track.album, track.catalogId))
@@ -368,7 +372,7 @@ class SocialApi(
 
     @Serializable private data class CatalogIdBody(val id: String)
     @Serializable private data class ImportPreviewBody(val url: String?, val text: String?, val name: String?)
-    @Serializable private data class ImportCreateBody(val name: String, val songIds: List<String>)
+    @Serializable private data class ImportCreateBody(val name: String, val items: List<ImportItem>)
     @Serializable private data class ImportRequestBody(val title: String, val artist: String?, val album: String?, val catalogId: String?)
     @Serializable private data class NoteBody(val note: String?)
     @Serializable private data class AlbumBody(val albumId: String, val songId: String? = null)

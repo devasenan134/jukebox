@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -492,6 +492,22 @@ class Db(private val path: String) {
         // Tracks ScoreSplitter moved from a soundtrack to its album's background score (so the move can be undone),
         // and a person's own photo (people-photos/ in the data folder).
         // Fulfilled requests waiting for an admin's check (docs/request-fulfilment.md).
+        // Songs of an imported playlist that the library didn't have, kept in their place (before the song at
+        // [slot]) to show greyed out and request; each becomes a real entry when the song arrives.
+        // not_ids: the library's songs offered for it at import and turned down, never matched to it later.
+        val SCHEMA_V27 = """
+            CREATE TABLE playlist_missing (
+                id INTEGER PRIMARY KEY,
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                slot INTEGER NOT NULL,
+                track_json TEXT NOT NULL,
+                not_ids TEXT NOT NULL DEFAULT '[]',
+                request_id INTEGER,
+                checked_version TEXT
+            );
+            CREATE INDEX playlist_missing_by_playlist ON playlist_missing(playlist_id)
+        """.trimIndent()
+
         val SCHEMA_V26 = """
             ALTER TABLE music_requests ADD COLUMN stage TEXT;
             ALTER TABLE music_requests ADD COLUMN review_json TEXT;

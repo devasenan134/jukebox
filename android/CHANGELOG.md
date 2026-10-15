@@ -8,6 +8,17 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Missing Songs, Kept (0.20.0)
+
+### New
+- **Keep the songs the library doesn't have.** When importing a playlist, the songs that aren't in the library can be left out (as before) or kept in their place, greyed out.
+- **Request from the playlist.** A greyed-out song has Request (Ask again if it couldn't be found) and shows Requested, then On its way. On your own playlist it can be removed.
+- **They fill in by themselves.** When a requested song arrives, or a new song is surely the same one, it becomes a song of the playlist in the place it had. A song you turned down at import is never used for it.
+
+### Server
+- Missing songs are kept apart from a playlist's songs (other players see only real songs), stay before the same song when songs are removed or reordered, and have their own endpoints: `GET /playlists/{id}/missing`, `POST …/missing/{missingId}/request`, `DELETE …/missing/{missingId}`.
+- `POST /imports` takes the songs in order (`items`: a library song, or a missing one with its request); `songIds` still works.
+
 ## Songs or Score (0.19.2)
 
 ### New

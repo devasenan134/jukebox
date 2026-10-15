@@ -566,4 +566,16 @@ data class ImportPreview(
 )
 
 @Serializable
-data class ImportCreated(val playlistId: String, val songCount: Int = 0)
+data class ImportCreated(val playlistId: String, val songCount: Int = 0, val missingCount: Int = 0)
+
+/** A song of a saved playlist: one of the library's ([songId]), or one it doesn't have ([track]), kept greyed out to request. */
+@Serializable
+data class ImportItem(val songId: String? = null, val track: ImportedTrack? = null, val requestId: Long? = null)
+
+/** A song of a playlist the library doesn't have: before the song at [before] (the end if past it), and its request. */
+@Serializable
+data class MissingSong(val id: Long, val before: Int, val track: ImportedTrack, val request: MusicRequest? = null)
+
+/** A playlist's missing songs; [filled]: how many just arrived in the library and became songs of it (reload them). */
+@Serializable
+data class PlaylistMissing(val songs: List<MissingSong> = emptyList(), val filled: Int = 0)

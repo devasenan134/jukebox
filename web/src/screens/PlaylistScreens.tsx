@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import type { Playlist, Song } from '../api/types'
+import type { MissingSong, Playlist, PlaylistMissing, Song } from '../api/types'
 import { mixSongToSong, mixSource, MIX_AUTHOR } from '../api/types'
 import { social } from '../api/social'
 import { subsonic } from '../api/subsonic'
@@ -9,10 +9,10 @@ import { activity, useRecentPlaylists } from '../state/history'
 import { useMixes, useMyPlaylists } from '../state/library'
 import { likes, useLikes } from '../state/likes'
 import { useSession } from '../state/session'
-import { Cover, formatTotalDuration, likeCount, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { Cover, formatDuration, formatTotalDuration, likeCount, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
 import { usePhotoPicker } from '../ui/PhotoPicker'
 import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
-import { Dialog, ErrorBox, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
+import { Dialog, ErrorBox, Icon, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover, mixTint, updatedText } from '../ui/mixes'
 import { useNav } from '../ui/nav'
 import { keys, playlistChanged } from '../state/queries'
@@ -62,6 +62,21 @@ export function PlaylistScreen() {
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [editing, setEditing] = useState<Song[] | null>(null)
+  // Songs it should have that the library doesn't (kept from an import), greyed out in their place.
+  const missing = useLoad<PlaylistMissing>(['playlist-missing', id], () => social.playlistMissing(id).catch(() => ({ songs: [], filled: 0 })))
+  const gaps = missing.data?.songs ?? []
+  // Some arrived and became songs of the playlist: show them.
+  const filled = missing.data?.filled ?? 0
+  useEffect(() => {
+    if (!filled) return
+    void subsonic.playlist(id).then((p) => {
+      data.set(p)
+      playlistChanged()
+      useMyPlaylists.getState().refresh()
+    })
+    toast(filled === 1 ? 'A song you were waiting for is in this playlist now' : `${filled} songs you were waiting for are in this playlist now`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filled, id])
   const mineNow = data.data != null && data.data.owner === username
   // How many friends liked a playlist you made (your own like doesn't count).
   const likeTotal = useLoad<Record<string, number>>(['playlist-likes', id, mineNow], () => (mineNow ? social.playlistLikeCounts([id]) : Promise.resolve({})), 30_000).data?.[id] ?? 0
@@ -96,6 +111,7 @@ export function PlaylistScreen() {
     try {
       await what()
       data.set(await subsonic.playlist(id))
+      missing.retry()
       playlistChanged()
       useMyPlaylists.getState().refresh()
       if (done) toast(done)
@@ -104,6 +120,19 @@ export function PlaylistScreen() {
     }
   }
   const remove = (index: number) => change(() => subsonic.updatePlaylist(id, { removeIndexes: [index] }), 'Removed from this playlist')
+  const requestMissing = async (m: MissingSong) => {
+    try {
+      const asked = await social.requestMissing(id, m.id)
+      missing.set({ songs: gaps.map((g) => (g.id === m.id ? asked : g)), filled: 0 })
+      toast('Requested. It joins the playlist when it arrives')
+    } catch (e) {
+      toast((e as Error).message || "Couldn't request it", true)
+    }
+  }
+  const removeMissing = (m: MissingSong) => change(() => social.removeMissing(id, m.id), 'Removed from this playlist')
+  const missingRow = (m: MissingSong) => (
+    <MissingRow key={`missing-${m.id}`} song={m} onRequest={() => requestMissing(m)} onRemove={mine ? () => void removeMissing(m) : undefined} />
+  )
   const saveOrder = (list: Song[]) => {
     setEditing(null)
     void change(() => subsonic.replacePlaylist(id, list.map((s) => s.id)), 'Saved')
@@ -135,7 +164,7 @@ export function PlaylistScreen() {
       meta={
         <>
           {playlist.comment && <div style={{ width: '100%', marginBottom: 4 }}>{playlist.comment}</div>}
-          <Meta parts={[mine ? <b>By you</b> : playlist.owner && <b>{playlist.owner}</b>, mine && likeCount(likeTotal), songCount(songs.length), songs.length > 0 && total(songs)]} />
+          <Meta parts={[mine ? <b>By you</b> : playlist.owner && <b>{playlist.owner}</b>, mine && likeCount(likeTotal), songCount(songs.length), songs.length > 0 && total(songs), gaps.length > 0 && `${gaps.length} not in the library`]} />
         </>
       }
     >
@@ -155,12 +184,13 @@ export function PlaylistScreen() {
           ) : (
             <div className="hero-bar">
               {menu}
-              <span className="muted">{mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
+              <span className="muted">{gaps.length ? 'None of its songs are in the library yet.' : mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
             </div>
           )}
           <div className="tracks">
-            {songs.length > 0 && <TrackHead />}
-            {songs.map((s, i) => (
+            {(songs.length > 0 || gaps.length > 0) && <TrackHead />}
+            {songs.map((s, i) => [
+              ...gaps.filter((m) => m.before === i).map(missingRow),
               <SongRow
                 key={`${s.id}-${i}`}
                 song={s}
@@ -170,8 +200,9 @@ export function PlaylistScreen() {
                 onClick={() => play(i)}
                 onRemoveFromPlaylist={mine ? () => void remove(i) : undefined}
                 inOwnPlaylist={mine ? playlist.name : undefined}
-              />
-            ))}
+              />,
+            ])}
+            {gaps.filter((m) => m.before >= songs.length).map(missingRow)}
           </div>
           {mine && <RecommendedSongs playlist={playlist} onAdded={() => void change(async () => {})} />}
         </>
@@ -191,6 +222,40 @@ export function PlaylistScreen() {
       )}
       {deleting && <DeleteDialog playlist={playlist} onClose={() => setDeleting(false)} onDeleted={() => nav.back()} />}
     </Collection>
+  )
+}
+
+/** A song of the playlist the library doesn't have: greyed out, with Request (and Remove, on your own playlist). */
+function MissingRow({ song, onRequest, onRemove }: { song: MissingSong; onRequest: () => Promise<void>; onRemove?: () => void }) {
+  const t = song.track
+  const r = song.request
+  const [busy, setBusy] = useState(false)
+  const status = !r ? null
+    : r.status === 'open' ? (r.stage === 'review' || r.stage === 'approved' ? 'On its way' : 'Requested')
+      : r.status === 'done' ? 'Arriving soon'
+        : null // declined: it can be asked for again
+  return (
+    <div className="song-row missing" title="Not in the library">
+      <div className="num body-medium"><Icon name="music_off" size={18} /></div>
+      <div className="text">
+        <div className="title body-large ellipsis">{t.title}</div>
+        <div className="body-small muted ellipsis">
+          {r?.status === 'declined' ? `Couldn't be found${r.note ? `: ${r.note}` : ''}` : [t.artists.join(', '), 'Not in the library'].filter(Boolean).join(' · ')}
+        </div>
+      </div>
+      <div className="album-col ellipsis">{t.album}</div>
+      <span className="missing-action">
+        {status ? (
+          <span className="body-small primary-text" style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="check" size={16} />{status}</span>
+        ) : (
+          <button className="btn tonal small" disabled={busy} onClick={async () => { setBusy(true); await onRequest(); setBusy(false) }}>
+            {r?.status === 'declined' ? 'Ask again' : 'Request'}
+          </button>
+        )}
+      </span>
+      <span className="dur body-small">{t.durationMs ? formatDuration(t.durationMs / 1000) : ''}</span>
+      {onRemove ? <IconButton icon="close" label="Remove from this playlist" className="row-more missing-action" onClick={onRemove} /> : <span style={{ width: 40 }} />}
+    </div>
   )
 }
 

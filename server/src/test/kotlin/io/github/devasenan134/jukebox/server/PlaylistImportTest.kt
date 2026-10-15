@@ -1,5 +1,6 @@
 package io.github.devasenan134.jukebox.server
 
+import io.github.devasenan134.jukebox.server.library.MissingSlots
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -142,5 +143,25 @@ class PlaylistPagesTest {
         assertEquals("Tamil & more", p.name)
         assertEquals(ImportedTrack("Kanave Kanave | David", listOf("Anirudh"), null, 284_000), p.tracks[0])
         assertEquals(ImportedTrack("Naa Ready - Lyric Video | Leo", listOf("Sony Music South"), null, 245_000), p.tracks[1])
+    }
+}
+
+class MissingSlotsTest {
+    @Test
+    fun `a missing song stays before the same song when the playlist is reordered or trimmed`() {
+        val before = listOf("a", "b", "c", "d")
+        assertEquals(0, MissingSlots.reordered(before, listOf("c", "a", "b"), 2)) // before c, now first
+        assertEquals(2, MissingSlots.reordered(before, listOf("a", "b", "d"), 2)) // c removed: before d
+        assertEquals(2, MissingSlots.reordered(before, listOf("a", "b"), 2)) // c and d removed: at the end
+        assertEquals(3, MissingSlots.reordered(before, listOf("a", "b", "c"), 4)) // at the end stays at the end
+    }
+
+    @Test
+    fun `songs that arrived take their missing place, the other gaps move with them`() {
+        // a [x] b [y] [z] c [w]
+        val gaps = listOf(1L to 1, 2L to 2, 3L to 2, 4L to 3)
+        val (songs, slots) = MissingSlots.fill(listOf("a", "b", "c"), gaps, mapOf(1L to "x", 3L to "z"))
+        assertEquals(listOf("a", "x", "b", "z", "c"), songs)
+        assertEquals(listOf(2L to 3, 4L to 5), slots)
     }
 }

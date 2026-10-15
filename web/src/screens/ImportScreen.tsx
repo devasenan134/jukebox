@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import type { ImportPreview, ImportRow, MixSong } from '../api/types'
+import type { ImportItem, ImportPreview, ImportRow, MixSong } from '../api/types'
 import { social } from '../api/social'
 import { useMyPlaylists } from '../state/library'
 import { playlistChanged } from '../state/queries'
@@ -10,7 +10,7 @@ import { useNav } from '../ui/nav'
 // Importing a playlist (ui/library/ImportScreen.kt in the app): paste a link to a Spotify, Apple Music or YouTube
 // playlist, or choose an exported file (CSV, M3U, Apple Music XML) or paste a list. The server reads the songs and
 // finds them in the library; here you check the matches, pick where it wasn't sure, request what's missing, and
-// save it as a playlist of yours.
+// save it as a playlist of yours: without the missing songs, or with them greyed out in their place to request.
 
 const SOURCES: Record<string, string> = { spotify: 'Spotify', apple: 'Apple Music', youtube: 'YouTube', file: 'your file' }
 
@@ -93,10 +93,20 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   // Per row: the song chosen for it (the match, a choice, or none), and whether it goes in.
   const [chosen, setChosen] = useState<(MixSong | undefined)[]>(() => preview.rows.map((r) => r.match))
   const [included, setIncluded] = useState<boolean[]>(() => preview.rows.map((r) => !!r.match))
-  const [requested, setRequested] = useState<Record<number, 'busy' | 'done'>>({})
+  // Per row: asking for it, or the request made.
+  const [requested, setRequested] = useState<Record<number, 'busy' | number>>({})
+  // Songs the library doesn't have: left out, or kept in their place (greyed out, to request).
+  const [keepMissing, setKeepMissing] = useState(false)
   const [saving, setSaving] = useState(false)
   const found = preview.rows.filter((r) => r.match).length
   const songs = chosen.filter((s, i) => s && included[i]) as MixSong[]
+  const missing = preview.rows.filter((_, i) => !chosen[i]).length
+  const items: ImportItem[] = preview.rows.flatMap((r, i): ImportItem[] => {
+    const s = chosen[i]
+    if (s) return included[i] ? [{ songId: s.id }] : []
+    const asked = requested[i]
+    return keepMissing ? [{ track: r.track, requestId: typeof asked === 'number' ? asked : undefined }] : []
+  })
 
   const choose = (i: number, s: MixSong | undefined) => {
     setChosen(chosen.map((x, j) => (j === i ? s : x)))
@@ -105,8 +115,8 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   const request = async (i: number) => {
     setRequested({ ...requested, [i]: 'busy' })
     try {
-      await social.importRequest(preview.rows[i].track)
-      setRequested((r) => ({ ...r, [i]: 'done' }))
+      const asked = await social.importRequest(preview.rows[i].track)
+      setRequested((r) => ({ ...r, [i]: asked.id }))
     } catch (e) {
       setRequested((r) => { const n = { ...r }; delete n[i]; return n })
       toast((e as Error).message || "Couldn't request it", true)
@@ -115,10 +125,10 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   const save = async () => {
     setSaving(true)
     try {
-      const r = await social.importCreate(name.trim() || preview.name, songs.map((s) => s.id))
+      const r = await social.importCreate(name.trim() || preview.name, items)
       playlistChanged()
       useMyPlaylists.getState().refresh()
-      toast(`Saved "${name.trim() || preview.name}" with ${r.songCount} songs`)
+      toast(`Saved "${name.trim() || preview.name}" with ${r.songCount} songs${r.missingCount ? `, and ${r.missingCount} to request` : ''}`)
       onSaved(r.playlistId)
     } catch (e) {
       toast((e as Error).message || "Couldn't save it", true)
@@ -139,8 +149,24 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
           {found < preview.rows.length && ' The others can be requested.'}
         </div>
         {preview.note && <div className="body-small muted" style={{ marginTop: 4 }}>{preview.note}</div>}
+        {missing > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="body-medium">{missing === 1 ? 'The song that isn\'t in the library:' : `The ${missing} songs that aren't in the library:`}</div>
+            <div className="chips" style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+              <button className={`chip${keepMissing ? '' : ' selected'}`} onClick={() => setKeepMissing(false)}>Leave out</button>
+              <button className={`chip${keepMissing ? ' selected' : ''}`} onClick={() => setKeepMissing(true)}>Keep, greyed out</button>
+            </div>
+            <div className="body-small muted" style={{ marginTop: 4 }}>
+              {keepMissing
+                ? 'They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest.'
+                : 'The playlist has only the songs in the library.'}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <button className="btn" disabled={!songs.length || saving} onClick={() => void save()}>{saving ? 'Saving…' : `Save playlist (${songs.length} songs)`}</button>
+          <button className="btn" disabled={!items.length || saving} onClick={() => void save()}>
+            {saving ? 'Saving…' : `Save playlist (${songs.length} songs${items.length > songs.length ? ` + ${items.length - songs.length} to request` : ''})`}
+          </button>
           <button className="btn text" onClick={onBack}>Start over</button>
         </div>
       </div>
@@ -162,7 +188,7 @@ function ImportRowView({ row, chosen, included, request, onInclude, onChoose, on
   row: ImportRow
   chosen?: MixSong
   included: boolean
-  request?: 'busy' | 'done'
+  request?: 'busy' | number
   onInclude: (v: boolean) => void
   onChoose: (s: MixSong | undefined) => void
   onRequest: () => void
@@ -197,7 +223,7 @@ function ImportRowView({ row, chosen, included, request, onInclude, onChoose, on
           <button className="btn text small" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())}>{chosen ? 'Change' : 'Pick'}</button>
         )}
         {!chosen && (
-          request === 'done' ? <span className="body-small primary-text" style={{ whiteSpace: 'nowrap' }}><Icon name="check" size={16} /> Requested</span>
+          typeof request === 'number' ? <span className="body-small primary-text" style={{ whiteSpace: 'nowrap' }}><Icon name="check" size={16} /> Requested</span>
             : <button className="btn tonal small" disabled={request === 'busy'} onClick={onRequest}>Request</button>
         )}
       </div>

@@ -27,6 +27,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.devasenan134.isaipetti.data.ImportItem
 import io.github.devasenan134.isaipetti.data.ImportPreview
 import io.github.devasenan134.isaipetti.data.ImportRow
 import io.github.devasenan134.isaipetti.data.MixSong
@@ -69,7 +71,7 @@ private const val MAX_FILE_BYTES = 12L * 1024 * 1024
  * Importing a playlist (screens/ImportScreen.tsx on the website): a link to a Spotify, Apple Music or YouTube
  * playlist, an exported file (CSV, M3U, Apple Music XML) or a pasted list. The server reads the songs and finds
  * them in the library; here you check the matches, pick where it wasn't sure, request what's missing, and save
- * it as a playlist of yours. [sharedLink] is a link shared to the app from another app (Spotify's Share).
+ * it as a playlist of yours: without the missing songs, or with them greyed out in their place to request. [sharedLink] is a link shared to the app from another app (Spotify's Share).
  */
 @Composable
 fun ImportScreen(nav: Nav, sharedLink: String? = null) {
@@ -195,10 +197,21 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
     // Per row: the song chosen for it (the match, a choice, or none), and whether it goes in.
     val chosen = remember { mutableStateListOf<MixSong?>().apply { addAll(preview.rows.map { it.match }) } }
     val included = remember { mutableStateListOf<Boolean>().apply { addAll(preview.rows.map { it.match != null }) } }
-    val requested = remember { mutableStateMapOf<Int, Boolean>() } // false: asking, true: done
+    val requested = remember { mutableStateMapOf<Int, Long?>() } // null: asking, else the request's id
+    // Songs the library doesn't have: left out, or kept in their place (greyed out, to request).
+    var keepMissing by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     val found = preview.rows.count { it.match != null }
     val songs = chosen.indices.mapNotNull { i -> chosen[i]?.takeIf { included[i] } }
+    val missing = chosen.count { it == null }
+    val items = preview.rows.indices.mapNotNull { i ->
+        val s = chosen[i]
+        when {
+            s != null -> if (included[i]) ImportItem(songId = s.id) else null
+            keepMissing -> ImportItem(track = preview.rows[i].track, requestId = requested[i])
+            else -> null
+        }
+    }
 
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
@@ -211,13 +224,30 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 preview.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (missing > 0) {
+                    Text(
+                        if (missing == 1) "The song that isn't in the library:" else "The $missing songs that aren't in the library:",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(selected = !keepMissing, onClick = { keepMissing = false }, label = { Text("Leave out") })
+                        FilterChip(selected = keepMissing, onClick = { keepMissing = true }, label = { Text("Keep, greyed out") })
+                    }
+                    Text(
+                        if (keepMissing) "They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest."
+                        else "The playlist has only the songs in the library.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Button(
                     onClick = {
                         saving = true
                         scope.launch {
-                            runCatching { app.social.api.importCreate(name.trim().ifEmpty { preview.name }, songs.map { it.id }) }
+                            runCatching { app.social.api.importCreate(name.trim().ifEmpty { preview.name }, items) }
                                 .onSuccess {
-                                    Toast.makeText(context, "Saved with ${it.songCount} songs", Toast.LENGTH_SHORT).show()
+                                    val more = if (it.missingCount > 0) ", and ${it.missingCount} to request" else ""
+                                    Toast.makeText(context, "Saved with ${it.songCount} songs$more", Toast.LENGTH_SHORT).show()
                                     onSaved(it.playlistId)
                                 }
                                 .onFailure {
@@ -226,20 +256,23 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                                 }
                         }
                     },
-                    enabled = songs.isNotEmpty() && !saving,
-                ) { Text(if (saving) "Saving…" else "Save playlist (${songs.size} songs)") }
+                    enabled = items.isNotEmpty() && !saving,
+                ) {
+                    val more = if (items.size > songs.size) " + ${items.size - songs.size} to request" else ""
+                    Text(if (saving) "Saving…" else "Save playlist (${songs.size} songs$more)")
+                }
             }
         }
         itemsIndexed(preview.rows) { i, row ->
             ImportRowView(
-                row, chosen[i], included[i], requested[i],
+                row, chosen[i], included[i], if (i in requested) requested[i] != null else null,
                 onInclude = { included[i] = it },
                 onChoose = { s -> chosen[i] = s; included[i] = s != null },
                 onRequest = {
-                    requested[i] = false
+                    requested[i] = null
                     scope.launch {
                         runCatching { app.social.api.importRequest(row.track) }
-                            .onSuccess { requested[i] = true }
+                            .onSuccess { requested[i] = it.id }
                             .onFailure {
                                 requested.remove(i)
                                 Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show()

@@ -16,7 +16,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import io.github.devasenan134.isaipetti.data.MissingSong
 import androidx.compose.material.icons.filled.PlayArrow
 import io.github.devasenan134.isaipetti.data.toAlbum
 import androidx.compose.material3.Button
@@ -167,9 +174,23 @@ fun PlaylistScreen(id: String, nav: Nav) {
         if (mine) value = runCatching { app.social.api.playlistLikeCounts(listOf(id))[id] }.getOrNull()
     }
     val tint = rememberPageTint(playlist?.coverArt)
+    // Songs it should have that the library doesn't (kept from an import), greyed out in their place.
+    var missing by remember(id) { mutableStateOf<List<MissingSong>>(emptyList()) }
+    var missingRound by remember { mutableStateOf(0) }
+    LaunchedEffect(id, missingRound) {
+        val found = runCatching { app.social.api.playlistMissing(id) }.getOrNull() ?: return@LaunchedEffect
+        missing = found.songs
+        // Some arrived and became songs of the playlist: show them.
+        if (found.filled > 0) {
+            loader.reload(quietly = true)
+            app.myPlaylists.refresh()
+            val text = if (found.filled == 1) "A song you were waiting for is in this playlist now" else "${found.filled} songs you were waiting for are in this playlist now"
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        }
+    }
     Column {
         ScreenHeader("", onBack = nav.back, color = tint) {
-            if (mine) PlaylistOwnerMenu(playlist!!, onChanged = { loader.reload(quietly = true) }, onDeleted = nav.back)
+            if (mine) PlaylistOwnerMenu(playlist!!, onChanged = { loader.reload(quietly = true); missingRound++ }, onDeleted = nav.back)
         }
         LoadableContent(loader) { playlist ->
             SongList(
@@ -188,9 +209,32 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 onRemoveSong = if (!mine || playlist.readonly) null else { index ->
                     scope.launch {
                         runCatching { app.api.updatePlaylist(playlist.id, removeIndexes = listOf(index)) }
-                            .onSuccess { loader.reload(quietly = true); app.myPlaylists.refresh() }
+                            .onSuccess { loader.reload(quietly = true); app.myPlaylists.refresh(); missingRound++ }
                             .onFailure { Toast.makeText(context, it.message ?: "Couldn't remove it", Toast.LENGTH_SHORT).show() }
                     }
+                },
+                missing = missing,
+                missingRow = { m ->
+                    MissingSongRow(
+                        m,
+                        onRequest = {
+                            runCatching { app.social.api.requestMissing(playlist.id, m.id) }
+                                .onSuccess { asked ->
+                                    missing = missing.map { if (it.id == m.id) asked else it }
+                                    Toast.makeText(context, "Requested. It joins the playlist when it arrives", Toast.LENGTH_SHORT).show()
+                                }
+                                .onFailure { Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show() }
+                        },
+                        onRemove = if (!mine) null else {
+                            {
+                                scope.launch {
+                                    runCatching { app.social.api.removeMissing(playlist.id, m.id) }
+                                        .onSuccess { missing = missing.filter { it.id != m.id } }
+                                        .onFailure { Toast.makeText(context, it.message ?: "Couldn't remove it", Toast.LENGTH_SHORT).show() }
+                                }
+                            }
+                        },
+                    )
                 },
                 coverArt = playlist.coverArt,
                 title = playlist.name,
@@ -203,6 +247,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                         playlist.changed?.let { "Updated ${shortDate(it)}" },
                     ).joinToString(" · "),
                     if (mine && playlist.readonly) "Its songs can't be changed here: it's a smart playlist or comes from a playlist file on the server." else null,
+                    if (missing.isNotEmpty()) "${missing.size} not in the library yet" else null,
                 ),
                 songs = playlist.entry,
                 onSubtitleClick = null,
@@ -303,6 +348,9 @@ internal fun SongList(
     tint: androidx.compose.ui.graphics.Color? = null,
     /** Set on a playlist you made (its name), so its songs' ✓ doesn't just say they're in it. */
     ownPlaylist: String? = null,
+    /** Songs of a playlist the library doesn't have, shown with [missingRow] in their place among the songs. */
+    missing: List<MissingSong> = emptyList(),
+    missingRow: @Composable (MissingSong) -> Unit = {},
 ) {
     val app = LocalApp.current
     val player = app.player
@@ -354,19 +402,73 @@ internal fun SongList(
             }
         }
         aboveSongs?.invoke(this)
-        itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
-            SongRow(
-                song = song,
-                // A song you tap goes in Recent songs; Play, Shuffle and Resume put the whole page in Recently played.
-                onClick = { app.activity.song(song); player.play(songs, index, source = source) },
-                isCurrent = song.id == nowPlaying.songId,
-                showCover = showCovers,
-                onOpenAlbum = if (showCovers) nav.openAlbum else null,
-                onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
-                inOwnPlaylist = ownPlaylist,
-            )
+        val gaps = missing.groupBy { it.before.coerceAtMost(songs.size) }
+        fun gapsAt(index: Int) = gaps[index]?.forEach { m -> item(key = "missing-${m.id}") { missingRow(m) } }
+        songs.forEachIndexed { index, song ->
+            gapsAt(index)
+            item(key = "$index-${song.id}") {
+                SongRow(
+                    song = song,
+                    // A song you tap goes in Recent songs; Play, Shuffle and Resume put the whole page in Recently played.
+                    onClick = { app.activity.song(song); player.play(songs, index, source = source) },
+                    isCurrent = song.id == nowPlaying.songId,
+                    showCover = showCovers,
+                    onOpenAlbum = if (showCovers) nav.openAlbum else null,
+                    onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
+                    inOwnPlaylist = ownPlaylist,
+                )
+            }
         }
+        gapsAt(songs.size)
         footer?.invoke(this)
+    }
+}
+
+/** A song of a playlist the library doesn't have: greyed out, with Request (and Remove, on your own playlist). */
+@Composable
+private fun MissingSongRow(song: MissingSong, onRequest: suspend () -> Unit, onRemove: (() -> Unit)?) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    val t = song.track
+    val r = song.request
+    val status = when {
+        r == null -> null
+        r.status == "open" -> if (r.stage == "review" || r.stage == "approved") "On its way" else "Requested"
+        r.status == "done" -> "Arriving soon"
+        else -> null // declined: it can be asked for again
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).alpha(0.38f), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(UiSize.SongThumb).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) { Icon(painterResource(R.drawable.ic_music_note), contentDescription = "Not in the library", modifier = Modifier.size(20.dp)) }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(t.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (r?.status == "declined") "Couldn't be found" + (r.note?.let { ": $it" } ?: "")
+                    else listOfNotNull(t.artists.joinToString().ifEmpty { null }, "Not in the library").joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (status != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = if (onRemove == null) 16.dp else 0.dp)) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
+        } else {
+            FilledTonalButton(
+                onClick = { busy = true; scope.launch { onRequest(); busy = false } },
+                enabled = !busy,
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                modifier = Modifier.padding(end = if (onRemove == null) 16.dp else 0.dp),
+            ) { Text(if (r?.status == "declined") "Ask again" else "Request") }
+        }
+        onRemove?.let { IconButton(onClick = it) { Icon(Icons.Filled.Close, contentDescription = "Remove from this playlist") } }
     }
 }
 

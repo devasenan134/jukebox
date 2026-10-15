@@ -374,6 +374,28 @@ export interface ImportRow {
   choices: MixSong[]
 }
 
+/** A song of a saved playlist: one of the library's (songId), or one it doesn't have (track), kept greyed out to request. */
+export interface ImportItem {
+  songId?: string
+  track?: ImportedTrack
+  /** Already requested while checking the import. */
+  requestId?: number
+}
+
+/** A song of a playlist the library doesn't have: before the song at `before` (the end if past it), and its request. */
+export interface MissingSong {
+  id: number
+  before: number
+  track: ImportedTrack
+  request?: MusicRequest | null
+}
+
+/** A playlist's missing songs; filled: how many just arrived in the library and became songs of it (reload them). */
+export interface PlaylistMissing {
+  songs: MissingSong[]
+  filled: number
+}
+
 export interface ImportPreview {
   name: string
   /** "spotify", "apple", "youtube" or "file". */

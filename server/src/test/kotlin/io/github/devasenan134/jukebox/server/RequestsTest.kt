@@ -310,3 +310,56 @@ class MusicRequestsTest {
         assertFailsWith<ApiError> { requests.request(alice, "itunes-movie-10") } // David is in the library
     }
 }
+
+class PlaylistMissingTest {
+    private val alice = UserDto(1, "alice", "Alice")
+    private val admin = UserDto(3, "admin", "Admin")
+
+    @Test
+    fun `an import keeps its missing songs in place, they're requested, and they fill in when they arrive`(): Unit = runBlocking {
+        val db = Db(File.createTempFile("jukebox-missing", ".db").apply { delete(); deleteOnExit() }.path)
+        db.tx { listOf(1L to "alice", 3L to "admin").forEach { (id, name) -> update("INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, 0)", id, name, name) } }
+        val music = GrowingMusic()
+        val requests = MusicRequests(
+            db, music, FakeCatalog(listOf(CatalogItem("itunes-song-3", "song", "Nenjukkulle", "Kadal", 2012))), Push(db, RecordingPush()),
+            isAdmin = { it.id == 3L }, adminIds = { listOf(3L) },
+        )
+        val listening = io.github.devasenan134.jukebox.server.library.Listening(db)
+        val imports = PlaylistImports(db, music, listening, requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
+
+        val created = imports.create(
+            alice,
+            ImportCreateRequest(
+                "From Spotify",
+                items = listOf(
+                    ImportItem(track = ImportedTrack("Nenjukkulle", listOf("A.R. Rahman"), "Kadal")),
+                    ImportItem(songId = "s1"),
+                    ImportItem(track = ImportedTrack("A song nobody has")),
+                ),
+            ),
+        )
+        assertEquals(1, created.songCount)
+        assertEquals(2, created.missingCount)
+        val id = created.playlistId
+        var missing = imports.missing(alice, id)
+        assertEquals(listOf(0, 1), missing.songs.map { it.before }) // before Kanave Kanave, and at the end
+        assertEquals(listOf("s1"), listening.playlist(1, id).songIds) // players only ever see real songs
+
+        val asked = imports.requestMissing(alice, id, missing.songs[0].id)
+        assertEquals("open", asked.request!!.status)
+        assertEquals(asked.request.id, imports.missing(alice, id).songs[0].request?.id)
+
+        music.songs = music.songs + LibrarySong("s2", "Nenjukkulle", "Kadal", "m2", "", emptyList(), null, 2012, 300, "Tamil", 0, false)
+        requests.complete(admin, asked.request.id)
+        missing = imports.missing(alice, id)
+        assertEquals(1, missing.filled)
+        assertEquals(listOf("s2", "s1"), listening.playlist(1, id).songIds) // in the place it had
+        assertEquals(listOf(2), missing.songs.map { it.before })
+
+        // Taking out a song before it keeps it at the end; then it can go too.
+        listening.update(1, id, null, null, null, emptyList(), listOf(0))
+        assertEquals(listOf(1), imports.missing(alice, id).songs.map { it.before })
+        listening.removeMissing(1, id, missing.songs[0].id)
+        assertEquals(emptyList(), imports.missing(alice, id).songs)
+    }
+}

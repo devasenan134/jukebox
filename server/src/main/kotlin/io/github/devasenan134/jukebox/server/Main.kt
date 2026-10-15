@@ -330,6 +330,16 @@ fun Application.jukeboxServer(
                 call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=2592000")
                 call.respondFile(file)
             }
+            // Songs of a playlist the library doesn't have (kept from an import), to show greyed out and request.
+            route("/playlists/{id}/missing") {
+                fun importsOn() = imports ?: throw ApiError(HttpStatusCode.NotFound, "Importing is off on this server")
+                get { call.respond(importsOn().missing(call.me(), call.parameters["id"].orEmpty())) }
+                post("/{missingId}/request") { call.respond(importsOn().requestMissing(call.me(), call.parameters["id"].orEmpty(), call.longParam("missingId"))) }
+                delete("/{missingId}") {
+                    listening.removeMissing(call.me().id, call.parameters["id"].orEmpty(), call.longParam("missingId"))
+                    call.respond(HttpStatusCode.NoContent)
+                }
+            }
             // A cover for a playlist you made (kept with the rest of the artwork).
             put("/playlists/{id}/cover") {
                 pictures.setPlaylistCover(call.me(), call.parameters["id"].orEmpty(), Picture(call.receive<ByteArray>()))

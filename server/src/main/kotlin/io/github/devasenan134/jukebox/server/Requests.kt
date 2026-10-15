@@ -449,6 +449,11 @@ class MusicRequests(
         ) { it.getLong(1) }.mapNotNull { dto(it, me.id)?.copy(review = null, reviewNote = null) }
     })
 
+    /** These requests as [me] sees them (whether they asked too), by id; ones that are gone are left out. */
+    suspend fun byIds(me: UserDto, ids: List<Long>): Map<Long, MusicRequestDto> =
+        if (ids.isEmpty()) emptyMap()
+        else repaired(db.tx { ids.distinct().mapNotNull { dto(it, me.id)?.copy(review = null, reviewNote = null) } }).associateBy { it.id }
+
     /** For admins: everything waiting (oldest first), then what was answered in the last 30 days. */
     suspend fun all(me: UserDto): List<MusicRequestDto> {
         requireAdmin(me)

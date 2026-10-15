@@ -1,5 +1,5 @@
 import type {
-  CatalogResults, HomeMixes, ImportedTrack, ImportPreview, LibrarySearchResults, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist,
+  CatalogResults, HomeMixes, ImportedTrack, ImportItem, ImportPreview, LibrarySearchResults, MissingSong, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist, PlaylistMissing,
   SessionResponse, SocialUser, SongRef,
 } from './types'
 import type {
@@ -122,8 +122,13 @@ export const social = {
 
   // Importing playlists from other services or files.
   importPreview: (o: { url?: string; text?: string; name?: string }) => post<ImportPreview>('/imports/preview', o),
-  importCreate: (name: string, songIds: string[]) => post<{ playlistId: string; songCount: number }>('/imports', { name, songIds }),
+  importCreate: (name: string, items: ImportItem[]) => post<{ playlistId: string; songCount: number; missingCount: number }>('/imports', { name, items }),
   importRequest: (t: ImportedTrack) => post<MusicRequest>('/imports/request', { title: t.title, artist: t.artists[0], album: t.album, catalogId: t.catalogId }),
+
+  /** A playlist's songs the library doesn't have (kept from an import); ones that arrived are filled in first. */
+  playlistMissing: (id: string) => get<PlaylistMissing>(`/playlists/${enc(id)}/missing`),
+  requestMissing: (id: string, missingId: number) => post<MissingSong>(`/playlists/${enc(id)}/missing/${missingId}/request`),
+  removeMissing: (id: string, missingId: number) => send<void>('DELETE', `/playlists/${enc(id)}/missing/${missingId}`),
 
   /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
   search: (q: string) => get<LibrarySearchResults>(`/search?q=${enc(q)}`),

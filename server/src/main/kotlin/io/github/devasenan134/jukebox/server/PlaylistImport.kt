@@ -1,6 +1,8 @@
 package io.github.devasenan134.jukebox.server
 
 import io.github.devasenan134.jukebox.server.library.Listening
+import io.github.devasenan134.jukebox.server.library.MissingRow
+import io.github.devasenan134.jukebox.server.library.NewMissing
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.forms.submitForm
@@ -62,11 +64,26 @@ data class ImportPreview(
 @Serializable
 data class ImportPreviewRequest(val url: String? = null, val text: String? = null, val name: String? = null)
 
+/**
+ * Saving an imported playlist: [songIds] in order, or with [items] its songs in order, each a song of the library
+ * or ([track]) one it doesn't have, kept in the playlist greyed out to request ([requestId]: already requested).
+ */
 @Serializable
-data class ImportCreateRequest(val name: String, val songIds: List<String>)
+data class ImportCreateRequest(val name: String, val songIds: List<String> = emptyList(), val items: List<ImportItem>? = null)
 
 @Serializable
-data class ImportCreated(val playlistId: String, val songCount: Int)
+data class ImportItem(val songId: String? = null, val track: ImportedTrack? = null, val requestId: Long? = null)
+
+@Serializable
+data class ImportCreated(val playlistId: String, val songCount: Int, val missingCount: Int = 0)
+
+/** A song of a playlist that isn't in the library: before the song at [before] (the playlist's end if past it), and its request. */
+@Serializable
+data class MissingSong(val id: Long, val before: Int, val track: ImportedTrack, val request: MusicRequestDto? = null)
+
+/** A playlist's missing songs; [filled]: how many just arrived in the library and became songs of it (reload them). */
+@Serializable
+data class PlaylistMissing(val songs: List<MissingSong>, val filled: Int = 0)
 
 /** Asking for a song of an imported playlist that isn't in the library. */
 @Serializable
@@ -88,6 +105,7 @@ class PlaylistImports(
     private val reader: PlaylistReader,
 ) {
     private val mutex = Mutex()
+    private val json = Json { ignoreUnknownKeys = true }
     @Volatile private var matcher: ImportMatcher? = null
 
     suspend fun preview(request: ImportPreviewRequest): ImportPreview {
@@ -110,13 +128,75 @@ class PlaylistImports(
     }
 
     suspend fun create(me: UserDto, request: ImportCreateRequest): ImportCreated {
-        val ids = request.songIds.distinct().take(MAX_TRACKS)
-        if (ids.isEmpty()) throw ApiError(HttpStatusCode.BadRequest, "No songs to save")
+        val items = (request.items ?: request.songIds.map { ImportItem(songId = it) }).take(MAX_TRACKS)
+        if (items.none { it.songId != null || it.track != null }) throw ApiError(HttpStatusCode.BadRequest, "No songs to save")
         val snapshot = music.snapshot() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "The library isn't ready yet")
-        val known = ids.filter { it in snapshot.index }
-        val playlist = listening.create(me.id, request.name.ifBlank { "Imported playlist" }, known)
-        return ImportCreated(playlist.id, known.size)
+        val m = matcher()
+        val known = mutableListOf<String>()
+        val missing = mutableListOf<NewMissing>()
+        for (item in items) {
+            val id = item.songId
+            when {
+                id != null -> if (id in snapshot.index && id !in known) known += id
+                item.track != null -> missing += NewMissing(
+                    known.size, json.encodeToString(ImportedTrack.serializer(), item.track),
+                    // What the library offered for it then and wasn't taken: never filled in with one of those later.
+                    notIds = m?.match(item.track)?.let { r -> listOfNotNull(r.match?.id) + r.choices.map { it.id } }.orEmpty().distinct(),
+                    requestId = item.requestId,
+                )
+            }
+        }
+        if (known.isEmpty() && missing.isEmpty()) throw ApiError(HttpStatusCode.BadRequest, "No songs to save")
+        val playlist = listening.create(me.id, request.name.ifBlank { "Imported playlist" }, known, missing)
+        return ImportCreated(playlist.id, known.size, missing.size)
     }
+
+    /**
+     * The songs of a playlist the library didn't have, with their requests. Those that are in the library now (their
+     * request was filled, or a new song is surely them) become songs of the playlist first.
+     */
+    suspend fun missing(me: UserDto, playlistId: String): PlaylistMissing {
+        val id = listening.playlist(me.id, playlistId).id
+        var rows = listening.missing(id)
+        if (rows.isEmpty()) return PlaylistMissing(emptyList())
+        val snapshot = music.snapshot()
+        var asked = requests?.byIds(me, rows.mapNotNull { it.requestId }).orEmpty()
+        val fills = HashMap<Long, String>()
+        if (snapshot != null) {
+            rows.forEach { r -> r.requestId?.let(asked::get)?.takeIf { it.status == "done" }?.songId?.takeIf { it in snapshot.index }?.let { fills[r.id] = it } }
+            // Look through the library again only when it changed since the last look.
+            val unchecked = rows.filter { it.id !in fills && it.checkedVersion != snapshot.version }
+            matcher()?.takeIf { unchecked.isNotEmpty() }?.let { m ->
+                val tracks = unchecked.associate { it.id to track(it) }
+                val byIsrc = isrcMatches(tracks.values.mapNotNull { it.isrc })
+                unchecked.forEach { r ->
+                    val t = tracks.getValue(r.id)
+                    val row = m.match(t, t.isrc?.let { byIsrc[it.uppercase()] })
+                    row.match?.takeIf { row.sure && it.id !in r.notIds }?.let { fills[r.id] = it.id }
+                }
+                listening.missingChecked(unchecked.map { it.id }.filter { it !in fills }, snapshot.version)
+            }
+        }
+        if (fills.isNotEmpty()) {
+            log.info("Playlist $id: ${fills.size} missing songs are in the library now")
+            listening.fillMissing(id, fills)
+            rows = listening.missing(id)
+            asked = asked.filterKeys { k -> rows.any { it.requestId == k } }
+        }
+        return PlaylistMissing(rows.map { MissingSong(it.id, it.slot, track(it), it.requestId?.let(asked::get)) }, fills.size)
+    }
+
+    /** Requests a missing song of a playlist, and remembers the request with it (so it's filled in when it arrives). */
+    suspend fun requestMissing(me: UserDto, playlistId: String, missingId: Long): MissingSong {
+        val id = listening.playlist(me.id, playlistId).id
+        val row = listening.missing(id).firstOrNull { it.id == missingId } ?: throw ApiError(HttpStatusCode.NotFound, "That song isn't in the playlist")
+        val t = track(row)
+        val asked = request(me, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId))
+        listening.missingRequested(id, row.id, asked.id)
+        return MissingSong(row.id, row.slot, t, asked)
+    }
+
+    private fun track(row: MissingRow) = json.decodeFromString(ImportedTrack.serializer(), row.trackJson)
 
     /** Requests a song that isn't in the library: by its catalog id, or found in the catalog by its name. */
     suspend fun request(me: UserDto, wanted: ImportRequestMusic): MusicRequestDto {

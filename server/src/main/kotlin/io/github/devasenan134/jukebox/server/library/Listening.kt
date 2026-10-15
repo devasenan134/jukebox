@@ -7,6 +7,8 @@ import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
 import io.github.devasenan134.jukebox.server.update
 import io.ktor.http.HttpStatusCode
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
@@ -36,6 +38,39 @@ class PlaylistRow(
     /** Its own cover, if its owner set one (an artwork id). */
     val coverId: String? = null,
 )
+
+/** A song to keep in a new playlist although the library doesn't have it: before the song at [slot]. */
+class NewMissing(val slot: Int, val trackJson: String, val notIds: List<String> = emptyList(), val requestId: Long? = null)
+
+/** A missing song of a playlist as kept: where, what (JSON), the songs not to match it to, its request, when last looked for. */
+class MissingRow(val id: Long, val slot: Int, val trackJson: String, val notIds: List<String>, val requestId: Long?, val checkedVersion: String?)
+
+/** Where missing songs go when a playlist's songs change. A slot is the position of the song a missing one is before. */
+object MissingSlots {
+    /** After the songs were reordered or trimmed: before the same song again; at the end if it's gone and nothing followed. */
+    fun reordered(before: List<String>, after: List<String>, slot: Int): Int {
+        // The song it was before, or the next one that's still there.
+        for (i in slot until before.size) after.indexOf(before[i]).takeIf { it >= 0 }?.let { return it }
+        return after.size
+    }
+
+    /** Puts the songs found for missing ones ([fills]) in their place; the new songs and the remaining gaps' slots. */
+    fun fill(songs: List<String>, gaps: List<Pair<Long, Int>>, fills: Map<Long, String>): Pair<List<String>, List<Pair<Long, Int>>> {
+        val out = mutableListOf<String>()
+        val slots = mutableListOf<Pair<Long, Int>>()
+        val sorted = gaps.sortedWith(compareBy({ it.second }, { it.first }))
+        var g = 0
+        fun gapsBefore(i: Int) {
+            while (g < sorted.size && (sorted[g].second <= i || i == songs.size)) {
+                val (gap, _) = sorted[g++]
+                fills[gap]?.let { out += it } ?: run { slots += gap to out.size }
+            }
+        }
+        songs.forEachIndexed { i, s -> gapsBefore(i); out += s }
+        gapsBefore(songs.size)
+        return out to slots
+    }
+}
 
 /**
  * Likes, play counts and playlists: what people do with the music. Every change is also written to the
@@ -89,12 +124,19 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
 
     suspend fun playlist(userId: Long, id: String): PlaylistRow = db.tx { load(mapped(id))?.takeIf { it.ownerId == userId || it.public } } ?: notFound()
 
-    suspend fun create(userId: Long, name: String, songIds: List<String>): PlaylistRow = db.tx {
+    /** A new playlist of [songIds], and with [missing] the songs it should have that the library doesn't (yet). */
+    suspend fun create(userId: Long, name: String, songIds: List<String>, missing: List<NewMissing> = emptyList()): PlaylistRow = db.tx {
         val id = newId()
         val t = clock()
         insert("INSERT INTO playlists (id, owner_id, name, public, created_at, changed_at) VALUES (?, ?, ?, 0, ?, ?)", id, userId, name.trim().take(100).ifEmpty { "New playlist" }, t, t)
         songIds.forEachIndexed { i, s -> update("INSERT INTO playlist_entries VALUES (?, ?, ?, ?)", id, i, recording(s), t) }
-        event(userId, "playlist_created", t) { put("playlist", id); put("songs", songIds.size) }
+        missing.forEach { m ->
+            insert(
+                "INSERT INTO playlist_missing (playlist_id, slot, track_json, not_ids, request_id) VALUES (?, ?, ?, ?, ?)",
+                id, m.slot.coerceIn(0, songIds.size), m.trackJson, Json.encodeToString(m.notIds), m.requestId,
+            )
+        }
+        event(userId, "playlist_created", t) { put("playlist", id); put("songs", songIds.size); if (missing.isNotEmpty()) put("missing", missing.size) }
         load(id)!!
     }
 
@@ -102,8 +144,12 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
     suspend fun replace(userId: Long, id: String, songIds: List<String>): PlaylistRow = db.tx {
         own(userId, id)
         val t = clock()
+        val before = entries(id)
+        val after = songIds.map { recording(it) }
         update("DELETE FROM playlist_entries WHERE playlist_id = ?", id)
-        songIds.forEachIndexed { i, s -> update("INSERT INTO playlist_entries VALUES (?, ?, ?, ?)", id, i, recording(s), t) }
+        after.forEachIndexed { i, s -> update("INSERT INTO playlist_entries VALUES (?, ?, ?, ?)", id, i, s, t) }
+        // Missing songs stay before the song they were before, wherever it went.
+        gaps(id).forEach { (gap, slot) -> moveGap(gap, MissingSlots.reordered(before, after, slot)) }
         update("UPDATE playlists SET changed_at = ? WHERE id = ?", t, id)
         event(userId, "playlist_changed", t) { put("playlist", id) }
         load(id)!!
@@ -118,10 +164,12 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
         public?.let { update("UPDATE playlists SET public = ? WHERE id = ?", if (it) 1 else 0, id) }
         if (add.isNotEmpty() || removePositions.isNotEmpty()) {
             val songs = query("SELECT recording_id FROM playlist_entries WHERE playlist_id = ? ORDER BY position", id) { it.getString(1) }.toMutableList()
-            removePositions.toSet().sortedDescending().filter { it in songs.indices }.forEach { songs.removeAt(it) }
+            val removed = removePositions.toSet().filter { it in songs.indices }
+            removed.sortedDescending().forEach { songs.removeAt(it) }
             songs += add.map { recording(it) }
             update("DELETE FROM playlist_entries WHERE playlist_id = ?", id)
             songs.forEachIndexed { i, s -> update("INSERT INTO playlist_entries VALUES (?, ?, ?, ?)", id, i, s, t) }
+            if (removed.isNotEmpty()) gaps(id).forEach { (gap, slot) -> moveGap(gap, slot - removed.count { it < slot }) }
         }
         update("UPDATE playlists SET changed_at = ? WHERE id = ?", t, id)
         event(userId, "playlist_changed", t) { put("playlist", id); put("added", add.size); put("removed", removePositions.size) }
@@ -134,6 +182,57 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
         update("DELETE FROM liked_playlists WHERE playlist_id = ?", id)
         event(userId, "playlist_deleted") { put("playlist", id) }
     }
+
+    // ---------- songs of a playlist the library doesn't have ----------
+
+    /** The playlist's missing songs, in order. */
+    suspend fun missing(playlistId: String): List<MissingRow> = db.read {
+        query(
+            "SELECT id, slot, track_json, not_ids, request_id, checked_version FROM playlist_missing WHERE playlist_id = ? ORDER BY slot, id", playlistId,
+        ) { MissingRow(it.getLong(1), it.getInt(2), it.getString(3), Json.decodeFromString(it.getString(4)), (it.getObject(5) as Number?)?.toLong(), it.getString(6)) }
+    }
+
+    /** Remembers the request made for a missing song. */
+    suspend fun missingRequested(playlistId: String, missingId: Long, requestId: Long) = db.tx {
+        update("UPDATE playlist_missing SET request_id = ? WHERE id = ? AND playlist_id = ?", requestId, missingId, playlistId)
+    }
+
+    /** The library at [version] was looked through for these missing songs. */
+    suspend fun missingChecked(ids: List<Long>, version: String) = db.tx {
+        ids.forEach { update("UPDATE playlist_missing SET checked_version = ? WHERE id = ?", version, it) }
+    }
+
+    /** Takes a missing song out of a playlist [userId] made. */
+    suspend fun removeMissing(userId: Long, playlistId: String, missingId: Long) = db.tx {
+        own(userId, playlistId)
+        if (update("DELETE FROM playlist_missing WHERE id = ? AND playlist_id = ?", missingId, playlistId) == 0) throw ApiError(HttpStatusCode.NotFound, "That song isn't in the playlist")
+        update("UPDATE playlists SET changed_at = ? WHERE id = ?", clock(), playlistId)
+    }
+
+    /** Missing songs that are in the library now ([fills]: missing id to song id) become songs of the playlist, in their place. */
+    suspend fun fillMissing(playlistId: String, fills: Map<Long, String>) = db.tx {
+        val ownerId = queryOne("SELECT owner_id FROM playlists WHERE id = ?", playlistId) { it.getLong(1) } ?: return@tx
+        val gaps = gaps(playlistId)
+        val known = fills.filterKeys { k -> gaps.any { it.first == k } }.mapValues { recording(it.value) }
+        if (known.isEmpty()) return@tx
+        val t = clock()
+        val (songs, slots) = MissingSlots.fill(entries(playlistId), gaps, known)
+        update("DELETE FROM playlist_entries WHERE playlist_id = ?", playlistId)
+        songs.forEachIndexed { i, s -> update("INSERT INTO playlist_entries VALUES (?, ?, ?, ?)", playlistId, i, s, t) }
+        known.keys.forEach { update("DELETE FROM playlist_missing WHERE id = ?", it) }
+        slots.forEach { (gap, slot) -> moveGap(gap, slot) }
+        update("UPDATE playlists SET changed_at = ? WHERE id = ?", t, playlistId)
+        event(ownerId, "playlist_changed", t) { put("playlist", playlistId); put("filled", known.size) }
+    }
+
+    private fun Connection.entries(id: String): List<String> =
+        query("SELECT recording_id FROM playlist_entries WHERE playlist_id = ? ORDER BY position", id) { it.getString(1) }
+
+    /** Missing song ids and their slots, in order. */
+    private fun Connection.gaps(id: String): List<Pair<Long, Int>> =
+        query("SELECT id, slot FROM playlist_missing WHERE playlist_id = ? ORDER BY slot, id", id) { it.getLong(1) to it.getInt(2) }
+
+    private fun Connection.moveGap(gap: Long, slot: Int) = update("UPDATE playlist_missing SET slot = ? WHERE id = ?", maxOf(0, slot), gap)
 
     private fun Connection.own(userId: Long, id: String) {
         val owner = queryOne("SELECT owner_id FROM playlists WHERE id = ?", id) { it.getLong(1) } ?: notFound()

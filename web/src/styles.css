@@ -1138,6 +1138,19 @@ a.nav-item:hover {
   font-variant-numeric: tabular-nums;
   color: var(--on-surface-variant);
 }
+/* A song of a playlist that isn't in the library: greyed out, but its Request and Remove aren't. */
+.song-row.missing {
+  cursor: default;
+}
+.song-row.missing:hover {
+  background: none;
+}
+.song-row.missing > :not(.missing-action) {
+  opacity: 0.38;
+}
+.song-row.missing .missing-action {
+  margin-left: 8px;
+}
 @media (min-width: 900px) {
   .tracks {
     padding: 0 16px;
