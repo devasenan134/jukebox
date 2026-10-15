@@ -24,7 +24,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import io.github.devasenan134.isaipetti.data.MissingSong
-import io.github.devasenan134.isaipetti.data.SocialException
 import androidx.compose.material.icons.filled.PlayArrow
 import io.github.devasenan134.isaipetti.data.toAlbum
 import androidx.compose.material3.Button
@@ -178,8 +177,15 @@ fun PlaylistScreen(id: String, nav: Nav) {
     // Songs it should have that the library doesn't (kept from an import), greyed out in their place.
     var missing by remember(id) { mutableStateOf<List<MissingSong>>(emptyList()) }
     var missingRound by remember { mutableStateOf(0) }
-    // Asking for every missing song not asked for yet, in turn: how many are done, of how many.
-    var requestingAll by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var requestingAll by remember { mutableStateOf(false) }
+    // While some wait in the server's queue to be requested, look again now and then.
+    val waiting = missing.any { it.queued }
+    LaunchedEffect(id, waiting) {
+        while (waiting) {
+            kotlinx.coroutines.delay(10_000)
+            missingRound++
+        }
+    }
     LaunchedEffect(id, missingRound) {
         val found = runCatching { app.social.api.playlistMissing(id) }.getOrNull() ?: return@LaunchedEffect
         missing = found.songs
@@ -218,51 +224,42 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 },
                 missing = missing,
                 aboveSongs = {
-                    val toRequest = missing.filter { it.request == null || it.request.status == "declined" }
-                    if (toRequest.isNotEmpty() || requestingAll != null) item(key = "request-all") {
+                    val toRequest = missing.filter { !it.queued && (it.request == null || it.request.status == "declined") }
+                    val queued = missing.count { it.queued }
+                    if (toRequest.isNotEmpty() || queued > 0) item(key = "request-all") {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            val progress = requestingAll
-                            if (progress != null) {
+                            if (toRequest.isEmpty()) {
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                Text("Requesting ${progress.first + 1} of ${progress.second}…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    "Requesting $queued ${if (queued == 1) "song" else "songs"}, a few a minute.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
                             } else {
                                 Text(
-                                    if (toRequest.size == 1) "1 song isn't in the library." else "${toRequest.size} songs aren't in the library.",
+                                    (if (toRequest.size == 1) "1 song isn't requested yet." else "${toRequest.size} songs aren't requested yet.") +
+                                        if (queued > 0) " $queued being requested." else "",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.weight(1f),
                                 )
                                 FilledTonalButton(onClick = {
-                                    requestingAll = 0 to toRequest.size
+                                    requestingAll = true
                                     scope.launch {
-                                        var asked = 0
-                                        var failed = 0
-                                        for (m in toRequest) {
-                                            val result = runCatching { app.social.api.requestMissing(playlist.id, m.id) }
-                                            result.onSuccess { made -> missing = missing.map { if (it.id == m.id) made else it }; asked++ }
-                                            result.onFailure { failed++ }
-                                            // Too many requests waiting: the rest would fail the same way.
-                                            val tooMany = (result.exceptionOrNull() as? SocialException)?.takeIf { it.code == 429 }
-                                            if (tooMany != null) {
-                                                Toast.makeText(context, tooMany.message, Toast.LENGTH_LONG).show()
-                                                break
+                                        runCatching { app.social.api.requestAllMissing(playlist.id) }
+                                            .onSuccess {
+                                                missing = it.songs
+                                                val n = toRequest.size
+                                                Toast.makeText(context, "Requesting ${if (n == 1) "it" else "$n songs"}, a few a minute. They join the playlist when they arrive", Toast.LENGTH_LONG).show()
                                             }
-                                            requestingAll = (asked + failed) to toRequest.size
-                                        }
-                                        requestingAll = null
-                                        val text = when {
-                                            asked > 0 -> "Requested $asked ${if (asked == 1) "song" else "songs"}. They join the playlist when they arrive" +
-                                                if (failed > 0) ". $failed couldn't be requested" else ""
-                                            failed > 0 -> "Couldn't request them. They may not be in the catalog"
-                                            else -> null
-                                        }
-                                        text?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+                                            .onFailure { Toast.makeText(context, it.message ?: "Couldn't request them", Toast.LENGTH_LONG).show() }
+                                        requestingAll = false
                                     }
-                                }, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Request all") }
+                                }, enabled = !requestingAll, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Request all") }
                             }
                         }
                     }
@@ -274,7 +271,8 @@ fun PlaylistScreen(id: String, nav: Nav) {
                             runCatching { app.social.api.requestMissing(playlist.id, m.id) }
                                 .onSuccess { asked ->
                                     missing = missing.map { if (it.id == m.id) asked else it }
-                                    Toast.makeText(context, "Requested. It joins the playlist when it arrives", Toast.LENGTH_SHORT).show()
+                                    val text = if (asked.queued) "The music catalog is busy. It's queued and will be requested in a minute" else "Requested. It joins the playlist when it arrives"
+                                    Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
                                 }
                                 .onFailure { Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show() }
                         },
@@ -485,6 +483,7 @@ private fun MissingSongRow(song: MissingSong, onRequest: suspend () -> Unit, onR
     val t = song.track
     val r = song.request
     val status = when {
+        song.queued -> "Queued"
         r == null -> null
         r.status == "open" -> if (r.stage == "review" || r.stage == "approved") "On its way" else "Requested"
         r.status == "done" -> "Arriving soon"
@@ -500,7 +499,7 @@ private fun MissingSongRow(song: MissingSong, onRequest: suspend () -> Unit, onR
                 Text(t.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
                     if (r?.status == "declined") "Couldn't be found" + (r.note?.let { ": $it" } ?: "")
-                    else listOfNotNull(t.artists.joinToString().ifEmpty { null }, "Not in the library").joinToString(" · "),
+                    else song.note ?: listOfNotNull(t.artists.joinToString().ifEmpty { null }, "Not in the library").joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

@@ -171,6 +171,9 @@ interface Catalog {
 
     /** One item by its [CatalogItem.id]. */
     suspend fun lookup(id: String): CatalogItem?
+
+    /** Whether it's making no more calls for now (so an empty answer may only mean "not now"). */
+    suspend fun busy(): Boolean = false
 }
 
 /**
@@ -208,6 +211,12 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
         mutex.withLock { items[id] }?.let { return it }
         val number = id.substringAfterLast('-').toLongOrNull() ?: return null
         return call("lookup", "id" to number.toString())?.firstOrNull { it.id == id }
+    }
+
+    override suspend fun busy(): Boolean = mutex.withLock {
+        val t = now()
+        while (calls.isNotEmpty() && calls.first() < t - 60_000) calls.removeFirst()
+        calls.size >= MAX_CALLS_PER_MINUTE
     }
 
     /** One call to the API, or null if it failed or the minute's calls are used up. */
@@ -341,7 +350,7 @@ class MusicRequests(
     }
 
     suspend fun request(me: UserDto, catalogId: String): MusicRequestDto {
-        val item = catalog.lookup(catalogId.take(100)) ?: throw ApiError(HttpStatusCode.NotFound, "Couldn't find that in the catalog")
+        val item = catalog.lookup(catalogId.take(100)) ?: throw notFoundOrBusy()
         if (shelf()?.find(item) != null) throw ApiError(HttpStatusCode.Conflict, "It's already in the library")
         val key = matchKey(item)
         val (id, isNew) = db.tx {
@@ -374,6 +383,10 @@ class MusicRequests(
         }
         return db.tx { dto(id, me.id) }!!
     }
+
+    /** The catalog didn't have it, or (when it's making no more calls for now) couldn't be asked. */
+    suspend fun notFoundOrBusy(what: String = "Couldn't find that in the catalog"): ApiError =
+        if (catalog.busy()) ApiError(HttpStatusCode.ServiceUnavailable, CATALOG_BUSY) else ApiError(HttpStatusCode.NotFound, what)
 
     /** Takes back your request; one nobody wants any more goes away. */
     suspend fun cancel(me: UserDto, id: Long) = db.tx {
@@ -708,6 +721,7 @@ class MusicRequests(
 
     companion object {
         const val MAX_OPEN = 20
+        const val CATALOG_BUSY = "The music catalog is busy. Try again in a minute"
         /** A file name in a request's folder: no folders, nothing hidden. */
         private val SAFE_FILE = Regex("""^[^/\\\u0000.][^/\\\u0000]{0,200}$""")
         private val VERSION = Regex("""\b(cover|karaoke|slowed|reverb|lo-?fi|8d|sped up)\b""", RegexOption.IGNORE_CASE)

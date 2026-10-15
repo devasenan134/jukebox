@@ -39,11 +39,19 @@ class PlaylistRow(
     val coverId: String? = null,
 )
 
+private const val MISSING_COLUMNS = "id, slot, track_json, not_ids, request_id, checked_version, queued_by, request_note, playlist_id"
+
 /** A song to keep in a new playlist although the library doesn't have it: before the song at [slot]. */
 class NewMissing(val slot: Int, val trackJson: String, val notIds: List<String> = emptyList(), val requestId: Long? = null)
 
-/** A missing song of a playlist as kept: where, what (JSON), the songs not to match it to, its request, when last looked for. */
-class MissingRow(val id: Long, val slot: Int, val trackJson: String, val notIds: List<String>, val requestId: Long?, val checkedVersion: String?)
+/**
+ * A missing song of a playlist as kept: where, what (JSON), the songs not to match it to, its request, when last
+ * looked for, who queued it to be requested ([queuedBy]), and why it couldn't be requested or waits ([note]).
+ */
+class MissingRow(
+    val id: Long, val slot: Int, val trackJson: String, val notIds: List<String>, val requestId: Long?, val checkedVersion: String?,
+    val queuedBy: Long? = null, val note: String? = null, val playlistId: String = "",
+)
 
 /** Where missing songs go when a playlist's songs change. A slot is the position of the song a missing one is before. */
 object MissingSlots {
@@ -187,14 +195,35 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
 
     /** The playlist's missing songs, in order. */
     suspend fun missing(playlistId: String): List<MissingRow> = db.read {
-        query(
-            "SELECT id, slot, track_json, not_ids, request_id, checked_version FROM playlist_missing WHERE playlist_id = ? ORDER BY slot, id", playlistId,
-        ) { MissingRow(it.getLong(1), it.getInt(2), it.getString(3), Json.decodeFromString(it.getString(4)), (it.getObject(5) as Number?)?.toLong(), it.getString(6)) }
+        query("SELECT $MISSING_COLUMNS FROM playlist_missing WHERE playlist_id = ? ORDER BY slot, id", playlistId) { missingRow(it) }
     }
+
+    /** [userId] wants these missing songs requested: they wait in the queue (see PlaylistImports.requestQueued). */
+    suspend fun queueMissing(playlistId: String, ids: List<Long>, userId: Long) = db.tx {
+        ids.forEach { update("UPDATE playlist_missing SET queued_by = ?, request_note = NULL WHERE id = ? AND playlist_id = ?", userId, it, playlistId) }
+    }
+
+    /** The missing song that has waited longest in the queue, leaving out those queued by [skipUsers]. */
+    suspend fun nextQueued(skipUsers: Set<Long>): MissingRow? = db.read {
+        query("SELECT $MISSING_COLUMNS FROM playlist_missing WHERE queued_by IS NOT NULL ORDER BY id") { missingRow(it) }
+            .firstOrNull { it.queuedBy !in skipUsers }
+    }
+
+    /** A queued song was requested ([requestId]), or couldn't be ([note], and with [keepQueued] it's tried again later). */
+    suspend fun queueResult(id: Long, requestId: Long? = null, note: String? = null, keepQueued: Boolean = false) = db.tx {
+        if (requestId != null) update("UPDATE playlist_missing SET request_id = ?, queued_by = NULL, request_note = NULL WHERE id = ?", requestId, id)
+        else if (keepQueued) update("UPDATE playlist_missing SET request_note = ? WHERE id = ?", note, id)
+        else update("UPDATE playlist_missing SET queued_by = NULL, request_note = ? WHERE id = ?", note, id)
+    }
+
+    private fun missingRow(it: java.sql.ResultSet) = MissingRow(
+        it.getLong(1), it.getInt(2), it.getString(3), Json.decodeFromString(it.getString(4)), (it.getObject(5) as Number?)?.toLong(), it.getString(6),
+        (it.getObject(7) as Number?)?.toLong(), it.getString(8), it.getString(9),
+    )
 
     /** Remembers the request made for a missing song. */
     suspend fun missingRequested(playlistId: String, missingId: Long, requestId: Long) = db.tx {
-        update("UPDATE playlist_missing SET request_id = ? WHERE id = ? AND playlist_id = ?", requestId, missingId, playlistId)
+        update("UPDATE playlist_missing SET request_id = ?, queued_by = NULL, request_note = NULL WHERE id = ? AND playlist_id = ?", requestId, missingId, playlistId)
     }
 
     /** The library at [version] was looked through for these missing songs. */

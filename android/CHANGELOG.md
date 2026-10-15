@@ -8,6 +8,16 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Request All, Queued (0.21.1)
+
+### Improved
+- **Request all goes through a queue.** The music catalog answers only about 20 searches a minute, so requesting many songs at once failed after the first few. Now Request all hands them to the server, which requests them a few a minute; rows show Queued until each is requested, and the playlist updates as it goes. It also waits (instead of failing) when you have too many requests open.
+- **Importing:** a third choice, **Keep and request all**, keeps the missing songs and queues them all when you save.
+- **A busy catalog isn't "not found".** A single Request while the catalog is busy is queued instead, and the reason a song couldn't be requested shows under it.
+
+### Server
+- `POST /playlists/{id}/missing/request-all`, `requestAll` on `POST /imports`, and a background queue for missing songs (schema 28). Catalog searches skipped for the minute's limit answer 503 ("busy") instead of 404.
+
 ## Sure Matches (0.21.0)
 
 ### New

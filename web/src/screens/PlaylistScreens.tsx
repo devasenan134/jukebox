@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { MissingSong, Playlist, PlaylistMissing, Song } from '../api/types'
 import { mixSongToSong, mixSource, MIX_AUTHOR } from '../api/types'
-import { social, SocialError } from '../api/social'
+import { social } from '../api/social'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { activity, useRecentPlaylists } from '../state/history'
@@ -78,8 +78,15 @@ export function PlaylistScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filled, id])
   const mineNow = data.data != null && data.data.owner === username
-  // Asking for every missing song not asked for yet, in turn: how far it got.
-  const [requestingAll, setRequestingAll] = useState<{ done: number; total: number } | null>(null)
+  const [requestingAll, setRequestingAll] = useState(false)
+  // While some wait in the server's queue to be requested, look again now and then.
+  const waiting = (missing.data?.songs ?? []).some((m) => m.queued)
+  useEffect(() => {
+    if (!waiting) return
+    const t = setInterval(() => missing.retry(), 10_000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting, id])
   // How many friends liked a playlist you made (your own like doesn't count).
   const likeTotal = useLoad<Record<string, number>>(['playlist-likes', id, mineNow], () => (mineNow ? social.playlistLikeCounts([id]) : Promise.resolve({})), 30_000).data?.[id] ?? 0
   const cover = usePhotoPicker({
@@ -126,37 +133,22 @@ export function PlaylistScreen() {
     try {
       const asked = await social.requestMissing(id, m.id)
       missing.set({ songs: gaps.map((g) => (g.id === m.id ? asked : g)), filled: 0 })
-      toast('Requested. It joins the playlist when it arrives')
+      toast(asked.queued ? "The music catalog is busy. It's queued and will be requested in a minute" : 'Requested. It joins the playlist when it arrives')
     } catch (e) {
       toast((e as Error).message || "Couldn't request it", true)
     }
   }
-  const toRequest = gaps.filter((m) => !m.request || m.request.status === 'declined')
+  const toRequest = gaps.filter((m) => !m.queued && (!m.request || m.request.status === 'declined'))
+  const queued = gaps.filter((m) => m.queued).length
   const requestAll = async () => {
-    const list = toRequest
-    let current = gaps
-    let asked = 0
-    let failed = 0
-    setRequestingAll({ done: 0, total: list.length })
-    for (const m of list) {
-      try {
-        const made = await social.requestMissing(id, m.id)
-        current = current.map((g) => (g.id === m.id ? made : g))
-        missing.set({ songs: current, filled: 0 })
-        asked++
-      } catch (e) {
-        failed++
-        // Too many requests waiting: the rest would fail the same way.
-        if (e instanceof SocialError && e.code === 429) {
-          toast(e.message, true)
-          break
-        }
-      }
-      setRequestingAll({ done: asked + failed, total: list.length })
+    setRequestingAll(true)
+    try {
+      missing.set(await social.requestAllMissing(id))
+      toast(`Requesting ${toRequest.length === 1 ? 'it' : `${toRequest.length} songs`}, a few a minute. They join the playlist when they arrive`)
+    } catch (e) {
+      toast((e as Error).message || "Couldn't request them", true)
     }
-    setRequestingAll(null)
-    if (asked) toast(`Requested ${asked} ${asked === 1 ? 'song' : 'songs'}. They join the playlist when they arrive${failed ? `. ${failed} couldn't be requested` : ''}`, failed > 0)
-    else if (failed) toast("Couldn't request them. They may not be in the catalog", true)
+    setRequestingAll(false)
   }
   const removeMissing = (m: MissingSong) => change(() => social.removeMissing(id, m.id), 'Removed from this playlist')
   const missingRow = (m: MissingSong) => (
@@ -216,14 +208,13 @@ export function PlaylistScreen() {
               <span className="muted">{gaps.length ? 'None of its songs are in the library yet.' : mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
             </div>
           )}
-          {(toRequest.length > 0 || requestingAll) && (
+          {(toRequest.length > 0 || queued > 0) && (
             <div className="body-medium muted" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px 12px', flexWrap: 'wrap' }}>
-              {requestingAll ? (
-                <><Spinner size={18} />Requesting {requestingAll.done + 1} of {requestingAll.total}…</>
-              ) : (
+              {queued > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner size={16} />Requesting {queued} {queued === 1 ? 'song' : 'songs'}, a few a minute.</span>}
+              {toRequest.length > 0 && (
                 <>
-                  {toRequest.length === 1 ? "1 song isn't in the library." : `${toRequest.length} songs aren't in the library.`}
-                  <button className="btn tonal small" onClick={() => void requestAll()}>Request all</button>
+                  {toRequest.length === 1 ? "1 song isn't requested yet." : `${toRequest.length} songs aren't requested yet.`}
+                  <button className="btn tonal small" disabled={requestingAll} onClick={() => void requestAll()}>Request all</button>
                 </>
               )}
             </div>
@@ -271,7 +262,8 @@ function MissingRow({ song, onRequest, onRemove }: { song: MissingSong; onReques
   const t = song.track
   const r = song.request
   const [busy, setBusy] = useState(false)
-  const status = !r ? null
+  const status = song.queued ? 'Queued'
+    : !r ? null
     : r.status === 'open' ? (r.stage === 'review' || r.stage === 'approved' ? 'On its way' : 'Requested')
       : r.status === 'done' ? 'Arriving soon'
         : null // declined: it can be asked for again
@@ -281,7 +273,7 @@ function MissingRow({ song, onRequest, onRemove }: { song: MissingSong; onReques
       <div className="text">
         <div className="title body-large ellipsis">{t.title}</div>
         <div className="body-small muted ellipsis">
-          {r?.status === 'declined' ? `Couldn't be found${r.note ? `: ${r.note}` : ''}` : [t.artists.join(', '), 'Not in the library'].filter(Boolean).join(' · ')}
+          {r?.status === 'declined' ? `Couldn't be found${r.note ? `: ${r.note}` : ''}` : song.note ?? [t.artists.join(', '), 'Not in the library'].filter(Boolean).join(' · ')}
         </div>
       </div>
       <div className="album-col ellipsis">{t.album}</div>

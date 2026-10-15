@@ -574,7 +574,16 @@ data class ImportItem(val songId: String? = null, val track: ImportedTrack? = nu
 
 /** A song of a playlist the library doesn't have: before the song at [before] (the end if past it), and its request. */
 @Serializable
-data class MissingSong(val id: Long, val before: Int, val track: ImportedTrack, val request: MusicRequest? = null)
+data class MissingSong(
+    val id: Long,
+    val before: Int,
+    val track: ImportedTrack,
+    val request: MusicRequest? = null,
+    /** Waiting in the server's queue to be requested (it goes at the pace the music catalog allows). */
+    val queued: Boolean = false,
+    /** Why it couldn't be requested, or why it's still waiting. */
+    val note: String? = null,
+)
 
 /** A playlist's missing songs; [filled]: how many just arrived in the library and became songs of it (reload them). */
 @Serializable

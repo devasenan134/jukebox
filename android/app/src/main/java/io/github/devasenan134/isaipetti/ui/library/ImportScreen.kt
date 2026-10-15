@@ -50,7 +50,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.devasenan134.isaipetti.data.ImportItem
-import io.github.devasenan134.isaipetti.data.SocialException
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.filled.PlayArrow
@@ -212,16 +211,14 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
     val chosen = remember { mutableStateListOf<MixSong?>().apply { addAll(preview.rows.map { it.match }) } }
     val included = remember { mutableStateListOf<Boolean>().apply { addAll(preview.rows.map { it.match != null }) } }
     val requested = remember { mutableStateMapOf<Int, Long?>() } // null: asking, else the request's id
-    // Songs the library doesn't have: left out, or kept in their place (greyed out, to request).
-    var keepMissing by remember { mutableStateOf(false) }
+    // Songs the library doesn't have: left out, kept in their place (greyed out, to request), or kept and all requested.
+    var missingMode by remember { mutableStateOf("leave") }
+    val keepMissing = missingMode != "leave"
     var saving by remember { mutableStateOf(false) }
-    // Asking for every missing song in turn: how many are done, of how many (null when not asking).
-    var requestingAll by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     // Going through the matches it wasn't sure of, one at a time.
     var reviewing by remember { mutableStateOf(false) }
     val found = preview.rows.count { it.match != null }
     val unsure = preview.rows.indices.filter { i -> preview.rows[i].let { (it.match != null && !it.sure) || (it.match == null && it.choices.isNotEmpty()) } }
-    val toRequest = preview.rows.indices.filter { chosen[it] == null && it !in requested }
     val songs = chosen.indices.mapNotNull { i -> chosen[i]?.takeIf { included[i] } }
     val missing = chosen.count { it == null }
     val items = preview.rows.indices.mapNotNull { i ->
@@ -257,53 +254,22 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                         Text("Check ${unsure.size} unsure ${if (unsure.size == 1) "match" else "matches"}")
                     }
                 }
-                requestingAll?.let { (done, total) ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text("Requesting ${done + 1} of $total…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } ?: run {
-                    if (toRequest.isNotEmpty()) FilledTonalButton(onClick = {
-                        val list = toRequest
-                        requestingAll = 0 to list.size
-                        scope.launch {
-                            var asked = 0
-                            var failed = 0
-                            for (i in list) {
-                                requested[i] = null
-                                val result = runCatching { app.social.api.importRequest(preview.rows[i].track) }
-                                result.onSuccess { requested[i] = it.id; asked++ }
-                                result.onFailure { requested.remove(i); failed++ }
-                                // Too many requests waiting: the rest would fail the same way.
-                                val tooMany = (result.exceptionOrNull() as? SocialException)?.takeIf { it.code == 429 }
-                                if (tooMany != null) {
-                                    Toast.makeText(context, tooMany.message, Toast.LENGTH_LONG).show()
-                                    break
-                                }
-                                requestingAll = (asked + failed) to list.size
-                            }
-                            requestingAll = null
-                            val text = when {
-                                asked > 0 -> "Requested $asked ${if (asked == 1) "song" else "songs"}" + if (failed > 0) ". $failed couldn't be requested" else ""
-                                failed > 0 -> "Couldn't request them. They may not be in the catalog"
-                                else -> null
-                            }
-                            text?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
-                        }
-                    }) { Text("Request all missing (${toRequest.size})") }
-                }
                 if (missing > 0) {
                     Text(
                         if (missing == 1) "The song that isn't in the library:" else "The $missing songs that aren't in the library:",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = !keepMissing, onClick = { keepMissing = false }, label = { Text("Leave out") })
-                        FilterChip(selected = keepMissing, onClick = { keepMissing = true }, label = { Text("Keep, greyed out") })
+                        FilterChip(selected = missingMode == "leave", onClick = { missingMode = "leave" }, label = { Text("Leave out") })
+                        FilterChip(selected = missingMode == "keep", onClick = { missingMode = "keep" }, label = { Text("Keep, greyed out") })
                     }
+                    FilterChip(selected = missingMode == "request", onClick = { missingMode = "request" }, label = { Text("Keep and request all") })
                     Text(
-                        if (keepMissing) "They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest."
-                        else "The playlist has only the songs in the library.",
+                        when (missingMode) {
+                            "leave" -> "The playlist has only the songs in the library."
+                            "keep" -> "They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest."
+                            else -> "They stay in their place, greyed out, and are all requested after you save (a few a minute, as the music catalog allows). Each one plays like the rest once it arrives."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -312,9 +278,9 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                     onClick = {
                         saving = true
                         scope.launch {
-                            runCatching { app.social.api.importCreate(name.trim().ifEmpty { preview.name }, items) }
+                            runCatching { app.social.api.importCreate(name.trim().ifEmpty { preview.name }, items, requestAll = missingMode == "request") }
                                 .onSuccess {
-                                    val more = if (it.missingCount > 0) ", and ${it.missingCount} to request" else ""
+                                    val more = if (it.missingCount > 0) ", and ${it.missingCount} ${if (missingMode == "request") "being requested" else "to request"}" else ""
                                     Toast.makeText(context, "Saved with ${it.songCount} songs$more", Toast.LENGTH_SHORT).show()
                                     onSaved(it.playlistId)
                                 }

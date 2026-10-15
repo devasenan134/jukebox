@@ -363,3 +363,52 @@ class PlaylistMissingTest {
         assertEquals(emptyList(), imports.missing(alice, id).songs)
     }
 }
+
+class RequestQueueTest {
+    /** A catalog that's busy (finds nothing, says so) until [freeAfter] searches were turned away. */
+    private class BusyCatalog(val items: List<CatalogItem>, var freeAfter: Int) : Catalog {
+        var busyNow = false
+        override suspend fun search(query: String): List<CatalogItem> {
+            busyNow = freeAfter-- > 0
+            return if (busyNow) emptyList() else items.filter { Fuzzy.match(Fuzzy.words(query), Fuzzy.words(it.title)) > 0 }
+        }
+        override suspend fun lookup(id: String) = items.firstOrNull { it.id == id }
+        override suspend fun busy() = busyNow
+    }
+
+    @Test
+    fun `request all waits out a busy catalog, and says which songs it couldn't find`(): Unit = runBlocking {
+        PlaylistImports.BUSY_WAIT_MS = 0
+        val db = Db(File.createTempFile("jukebox-queue", ".db").apply { delete(); deleteOnExit() }.path)
+        db.tx { update("INSERT INTO users (id, username, display_name, created_at) VALUES (1, 'alice', 'Alice', 0)") }
+        val catalog = BusyCatalog(
+            listOf(CatalogItem("itunes-song-3", "song", "Nenjukkulle", "Kadal", 2012), CatalogItem("itunes-song-4", "song", "Moongil Thottam", "Kadal", 2012)),
+            freeAfter = 1,
+        )
+        val requests = MusicRequests(db, GrowingMusic(), catalog, Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
+        val listening = io.github.devasenan134.jukebox.server.library.Listening(db)
+        val imports = PlaylistImports(db, GrowingMusic(), listening, requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
+        val alice = UserDto(1, "alice", "Alice")
+
+        val id = imports.create(
+            alice,
+            ImportCreateRequest(
+                "Kadal",
+                items = listOf(ImportedTrack("Nenjukkulle"), ImportedTrack("Moongil Thottam"), ImportedTrack("Nothing like it")).map { ImportItem(track = it) },
+                requestAll = true,
+            ),
+        ).playlistId
+        assertTrue(imports.missing(alice, id).songs.all { it.queued })
+
+        while (imports.requestNext()) Unit // the first try finds the catalog busy and comes back to it
+        val songs = imports.missing(alice, id).songs
+        assertEquals(listOf("open", "open", null), songs.map { it.request?.status })
+        assertEquals(listOf(false, false, false), songs.map { it.queued })
+        assertTrue(songs[2].note!!.startsWith("Couldn't find"))
+
+        // A single Request while the catalog is busy is queued instead of failing.
+        catalog.freeAfter = 1
+        val again = imports.requestMissing(alice, id, songs[2].id)
+        assertTrue(again.queued)
+    }
+}

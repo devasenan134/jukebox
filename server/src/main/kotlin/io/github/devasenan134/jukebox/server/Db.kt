@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -495,6 +495,13 @@ class Db(private val path: String) {
         // Songs of an imported playlist that the library didn't have, kept in their place (before the song at
         // [slot]) to show greyed out and request; each becomes a real entry when the song arrives.
         // not_ids: the library's songs offered for it at import and turned down, never matched to it later.
+        // Missing songs someone asked to request in bulk wait in a queue (queued_by: who asked), made into requests
+        // at the pace the catalog allows; request_note says why one couldn't be requested, or why it waits.
+        val SCHEMA_V28 = """
+            ALTER TABLE playlist_missing ADD COLUMN queued_by INTEGER;
+            ALTER TABLE playlist_missing ADD COLUMN request_note TEXT
+        """.trimIndent()
+
         val SCHEMA_V27 = """
             CREATE TABLE playlist_missing (
                 id INTEGER PRIMARY KEY,

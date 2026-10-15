@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ImportItem, ImportPreview, ImportRow, MixSong } from '../api/types'
 import { catalog } from '../api/catalog'
-import { social, SocialError } from '../api/social'
+import { social } from '../api/social'
 import { pause as pausePlayer } from '../player/player'
 import { useMyPlaylists } from '../state/library'
 import { playlistChanged } from '../state/queries'
@@ -97,16 +97,14 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   const [included, setIncluded] = useState<boolean[]>(() => preview.rows.map((r) => !!r.match))
   // Per row: asking for it, or the request made.
   const [requested, setRequested] = useState<Record<number, 'busy' | number>>({})
-  // Songs the library doesn't have: left out, or kept in their place (greyed out, to request).
-  const [keepMissing, setKeepMissing] = useState(false)
+  // Songs the library doesn't have: left out, kept in their place (greyed out, to request), or kept and all requested.
+  const [missingMode, setMissingMode] = useState<'leave' | 'keep' | 'request'>('leave')
+  const keepMissing = missingMode !== 'leave'
   const [saving, setSaving] = useState(false)
-  // Asking for every missing song in turn: how far it got.
-  const [requestingAll, setRequestingAll] = useState<{ done: number; total: number } | null>(null)
   // Going through the matches it wasn't sure of, one at a time.
   const [reviewing, setReviewing] = useState(false)
   const found = preview.rows.filter((r) => r.match).length
   const unsure = preview.rows.flatMap((r, i) => ((r.match && !r.sure) || (!r.match && r.choices.length) ? [i] : []))
-  const toRequest = preview.rows.flatMap((_, i) => (!chosen[i] && requested[i] === undefined ? [i] : []))
   const songs = chosen.filter((s, i) => s && included[i]) as MixSong[]
   const missing = preview.rows.filter((_, i) => !chosen[i]).length
   const items: ImportItem[] = preview.rows.flatMap((r, i): ImportItem[] => {
@@ -130,39 +128,13 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
       toast((e as Error).message || "Couldn't request it", true)
     }
   }
-  const requestAll = async () => {
-    const list = toRequest
-    setRequestingAll({ done: 0, total: list.length })
-    let asked = 0
-    let failed = 0
-    for (const i of list) {
-      setRequested((r) => ({ ...r, [i]: 'busy' }))
-      try {
-        const made = await social.importRequest(preview.rows[i].track)
-        setRequested((r) => ({ ...r, [i]: made.id }))
-        asked++
-      } catch (e) {
-        setRequested((r) => { const n = { ...r }; delete n[i]; return n })
-        failed++
-        // Too many requests waiting: the rest would fail the same way.
-        if (e instanceof SocialError && e.code === 429) {
-          toast(e.message, true)
-          break
-        }
-      }
-      setRequestingAll({ done: asked + failed, total: list.length })
-    }
-    setRequestingAll(null)
-    if (asked) toast(`Requested ${asked} ${asked === 1 ? 'song' : 'songs'}${failed ? `. ${failed} couldn't be requested (not in the catalog, or already asked for)` : ''}`, failed > 0)
-    else if (failed) toast("Couldn't request them. They may not be in the catalog", true)
-  }
   const save = async () => {
     setSaving(true)
     try {
-      const r = await social.importCreate(name.trim() || preview.name, items)
+      const r = await social.importCreate(name.trim() || preview.name, items, missingMode === 'request')
       playlistChanged()
       useMyPlaylists.getState().refresh()
-      toast(`Saved "${name.trim() || preview.name}" with ${r.songCount} songs${r.missingCount ? `, and ${r.missingCount} to request` : ''}`)
+      toast(`Saved "${name.trim() || preview.name}" with ${r.songCount} songs${r.missingCount ? `, and ${r.missingCount} ${missingMode === 'request' ? 'being requested' : 'to request'}` : ''}`)
       onSaved(r.playlistId)
     } catch (e) {
       toast((e as Error).message || "Couldn't save it", true)
@@ -183,29 +155,23 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
           {found < preview.rows.length && ' The others can be requested.'}
         </div>
         {preview.note && <div className="body-small muted" style={{ marginTop: 4 }}>{preview.note}</div>}
-        {(unsure.length > 0 || toRequest.length > 0 || requestingAll) && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-            {unsure.length > 0 && (
-              <button className="btn tonal" onClick={() => setReviewing(true)}><Icon name="hearing" size={18} />Check {unsure.length} unsure {unsure.length === 1 ? 'match' : 'matches'}</button>
-            )}
-            {requestingAll ? (
-              <span className="body-medium muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner size={18} />Requesting {requestingAll.done + 1} of {requestingAll.total}…</span>
-            ) : toRequest.length > 0 && (
-              <button className="btn tonal" onClick={() => void requestAll()}><Icon name="library_add" size={18} />Request all missing ({toRequest.length})</button>
-            )}
+        {unsure.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <button className="btn tonal" onClick={() => setReviewing(true)}><Icon name="hearing" size={18} />Check {unsure.length} unsure {unsure.length === 1 ? 'match' : 'matches'}</button>
           </div>
         )}
         {missing > 0 && (
           <div style={{ marginTop: 12 }}>
             <div className="body-medium">{missing === 1 ? 'The song that isn\'t in the library:' : `The ${missing} songs that aren't in the library:`}</div>
             <div className="chips" style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-              <button className={`chip${keepMissing ? '' : ' selected'}`} onClick={() => setKeepMissing(false)}>Leave out</button>
-              <button className={`chip${keepMissing ? ' selected' : ''}`} onClick={() => setKeepMissing(true)}>Keep, greyed out</button>
+              <button className={`chip${missingMode === 'leave' ? ' selected' : ''}`} onClick={() => setMissingMode('leave')}>Leave out</button>
+              <button className={`chip${missingMode === 'keep' ? ' selected' : ''}`} onClick={() => setMissingMode('keep')}>Keep, greyed out</button>
+              <button className={`chip${missingMode === 'request' ? ' selected' : ''}`} onClick={() => setMissingMode('request')}><Icon name="library_add" size={16} />Keep and request all</button>
             </div>
             <div className="body-small muted" style={{ marginTop: 4 }}>
-              {keepMissing
-                ? 'They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest.'
-                : 'The playlist has only the songs in the library.'}
+              {missingMode === 'leave' ? 'The playlist has only the songs in the library.'
+                : missingMode === 'keep' ? 'They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest.'
+                  : 'They stay in their place, greyed out, and are all requested after you save (a few a minute, as the music catalog allows). Each one plays like the rest once it arrives.'}
             </div>
           </div>
         )}

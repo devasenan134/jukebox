@@ -132,10 +132,13 @@ class SocialApi(
     suspend fun importPreview(url: String? = null, text: String? = null, name: String? = null): ImportPreview =
         post("/imports/preview", ImportPreviewBody(url, text, name))
     /** Saves an imported playlist with these songs (in this order): the library's, and ones it doesn't have to keep greyed out. */
-    suspend fun importCreate(name: String, items: List<ImportItem>): ImportCreated = post("/imports", ImportCreateBody(name, items))
+    suspend fun importCreate(name: String, items: List<ImportItem>, requestAll: Boolean = false): ImportCreated =
+        post("/imports", ImportCreateBody(name, items, requestAll))
     /** A playlist's songs the library doesn't have (kept from an import); ones that arrived are filled in first. */
     suspend fun playlistMissing(id: String): PlaylistMissing = get("/playlists/${enc(id)}/missing")
     suspend fun requestMissing(id: String, missingId: Long): MissingSong = post("/playlists/${enc(id)}/missing/$missingId/request", Unit)
+    /** Queues every missing song not requested yet; the server requests them at the pace the catalog allows. */
+    suspend fun requestAllMissing(id: String): PlaylistMissing = post("/playlists/${enc(id)}/missing/request-all", Unit)
     suspend fun removeMissing(id: String, missingId: Long) = send<Unit>("DELETE", "/playlists/${enc(id)}/missing/$missingId", null)
     /** Requests a song of an imported playlist that isn't in the library. */
     suspend fun importRequest(track: ImportedTrack): MusicRequest =
@@ -372,7 +375,7 @@ class SocialApi(
 
     @Serializable private data class CatalogIdBody(val id: String)
     @Serializable private data class ImportPreviewBody(val url: String?, val text: String?, val name: String?)
-    @Serializable private data class ImportCreateBody(val name: String, val items: List<ImportItem>)
+    @Serializable private data class ImportCreateBody(val name: String, val items: List<ImportItem>, val requestAll: Boolean)
     @Serializable private data class ImportRequestBody(val title: String, val artist: String?, val album: String?, val catalogId: String?)
     @Serializable private data class NoteBody(val note: String?)
     @Serializable private data class AlbumBody(val albumId: String, val songId: String? = null)

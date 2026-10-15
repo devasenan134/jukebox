@@ -388,6 +388,10 @@ export interface MissingSong {
   before: number
   track: ImportedTrack
   request?: MusicRequest | null
+  /** Waiting in the server's queue to be requested (it goes at the pace the music catalog allows). */
+  queued?: boolean
+  /** Why it couldn't be requested, or why it's still waiting. */
+  note?: string | null
 }
 
 /** A playlist's missing songs; filled: how many just arrived in the library and became songs of it (reload them). */
