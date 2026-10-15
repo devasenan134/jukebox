@@ -12,7 +12,7 @@ import { useSession } from '../state/session'
 import { Cover, formatDuration, formatTotalDuration, likeCount, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
 import { usePhotoPicker } from '../ui/PhotoPicker'
 import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
-import { Dialog, ErrorBox, Icon, IconButton, MoreMenu, NameDialog, Spinner, toast } from '../ui/kit'
+import { Dialog, ErrorBox, Icon, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover, mixTint, updatedText } from '../ui/mixes'
 import { useNav } from '../ui/nav'
 import { keys, playlistChanged } from '../state/queries'
@@ -133,18 +133,17 @@ export function PlaylistScreen() {
     try {
       const asked = await social.requestMissing(id, m.id)
       missing.set({ songs: gaps.map((g) => (g.id === m.id ? asked : g)), filled: 0 })
-      toast(asked.queued ? "Queued. It's requested shortly and joins the playlist when it arrives" : asked.request ? 'Requested. It joins the playlist when it arrives' : asked.note || 'Done')
+      toast(asked.queued || asked.request ? 'Requested. It joins the playlist when it arrives' : asked.note || 'Done')
     } catch (e) {
       toast((e as Error).message || "Couldn't request it", true)
     }
   }
   const toRequest = gaps.filter((m) => !m.queued && (!m.request || m.request.status === 'declined'))
-  const queued = gaps.filter((m) => m.queued).length
   const requestAll = async () => {
     setRequestingAll(true)
     try {
       missing.set(await social.requestAllMissing(id))
-      toast(`Queued ${toRequest.length === 1 ? 'it' : `${toRequest.length} songs`}. They're requested shortly and join the playlist when they arrive`)
+      toast(`Requested ${toRequest.length === 1 ? 'it' : `${toRequest.length} songs`}. They join the playlist when they arrive`)
     } catch (e) {
       toast((e as Error).message || "Couldn't request them", true)
     }
@@ -208,15 +207,10 @@ export function PlaylistScreen() {
               <span className="muted">{gaps.length ? 'None of its songs are in the library yet.' : mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
             </div>
           )}
-          {(toRequest.length > 0 || queued > 0) && (
+          {toRequest.length > 0 && (
             <div className="body-medium muted" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px 12px', flexWrap: 'wrap' }}>
-              {queued > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner size={16} />Requesting {queued} {queued === 1 ? 'song' : 'songs'}…</span>}
-              {toRequest.length > 0 && (
-                <>
-                  {toRequest.length === 1 ? "1 song isn't requested yet." : `${toRequest.length} songs aren't requested yet.`}
-                  <button className="btn tonal small" disabled={requestingAll} onClick={() => void requestAll()}>Request all</button>
-                </>
-              )}
+              {toRequest.length === 1 ? "1 song isn't requested yet." : `${toRequest.length} songs aren't requested yet.`}
+              <button className="btn tonal small" disabled={requestingAll} onClick={() => void requestAll()}>Request all</button>
             </div>
           )}
           <div className="tracks">

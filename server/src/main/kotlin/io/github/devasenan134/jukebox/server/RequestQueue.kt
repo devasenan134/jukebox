@@ -39,7 +39,7 @@ class RequestQueue(
     private val listening: Listening,
     private val requests: MusicRequests,
     private val matcher: suspend () -> ImportMatcher?,
-    /** Finds a song in the catalog and requests it (PlaylistImports.request). */
+    /** Finds a song in the catalog and requests it, held (PlaylistImports.request). */
     private val requestSong: suspend (UserDto, ImportedTrack) -> MusicRequestDto,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -102,7 +102,11 @@ class RequestQueue(
         adoptOldRows()
         while (true) {
             val worked = runCatching { next() }.onFailure { log.warn("A queued request failed", it) }.getOrDefault(false)
-            if (!worked) withTimeoutOrNull(10 * 60_000L) { wake.receive() }
+            if (!worked) {
+                // Nothing left waiting: the requests made show now, and admins hear about them once.
+                runCatching { requests.releaseHeld() }.onFailure { log.warn("Releasing held requests failed", it) }
+                withTimeoutOrNull(10 * 60_000L) { wake.receive() }
+            }
         }
     }
 
@@ -172,7 +176,7 @@ class RequestQueue(
             ?: if (requests.catalogBusy()) throw ApiError(HttpStatusCode.ServiceUnavailable, MusicRequests.CATALOG_BUSY) else return null
         hit.request?.let { r -> requests.join(user, r.id)?.let { return it } }
         return try {
-            requests.request(user, hit.item.id)
+            requests.request(user, hit.item.id, hold = true)
         } catch (e: ApiError) {
             if (e.status == HttpStatusCode.ServiceUnavailable) throw e
             null // the album is in the library already (only some songs aren't): ask for the songs

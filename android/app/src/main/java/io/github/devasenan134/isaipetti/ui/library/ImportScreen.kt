@@ -216,9 +216,11 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
     val keepMissing = missingMode != "leave"
     var saving by remember { mutableStateOf(false) }
     // Going through the matches it wasn't sure of, one at a time.
-    var reviewing by remember { mutableStateOf(false) }
+    // The unsure rows being gone through (kept as they were when it opened), and the rows already decided by hand.
+    var reviewing by remember { mutableStateOf<List<Int>?>(null) }
+    val checked = remember { mutableStateMapOf<Int, Boolean>() }
     val found = preview.rows.count { it.match != null }
-    val unsure = preview.rows.indices.filter { i -> preview.rows[i].let { (it.match != null && !it.sure) || (it.match == null && it.choices.isNotEmpty()) } }
+    val unsure = preview.rows.indices.filter { i -> i !in checked && preview.rows[i].let { (it.match != null && !it.sure) || (it.match == null && it.choices.isNotEmpty()) } }
     val songs = chosen.indices.mapNotNull { i -> chosen[i]?.takeIf { included[i] } }
     val missing = chosen.count { it == null }
     val items = preview.rows.indices.mapNotNull { i ->
@@ -230,12 +232,12 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
         }
     }
 
-    if (reviewing) {
+    reviewing?.let { indices ->
         UnsureReview(
-            preview, unsure, chosen,
+            preview, indices,
             source = SOURCES[preview.source] ?: preview.source,
-            onDecide = { i, s -> chosen[i] = s; included[i] = s != null },
-            onClose = { reviewing = false },
+            onDecide = { i, s -> chosen[i] = s; included[i] = s != null; checked[i] = true },
+            onClose = { reviewing = null },
         )
     }
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -250,7 +252,7 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                 )
                 preview.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (unsure.isNotEmpty()) {
-                    FilledTonalButton(onClick = { reviewing = true }) {
+                    FilledTonalButton(onClick = { reviewing = unsure }) {
                         Text("Check ${unsure.size} unsure ${if (unsure.size == 1) "match" else "matches"}")
                     }
                 }
@@ -299,9 +301,9 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
         }
         itemsIndexed(preview.rows) { i, row ->
             ImportRowView(
-                row, chosen[i], included[i], if (i in requested) requested[i] ?: "busy" else null,
+                row, chosen[i], included[i], if (i in requested) requested[i] ?: "busy" else null, checked = i in checked,
                 onInclude = { included[i] = it },
-                onChoose = { s -> chosen[i] = s; included[i] = s != null },
+                onChoose = { s -> chosen[i] = s; included[i] = s != null; checked[i] = true },
                 onRequest = {
                     requested[i] = null
                     scope.launch {
@@ -330,13 +332,15 @@ private fun ImportRowView(
     included: Boolean,
     /** null: not asked; "busy": asking; else what the server said ("queued", "requested", "in_library"). */
     request: String?,
+    /** Decided by hand (in Check unsure matches, or picked): no longer "Is this the one?". */
+    checked: Boolean,
     onInclude: (Boolean) -> Unit,
     onChoose: (MixSong?) -> Unit,
     onRequest: () -> Unit,
 ) {
     val t = row.track
     var menu by remember { mutableStateOf(false) }
-    val unsure = chosen != null && !row.sure && chosen.id == row.match?.id
+    val unsure = chosen != null && !row.sure && !checked && chosen.id == row.match?.id
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         // The song as the other service has it…
         Text(t.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -401,13 +405,12 @@ private fun ImportRowView(
 /**
  * The matches it wasn't sure of, one at a time (UnsureReview on the website): the song as the other service has
  * it next to the library's best guess, which can be played for a moment on a player of its own (your queue is left
- * alone). Same song takes it; Not this one shows the next guess (after the last, leaves the song out); Skip keeps it.
+ * alone). Same song takes it; Not this one leaves it out at once and shows the next guess, if any; Skip keeps it as it is.
  */
 @Composable
 private fun UnsureReview(
     preview: ImportPreview,
     indices: List<Int>,
-    chosen: List<MixSong?>,
     source: String,
     onDecide: (Int, MixSong?) -> Unit,
     onClose: () -> Unit,
@@ -418,6 +421,8 @@ private fun UnsureReview(
     var at by remember { mutableIntStateOf(0) }
     var guess by remember { mutableIntStateOf(0) }
     var playing by remember { mutableStateOf(false) }
+    // What was decided in here (row to kept or not), for the summary at the end.
+    val decided = remember { mutableStateMapOf<Int, Boolean>() }
     val player = remember {
         ExoPlayer.Builder(context)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), false)
@@ -432,15 +437,16 @@ private fun UnsureReview(
     }
     val i = indices.getOrNull(at) ?: return
     val row = preview.rows[i]
-    // The one chosen now first, then the others it could be.
-    val guesses = (listOfNotNull(chosen[i] ?: row.match) + row.choices).distinctBy { it.id }
+    // Its best guess first, then the others it could be (the same list however it's decided along the way).
+    val guesses = (listOfNotNull(row.match) + row.choices).distinctBy { it.id }
     val song = guesses.getOrNull(guess)
     fun stop() = player.stop()
     fun next() {
         stop()
         guess = 0
         if (at + 1 >= indices.size) {
-            Toast.makeText(context, "All checked", Toast.LENGTH_SHORT).show()
+            val kept = decided.values.count { it }
+            Toast.makeText(context, "All checked: $kept kept, ${decided.size - kept} left out", Toast.LENGTH_SHORT).show()
             onClose()
         } else at++
     }
@@ -500,14 +506,17 @@ private fun UnsureReview(
             }
         },
         confirmButton = {
-            Button(onClick = { onDecide(i, song); next() }, enabled = song != null) { Text("Same song") }
+            Button(onClick = { onDecide(i, song); decided[i] = true; next() }, enabled = song != null) { Text("Same song") }
         },
         dismissButton = {
             Row {
                 TextButton(onClick = { next() }) { Text("Skip") }
                 TextButton(onClick = {
                     stop()
-                    if (guess + 1 < guesses.size) guess++ else { onDecide(i, null); next() }
+                    // It isn't this one: out of the playlist now, whatever happens next.
+                    onDecide(i, null)
+                    decided[i] = false
+                    if (guess + 1 < guesses.size) guess++ else next()
                 }) { Text(if (guess + 1 < guesses.size) "Not this one" else "None of these") }
             }
         },

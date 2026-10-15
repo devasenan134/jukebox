@@ -218,7 +218,7 @@ class PlaylistImports(
 
     /** The request queue (RequestQueue.kt); null when requests are off. */
     val queue: RequestQueue? = requests?.let { r ->
-        RequestQueue(db, listening, r, ::matcher) { user, t -> request(user, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId)) }
+        RequestQueue(db, listening, r, ::matcher) { user, t -> request(user, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId), hold = true) }
     }
 
     private fun queueOn() = queue ?: throw ApiError(HttpStatusCode.NotFound, "Requests are off on this server")
@@ -253,9 +253,9 @@ class PlaylistImports(
     private fun track(row: MissingRow) = json.decodeFromString(ImportedTrack.serializer(), row.trackJson)
 
     /** Requests a song that isn't in the library: by its catalog id, or found in the catalog by its name. */
-    suspend fun request(me: UserDto, wanted: ImportRequestMusic): MusicRequestDto {
+    suspend fun request(me: UserDto, wanted: ImportRequestMusic, hold: Boolean = false): MusicRequestDto {
         val requests = requests ?: throw ApiError(HttpStatusCode.NotFound, "Requests are off on this server")
-        wanted.catalogId?.let { return requests.request(me, it) }
+        wanted.catalogId?.let { return requests.request(me, it, hold) }
         // Search by the title alone (the catalog search keeps results whose title or artist has every word asked
         // for), then prefer the one by the same artist.
         val title = ImportMatcher.cleanTitle(wanted.title).first
@@ -267,7 +267,7 @@ class PlaylistImports(
             artists.any { a -> theirs.any { MusicRequests.same(a, it) } }
         } ?: sameTitle.firstOrNull()
             ?: throw requests.notFoundOrBusy("Couldn't find \"$title\" in the catalog. Request it from Search instead.")
-        return requests.request(me, best.item.id)
+        return requests.request(me, best.item.id, hold)
     }
 
     internal suspend fun matcher(): ImportMatcher? = mutex.withLock {

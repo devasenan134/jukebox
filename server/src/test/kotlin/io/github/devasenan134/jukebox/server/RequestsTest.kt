@@ -425,6 +425,11 @@ class RequestQueueTest {
         assertEquals(listOf("open", "open", null), songs.map { it.request?.status })
         assertEquals(listOf(false, false, false), songs.map { it.queued })
         assertTrue(songs[2].note!!.startsWith("Couldn't find"))
+        // The requests it made are held: not in anyone's Requests (nor the fulfil script's) until the queue is done.
+        assertEquals(emptyList(), s.requests.mine(alice))
+        assertEquals(2, s.requests.releaseHeld())
+        assertEquals(2, s.requests.mine(alice).size)
+        assertEquals(0, s.requests.releaseHeld())
 
         // Asking again for one that's requested changes nothing; the one it couldn't find is tried again.
         assertEquals("requested", s.imports.requestTrack(alice, ImportRequestMusic("Nenjukkulle")).status)

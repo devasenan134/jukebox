@@ -103,9 +103,11 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   const keepMissing = missingMode !== 'leave'
   const [saving, setSaving] = useState(false)
   // Going through the matches it wasn't sure of, one at a time.
-  const [reviewing, setReviewing] = useState(false)
+  // The unsure rows being gone through (kept as they were when it opened), and the rows already decided.
+  const [reviewing, setReviewing] = useState<number[] | null>(null)
+  const [checked, setChecked] = useState<Set<number>>(() => new Set())
   const found = preview.rows.filter((r) => r.match).length
-  const unsure = preview.rows.flatMap((r, i) => ((r.match && !r.sure) || (!r.match && r.choices.length) ? [i] : []))
+  const unsure = preview.rows.flatMap((r, i) => (!checked.has(i) && ((r.match && !r.sure) || (!r.match && r.choices.length)) ? [i] : []))
   const songs = chosen.filter((s, i) => s && included[i]) as MixSong[]
   const missing = preview.rows.filter((_, i) => !chosen[i]).length
   const items: ImportItem[] = preview.rows.flatMap((r, i): ImportItem[] => {
@@ -115,8 +117,9 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   })
 
   const choose = (i: number, s: MixSong | undefined) => {
-    setChosen(chosen.map((x, j) => (j === i ? s : x)))
-    setIncluded(included.map((x, j) => (j === i ? !!s : x)))
+    setChosen((c) => c.map((x, j) => (j === i ? s : x)))
+    setIncluded((inc) => inc.map((x, j) => (j === i ? !!s : x)))
+    setChecked((c) => new Set(c).add(i))
   }
   const request = async (i: number) => {
     setRequested({ ...requested, [i]: 'busy' })
@@ -160,7 +163,7 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
         {preview.note && <div className="body-small muted" style={{ marginTop: 4 }}>{preview.note}</div>}
         {unsure.length > 0 && (
           <div style={{ marginTop: 12 }}>
-            <button className="btn tonal" onClick={() => setReviewing(true)}><Icon name="hearing" size={18} />Check {unsure.length} unsure {unsure.length === 1 ? 'match' : 'matches'}</button>
+            <button className="btn tonal" onClick={() => setReviewing(unsure)}><Icon name="hearing" size={18} />Check {unsure.length} unsure {unsure.length === 1 ? 'match' : 'matches'}</button>
           </div>
         )}
         {missing > 0 && (
@@ -188,17 +191,16 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
       {reviewing && (
         <UnsureReview
           rows={preview.rows}
-          indices={unsure}
-          chosen={chosen}
+          indices={reviewing}
           source={SOURCES[preview.source] ?? preview.source}
           onDecide={choose}
-          onClose={() => setReviewing(false)}
+          onClose={() => setReviewing(null)}
         />
       )}
       <div style={{ padding: '0 8px 24px' }}>
         {preview.rows.map((row, i) => (
           <ImportRowView
-            key={i} row={row} chosen={chosen[i]} included={included[i]} request={requested[i]}
+            key={i} row={row} chosen={chosen[i]} included={included[i]} request={requested[i]} checked={checked.has(i)}
             onInclude={(v) => setIncluded(included.map((x, j) => (j === i ? v : x)))}
             onChoose={(s) => choose(i, s)}
             onRequest={() => void request(i)}
@@ -209,8 +211,10 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   )
 }
 
-function ImportRowView({ row, chosen, included, request, onInclude, onChoose, onRequest }: {
+function ImportRowView({ row, chosen, included, request, checked, onInclude, onChoose, onRequest }: {
   row: ImportRow
+  /** Decided by hand (in Check unsure matches, or picked): no longer "Is this the one?". */
+  checked?: boolean
   chosen?: MixSong
   included: boolean
   request?: string
@@ -220,7 +224,7 @@ function ImportRowView({ row, chosen, included, request, onInclude, onChoose, on
 }) {
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const t = row.track
-  const unsure = !!chosen && !row.sure && chosen.id === row.match?.id
+  const unsure = !!chosen && !row.sure && !checked && chosen.id === row.match?.id
   return (
     <div className="import-row">
       <div className="from">
@@ -271,13 +275,12 @@ let previewAudio: HTMLAudioElement | null = null
 
 /**
  * The matches it wasn't sure of, one at a time: the song as the other service has it next to the library's
- * best guess, which can be played for a moment. Same song takes it; Not this one shows the next guess (and
- * after the last, leaves the song out); Skip keeps it as it is.
+ * best guess, which can be played for a moment. Same song takes it; Not this one leaves it out at once and shows
+ * the next guess, if there is one; Skip keeps it as it is.
  */
-function UnsureReview({ rows, indices, chosen, source, onDecide, onClose }: {
+function UnsureReview({ rows, indices, source, onDecide, onClose }: {
   rows: ImportRow[]
   indices: number[]
-  chosen: (MixSong | undefined)[]
   source: string
   onDecide: (i: number, s: MixSong | undefined) => void
   onClose: () => void
@@ -288,8 +291,10 @@ function UnsureReview({ rows, indices, chosen, source, onDecide, onClose }: {
   useEffect(() => () => previewAudio?.pause(), [])
   const i = indices[at]
   const row = rows[i]
-  // The one chosen now first, then the others it could be.
-  const guesses = row ? [chosen[i] ?? row.match, ...row.choices].filter((s, n, all): s is MixSong => !!s && all.findIndex((x) => x?.id === s.id) === n) : []
+  // Its best guess first, then the others it could be (the same list however it's decided along the way).
+  const guesses = row ? [row.match, ...row.choices].filter((s, n, all): s is MixSong => !!s && all.findIndex((x) => x?.id === s.id) === n) : []
+  // What was decided in here so far, for the summary at the end.
+  const [decided, setDecided] = useState<Record<number, 'kept' | 'left'>>({})
   const song = guesses[guess]
 
   const stop = () => {
@@ -300,7 +305,8 @@ function UnsureReview({ rows, indices, chosen, source, onDecide, onClose }: {
     stop()
     setGuess(0)
     if (at + 1 >= indices.length) {
-      toast('All checked')
+      const all = Object.values(decided)
+      toast(`All checked: ${all.filter((d) => d === 'kept').length} kept, ${all.filter((d) => d === 'left').length} left out`)
       onClose()
     } else setAt(at + 1)
   }
@@ -330,10 +336,13 @@ function UnsureReview({ rows, indices, chosen, source, onDecide, onClose }: {
           <button className="btn text" onClick={next}>Skip</button>
           <button className="btn tonal" onClick={() => {
             stop()
+            // It isn't this one: out of the playlist now, whatever happens next.
+            onDecide(i, undefined)
+            setDecided({ ...decided, [i]: 'left' })
             if (guess + 1 < guesses.length) setGuess(guess + 1)
-            else { onDecide(i, undefined); next() }
+            else next()
           }}>{guess + 1 < guesses.length ? 'Not this one' : 'None of these'}</button>
-          <button className="btn" disabled={!song} onClick={() => { onDecide(i, song); next() }}>Same song</button>
+          <button className="btn" disabled={!song} onClick={() => { onDecide(i, song); setDecided({ ...decided, [i]: 'kept' }); next() }}>Same song</button>
         </>
       }
     >

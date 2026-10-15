@@ -225,24 +225,15 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 missing = missing,
                 aboveSongs = {
                     val toRequest = missing.filter { !it.queued && (it.request == null || it.request.status == "declined") }
-                    val queued = missing.count { it.queued }
-                    if (toRequest.isNotEmpty() || queued > 0) item(key = "request-all") {
+                    if (toRequest.isNotEmpty()) item(key = "request-all") {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            if (toRequest.isEmpty()) {
-                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            run {
                                 Text(
-                                    "Requesting $queued ${if (queued == 1) "song" else "songs"}…",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            } else {
-                                Text(
-                                    (if (toRequest.size == 1) "1 song isn't requested yet." else "${toRequest.size} songs aren't requested yet.") +
-                                        if (queued > 0) " $queued being requested." else "",
+                                    if (toRequest.size == 1) "1 song isn't requested yet." else "${toRequest.size} songs aren't requested yet.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.weight(1f),
@@ -254,7 +245,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                                             .onSuccess {
                                                 missing = it.songs
                                                 val n = toRequest.size
-                                                Toast.makeText(context, "Queued ${if (n == 1) "it" else "$n songs"}. They're requested shortly and join the playlist when they arrive", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Requested ${if (n == 1) "it" else "$n songs"}. They join the playlist when they arrive", Toast.LENGTH_LONG).show()
                                             }
                                             .onFailure { Toast.makeText(context, it.message ?: "Couldn't request them", Toast.LENGTH_LONG).show() }
                                         requestingAll = false
@@ -271,11 +262,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                             runCatching { app.social.api.requestMissing(playlist.id, m.id) }
                                 .onSuccess { asked ->
                                     missing = missing.map { if (it.id == m.id) asked else it }
-                                    val text = when {
-                                        asked.queued -> "Queued. It's requested shortly and joins the playlist when it arrives"
-                                        asked.request != null -> "Requested. It joins the playlist when it arrives"
-                                        else -> asked.note ?: "Done"
-                                    }
+                                    val text = if (asked.queued || asked.request != null) "Requested. It joins the playlist when it arrives" else asked.note ?: "Done"
                                     Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
                                 }
                                 .onFailure { Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show() }

@@ -349,7 +349,11 @@ class MusicRequests(
         return CatalogResults(movies = hits("movie", 10), songs = hits("song", 20))
     }
 
-    suspend fun request(me: UserDto, catalogId: String): MusicRequestDto {
+    /**
+     * Requests [catalogId] for [me] (or adds them to the request someone made for it). With [hold], a new request
+     * waits unseen (by admins and the fulfil script) until [releaseHeld], and nobody is told yet.
+     */
+    suspend fun request(me: UserDto, catalogId: String, hold: Boolean = false): MusicRequestDto {
         val item = catalog.lookup(catalogId.take(100)) ?: throw notFoundOrBusy()
         if (shelf()?.find(item) != null) throw ApiError(HttpStatusCode.Conflict, "It's already in the library")
         val key = matchKey(item)
@@ -358,13 +362,14 @@ class MusicRequests(
             val itemJson = json.encodeToString(CatalogItem.serializer(), item)
             val id = when {
                 existing == null -> insert(
-                    "INSERT INTO music_requests (match_key, catalog_id, item_json, status, created_at) VALUES (?, ?, ?, 'open', ?)", key, item.id, itemJson, now(),
+                    "INSERT INTO music_requests (match_key, catalog_id, item_json, status, created_at, held) VALUES (?, ?, ?, 'open', ?, ?)",
+                    key, item.id, itemJson, now(), if (hold) 1 else 0,
                 )
                 // Asked for again after it was declined (or removed from the library): open it again.
                 existing.second != "open" -> existing.first.also {
                     update(
-                        "UPDATE music_requests SET status = 'open', catalog_id = ?, item_json = ?, note = NULL, closed_at = NULL, album_id = NULL, song_id = NULL, created_at = ? WHERE id = ?",
-                        item.id, itemJson, now(), it,
+                        "UPDATE music_requests SET status = 'open', catalog_id = ?, item_json = ?, note = NULL, closed_at = NULL, album_id = NULL, song_id = NULL, created_at = ?, held = ? WHERE id = ?",
+                        item.id, itemJson, now(), if (hold) 1 else 0, it,
                     )
                 }
                 else -> existing.first
@@ -373,10 +378,37 @@ class MusicRequests(
             id to (existing?.second != "open")
         }
         if (isNew) {
-            log.info("${me.username} requested ${label(item)}")
-            push.musicRequested(adminIds().filter { it != me.id }, me, label(item))
+            log.info("${me.username} requested ${label(item)}${if (hold) " (held until the queue is done)" else ""}")
+            if (!hold) push.musicRequested(adminIds().filter { it != me.id }, me, label(item))
         }
         return db.tx { dto(id, me.id) }!!
+    }
+
+    /**
+     * The queue is done: its held requests show from now on, and admins are told once ("Alice asked for 18 songs
+     * and 2 albums"). How many were released.
+     */
+    suspend fun releaseHeld(): Int {
+        val held = db.tx {
+            val rows = query("SELECT id, item_json FROM music_requests WHERE held = 1") { it.getLong(1) to json.decodeFromString(CatalogItem.serializer(), it.getString(2)) }
+            val askers = rows.flatMap { (id, _) ->
+                query("SELECT u.display_name FROM music_request_askers a JOIN users u ON u.id = a.user_id WHERE a.request_id = ? ORDER BY a.asked_at", id) { it.getString(1) }
+            }.distinct()
+            update("UPDATE music_requests SET held = 0 WHERE held = 1")
+            rows.map { it.second } to askers
+        }
+        val (items, askers) = held
+        if (items.isEmpty()) return 0
+        val songs = items.count { it.kind != "movie" }
+        val albums = items.size - songs
+        val what = listOfNotNull(
+            songs.takeIf { it > 0 }?.let { "$it ${if (it == 1) "song" else "songs"}" },
+            albums.takeIf { it > 0 }?.let { "$it ${if (it == 1) "album" else "albums"}" },
+        ).joinToString(" and ")
+        val who = when (askers.size) { 0 -> "Someone"; 1 -> askers[0]; 2 -> "${askers[0]} and ${askers[1]}"; else -> "${askers[0]} and ${askers.size - 1} others" }
+        log.info("Queue done: $who asked for $what")
+        push.requestsReady(adminIds(), "$who asked for $what")
+        return items.size
     }
 
     /** Adds [me] to request [id] (someone asked for the same music already); null if it was declined or is gone. */
@@ -462,7 +494,7 @@ class MusicRequests(
     suspend fun mine(me: UserDto): List<MusicRequestDto> = repaired(db.tx {
         query(
             """SELECT r.id FROM music_requests r JOIN music_request_askers a ON a.request_id = r.id
-               WHERE a.user_id = ? AND (r.status = 'open' OR r.closed_at > ?)
+               WHERE a.user_id = ? AND r.held = 0 AND (r.status = 'open' OR r.closed_at > ?)
                ORDER BY r.status = 'open' DESC, coalesce(r.closed_at, r.created_at) DESC""",
             me.id, now() - RECENT_MS,
         ) { it.getLong(1) }.mapNotNull { dto(it, me.id)?.copy(review = null, reviewNote = null) }
@@ -478,7 +510,7 @@ class MusicRequests(
         requireAdmin(me)
         return repaired(db.tx {
             query(
-                """SELECT id FROM music_requests WHERE status = 'open' OR closed_at > ?
+                """SELECT id FROM music_requests WHERE held = 0 AND (status = 'open' OR closed_at > ?)
                    ORDER BY status = 'open' DESC, CASE WHEN status = 'open' THEN created_at ELSE -closed_at END""",
                 now() - ADMIN_RECENT_MS,
             ) { it.getLong(1) }.mapNotNull { dto(it, me.id) }

@@ -8,6 +8,18 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Requested, Quietly (0.23.0)
+
+### Improved
+- **Request is done when you tap it.** Request and Request all mark the songs Requested right away, with no progress to wait on; the server does the rest in the background.
+- **Admins hear once.** Requests the server makes from the queue stay out of Requests (and away from the fulfil script) until it has gone through everything waiting; then every admin gets one notification ("Alice asked for 18 songs and 2 albums") and they show in Requests.
+
+### Fixed
+- **Check unsure matches** now changes the playlist the way you decide: Not this one takes the song out at once (Skip after it keeps it out), Same song keeps it, decided songs stop saying "Is this the one?", the button counts only the songs still unsure, and a summary says how many were kept and left out.
+
+### Server
+- `music_requests.held` (schema 30): the queue's new requests are held and released together with one `requestsReady` notification to every admin.
+
 ## The Request Queue (0.22.0)
 
 ### New
