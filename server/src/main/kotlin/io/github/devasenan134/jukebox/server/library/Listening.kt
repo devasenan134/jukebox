@@ -203,15 +203,9 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
         ids.forEach { update("UPDATE playlist_missing SET queued_by = ?, request_note = NULL WHERE id = ? AND playlist_id = ?", userId, it, playlistId) }
     }
 
-    /** The missing song that has waited longest in the queue, leaving out those queued by [skipUsers]. */
-    suspend fun nextQueued(skipUsers: Set<Long>): MissingRow? = db.read {
+    /** Every missing song (of any playlist) waiting in the request queue. */
+    suspend fun allQueued(): List<MissingRow> = db.read {
         query("SELECT $MISSING_COLUMNS FROM playlist_missing WHERE queued_by IS NOT NULL ORDER BY id") { missingRow(it) }
-            .firstOrNull { it.queuedBy !in skipUsers }
-    }
-
-    /** Says why all of [userId]'s queued songs wait ([note]), or (null) that they don't. */
-    suspend fun noteQueued(userId: Long, note: String?) = db.tx {
-        update("UPDATE playlist_missing SET request_note = ? WHERE queued_by = ?", note, userId)
     }
 
     /** A queued song was requested ([requestId]), or couldn't be ([note], and with [keepQueued] it's tried again later). */

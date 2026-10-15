@@ -378,8 +378,6 @@ export interface ImportRow {
 export interface ImportItem {
   songId?: string
   track?: ImportedTrack
-  /** Already requested while checking the import. */
-  requestId?: number
 }
 
 /** A song of a playlist the library doesn't have: before the song at `before` (the end if past it), and its request. */
@@ -391,6 +389,12 @@ export interface MissingSong {
   /** Waiting in the server's queue to be requested (it goes at the pace the music catalog allows). */
   queued?: boolean
   /** Why it couldn't be requested, or why it's still waiting. */
+  note?: string | null
+}
+
+/** What became of a song asked for: "queued", "requested", "in_library" or "not_found" (see note). */
+export interface QueuedRequest {
+  status: string
   note?: string | null
 }
 

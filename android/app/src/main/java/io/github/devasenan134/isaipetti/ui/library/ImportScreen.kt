@@ -210,7 +210,7 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
     // Per row: the song chosen for it (the match, a choice, or none), and whether it goes in.
     val chosen = remember { mutableStateListOf<MixSong?>().apply { addAll(preview.rows.map { it.match }) } }
     val included = remember { mutableStateListOf<Boolean>().apply { addAll(preview.rows.map { it.match != null }) } }
-    val requested = remember { mutableStateMapOf<Int, Long?>() } // null: asking, else the request's id
+    val requested = remember { mutableStateMapOf<Int, String?>() } // null: asking, else what the server said ("queued", …)
     // Songs the library doesn't have: left out, kept in their place (greyed out, to request), or kept and all requested.
     var missingMode by remember { mutableStateOf("leave") }
     val keepMissing = missingMode != "leave"
@@ -225,7 +225,7 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
         val s = chosen[i]
         when {
             s != null -> if (included[i]) ImportItem(songId = s.id) else null
-            keepMissing -> ImportItem(track = preview.rows[i].track, requestId = requested[i])
+            keepMissing -> ImportItem(track = preview.rows[i].track)
             else -> null
         }
     }
@@ -268,7 +268,7 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                         when (missingMode) {
                             "leave" -> "The playlist has only the songs in the library."
                             "keep" -> "They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest."
-                            else -> "They stay in their place, greyed out, and are all requested after you save (a few a minute, as the music catalog allows). Each one plays like the rest once it arrives."
+                            else -> "They stay in their place, greyed out, and are all requested after you save (songs of the same album as one album request). Each one plays like the rest once it arrives."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -299,14 +299,19 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
         }
         itemsIndexed(preview.rows) { i, row ->
             ImportRowView(
-                row, chosen[i], included[i], if (i in requested) requested[i] != null else null,
+                row, chosen[i], included[i], if (i in requested) requested[i] ?: "busy" else null,
                 onInclude = { included[i] = it },
                 onChoose = { s -> chosen[i] = s; included[i] = s != null },
                 onRequest = {
                     requested[i] = null
                     scope.launch {
                         runCatching { app.social.api.importRequest(row.track) }
-                            .onSuccess { requested[i] = it.id }
+                            .onSuccess {
+                                if (it.status == "not_found") {
+                                    requested.remove(i)
+                                    Toast.makeText(context, it.note ?: "Couldn't find it in the catalog", Toast.LENGTH_LONG).show()
+                                } else requested[i] = it.status
+                            }
                             .onFailure {
                                 requested.remove(i)
                                 Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show()
@@ -323,7 +328,8 @@ private fun ImportRowView(
     row: ImportRow,
     chosen: MixSong?,
     included: Boolean,
-    request: Boolean?,
+    /** null: not asked; "busy": asking; else what the server said ("queued", "requested", "in_library"). */
+    request: String?,
     onInclude: (Boolean) -> Unit,
     onChoose: (MixSong?) -> Unit,
     onRequest: () -> Unit,
@@ -381,11 +387,11 @@ private fun ImportRowView(
             }
             if (chosen == null) {
                 when (request) {
-                    true -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    null, "busy" -> FilledTonalButton(onClick = onRequest, enabled = request == null, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Request") }
+                    else -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                        Text("Requested", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                        Text(when (request) { "queued" -> "Queued"; "in_library" -> "In the library"; else -> "Requested" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     }
-                    else -> FilledTonalButton(onClick = onRequest, enabled = request == null, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Request") }
                 }
             }
         }

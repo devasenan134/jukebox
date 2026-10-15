@@ -96,7 +96,8 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   const [chosen, setChosen] = useState<(MixSong | undefined)[]>(() => preview.rows.map((r) => r.match))
   const [included, setIncluded] = useState<boolean[]>(() => preview.rows.map((r) => !!r.match))
   // Per row: asking for it, or the request made.
-  const [requested, setRequested] = useState<Record<number, 'busy' | number>>({})
+  // Per row: asking, or what the server said ("queued", "requested", "in_library").
+  const [requested, setRequested] = useState<Record<number, string>>({})
   // Songs the library doesn't have: left out, kept in their place (greyed out, to request), or kept and all requested.
   const [missingMode, setMissingMode] = useState<'leave' | 'keep' | 'request'>('leave')
   const keepMissing = missingMode !== 'leave'
@@ -110,8 +111,7 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   const items: ImportItem[] = preview.rows.flatMap((r, i): ImportItem[] => {
     const s = chosen[i]
     if (s) return included[i] ? [{ songId: s.id }] : []
-    const asked = requested[i]
-    return keepMissing ? [{ track: r.track, requestId: typeof asked === 'number' ? asked : undefined }] : []
+    return keepMissing ? [{ track: r.track }] : []
   })
 
   const choose = (i: number, s: MixSong | undefined) => {
@@ -122,7 +122,10 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
     setRequested({ ...requested, [i]: 'busy' })
     try {
       const asked = await social.importRequest(preview.rows[i].track)
-      setRequested((r) => ({ ...r, [i]: asked.id }))
+      if (asked.status === 'not_found') {
+        setRequested((r) => { const n = { ...r }; delete n[i]; return n })
+        toast(asked.note || "Couldn't find it in the catalog", true)
+      } else setRequested((r) => ({ ...r, [i]: asked.status }))
     } catch (e) {
       setRequested((r) => { const n = { ...r }; delete n[i]; return n })
       toast((e as Error).message || "Couldn't request it", true)
@@ -171,7 +174,7 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
             <div className="body-small muted" style={{ marginTop: 4 }}>
               {missingMode === 'leave' ? 'The playlist has only the songs in the library.'
                 : missingMode === 'keep' ? 'They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest.'
-                  : 'They stay in their place, greyed out, and are all requested after you save (a few a minute, as the music catalog allows). Each one plays like the rest once it arrives.'}
+                  : 'They stay in their place, greyed out, and are all requested after you save (songs of the same album as one album request). Each one plays like the rest once it arrives.'}
             </div>
           </div>
         )}
@@ -210,7 +213,7 @@ function ImportRowView({ row, chosen, included, request, onInclude, onChoose, on
   row: ImportRow
   chosen?: MixSong
   included: boolean
-  request?: 'busy' | number
+  request?: string
   onInclude: (v: boolean) => void
   onChoose: (s: MixSong | undefined) => void
   onRequest: () => void
@@ -245,7 +248,7 @@ function ImportRowView({ row, chosen, included, request, onInclude, onChoose, on
           <button className="btn text small" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())}>{chosen ? 'Change' : 'Pick'}</button>
         )}
         {!chosen && (
-          typeof request === 'number' ? <span className="body-small primary-text" style={{ whiteSpace: 'nowrap' }}><Icon name="check" size={16} /> Requested</span>
+          request && request !== 'busy' ? <span className="body-small primary-text" style={{ whiteSpace: 'nowrap' }}><Icon name="check" size={16} /> {request === 'queued' ? 'Queued' : request === 'in_library' ? 'In the library' : 'Requested'}</span>
             : <button className="btn tonal small" disabled={request === 'busy'} onClick={onRequest}>Request</button>
         )}
       </div>

@@ -13,8 +13,6 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.Parameters
 import io.ktor.http.isSuccess
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -99,9 +97,19 @@ data class MissingSong(
 @Serializable
 data class PlaylistMissing(val songs: List<MissingSong>, val filled: Int = 0)
 
-/** Asking for a song of an imported playlist that isn't in the library. */
+/** Asking for a song of an imported playlist that isn't in the library ([artist], or all its [artists]). */
 @Serializable
-data class ImportRequestMusic(val title: String, val artist: String? = null, val album: String? = null, val catalogId: String? = null)
+data class ImportRequestMusic(
+    val title: String,
+    val artist: String? = null,
+    val album: String? = null,
+    val catalogId: String? = null,
+    val artists: List<String> = emptyList(),
+    val durationMs: Long? = null,
+    val isrc: String? = null,
+) {
+    fun track() = ImportedTrack(title, artists.ifEmpty { listOfNotNull(artist) }, album, durationMs, isrc, catalogId)
+}
 
 /** A playlist as read from its source, before matching. */
 class ReadPlaylist(val name: String, val source: String, val tracks: List<ImportedTrack>, val truncated: Boolean = false, val note: String? = null)
@@ -162,9 +170,11 @@ class PlaylistImports(
         }
         if (known.isEmpty() && missing.isEmpty()) throw ApiError(HttpStatusCode.BadRequest, "No songs to save")
         val playlist = listening.create(me.id, request.name.ifBlank { "Imported playlist" }, known, missing)
-        if (request.requestAll && requests != null) {
-            listening.queueMissing(playlist.id, listening.missing(playlist.id).filter { it.requestId == null }.map { it.id }, me.id)
-            wake.trySend(Unit)
+        queue?.let { q ->
+            val rows = listening.missing(playlist.id)
+            // Requested while checking the import, or (with requestAll) all of them: they wait in the queue.
+            if (request.requestAll) q.add(me, rows.map(::track))
+            q.link(me, rows)
         }
         return ImportCreated(playlist.id, known.size, missing.size)
     }
@@ -206,85 +216,38 @@ class PlaylistImports(
 
     private fun dto(r: MissingRow, request: MusicRequestDto?) = MissingSong(r.id, r.slot, track(r), request, queued = r.queuedBy != null, note = r.note)
 
-    /** Queues every missing song of the playlist that isn't requested yet (or couldn't be found before) to be requested for [me]. */
+    /** The request queue (RequestQueue.kt); null when requests are off. */
+    val queue: RequestQueue? = requests?.let { r ->
+        RequestQueue(db, listening, r, ::matcher) { user, t -> request(user, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId)) }
+    }
+
+    private fun queueOn() = queue ?: throw ApiError(HttpStatusCode.NotFound, "Requests are off on this server")
+
+    /** Asks for a song of an import being checked: it waits in the queue (and is tied to the playlist when it's saved). */
+    suspend fun requestTrack(me: UserDto, wanted: ImportRequestMusic): QueuedRequest =
+        queueOn().add(me, listOf(wanted.track())).single().let { QueuedRequest(it.status, it.note) }
+
+    /** Puts every missing song of the playlist that isn't requested yet (or couldn't be found before) in the queue for [me]. */
     suspend fun requestAll(me: UserDto, playlistId: String): PlaylistMissing {
-        if (requests == null) throw ApiError(HttpStatusCode.NotFound, "Requests are off on this server")
+        val q = queueOn()
         val id = listening.playlist(me.id, playlistId).id
         val rows = listening.missing(id)
-        val asked = requests.byIds(me, rows.mapNotNull { it.requestId })
+        val asked = requests!!.byIds(me, rows.mapNotNull { it.requestId })
         val wanted = rows.filter { r -> r.queuedBy == null && r.requestId?.let(asked::get).let { it == null || it.status == "declined" } }
-        listening.queueMissing(id, wanted.map { it.id }, me.id)
-        log.info("${me.username} queued ${wanted.size} songs of playlist $id to request")
-        wake.trySend(Unit)
+        q.add(me, wanted.map(::track))
+        q.link(me, wanted)
+        log.info("${me.username} asked for ${wanted.size} songs of playlist $id")
         return missing(me, id)
     }
 
-    private val wake = Channel<Unit>(Channel.CONFLATED)
-    /** People who have too many requests open, and until when their queued songs wait. */
-    private val waiting = HashMap<Long, Long>()
-
-    /**
-     * Makes the queued requests one at a time, for as long as the server runs. The catalog answers about 20 calls
-     * a minute, so while it's busy this waits; someone with too many requests open waits a while for some to close.
-     */
-    suspend fun requestQueued() {
-        while (true) {
-            val worked = runCatching { requestNext() }.onFailure { log.warn("Queued request failed", it) }.getOrDefault(false)
-            if (!worked) withTimeoutOrNull(if (waiting.isEmpty()) 10 * 60_000L else LIMIT_WAIT_MS) { wake.receive() }
-        }
-    }
-
-    /** Makes the next queued request; false if there's nothing to do now. */
-    suspend fun requestNext(): Boolean {
-        val requests = requests ?: return false
-        val t = System.currentTimeMillis()
-        waiting.entries.removeIf { it.value < t }
-        val row = listening.nextQueued(waiting.keys) ?: return false
-        val user = db.read { queryOne("SELECT * FROM users WHERE id = ?", row.queuedBy) { it.toUser() } }
-            ?: return true.also { listening.queueResult(row.id) }
-        // Someone with too many requests open: their songs wait (checked before using any of the catalog's calls).
-        if (requests.atLimit(user)) {
-            waiting[user.id] = t + LIMIT_WAIT_MS
-            listening.noteQueued(user.id, WAITS_FOR_LIMIT)
-            return true
-        }
-        if (row.note == WAITS_FOR_LIMIT) listening.noteQueued(user.id, null)
-        val t0 = track(row)
-        try {
-            val made = request(user, ImportRequestMusic(t0.title, t0.artists.firstOrNull(), t0.album, t0.catalogId))
-            listening.queueResult(row.id, requestId = made.id)
-        } catch (e: ApiError) {
-            when (e.status) {
-                HttpStatusCode.ServiceUnavailable -> delay(BUSY_WAIT_MS) // the catalog's calls for this minute are used up
-                HttpStatusCode.TooManyRequests -> {
-                    waiting[user.id] = t + LIMIT_WAIT_MS
-                    listening.noteQueued(user.id, WAITS_FOR_LIMIT)
-                }
-                HttpStatusCode.Conflict -> listening.queueResult(row.id) // it's in the library: filled in at the next look
-                else -> listening.queueResult(row.id, note = e.message)
-            }
-        }
-        return true
-    }
-
-    /**
-     * Requests a missing song of a playlist, and remembers the request with it (so it's filled in when it arrives).
-     * While the catalog is busy it's queued instead, to be requested in a minute or so.
-     */
+    /** Puts a missing song of a playlist in the queue; it's tied to its request once that's made (and filled in when it arrives). */
     suspend fun requestMissing(me: UserDto, playlistId: String, missingId: Long): MissingSong {
+        val q = queueOn()
         val id = listening.playlist(me.id, playlistId).id
         val row = listening.missing(id).firstOrNull { it.id == missingId } ?: throw ApiError(HttpStatusCode.NotFound, "That song isn't in the playlist")
-        val t = track(row)
-        val asked = try {
-            request(me, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId))
-        } catch (e: ApiError) {
-            if (e.status != HttpStatusCode.ServiceUnavailable) throw e
-            listening.queueMissing(id, listOf(row.id), me.id)
-            wake.trySend(Unit)
-            return MissingSong(row.id, row.slot, t, queued = true)
-        }
-        listening.missingRequested(id, row.id, asked.id)
-        return MissingSong(row.id, row.slot, t, asked)
+        q.add(me, listOf(track(row)))
+        q.link(me, listOf(row))
+        return missing(me, id).songs.firstOrNull { it.id == missingId } ?: MissingSong(row.id, row.slot, track(row))
     }
 
     private fun track(row: MissingRow) = json.decodeFromString(ImportedTrack.serializer(), row.trackJson)
@@ -307,7 +270,7 @@ class PlaylistImports(
         return requests.request(me, best.item.id)
     }
 
-    private suspend fun matcher(): ImportMatcher? = mutex.withLock {
+    internal suspend fun matcher(): ImportMatcher? = mutex.withLock {
         val snapshot = music.snapshot() ?: return null
         matcher?.takeIf { it.version == snapshot.version } ?: ImportMatcher(snapshot).also { matcher = it }
     }
@@ -328,11 +291,6 @@ class PlaylistImports(
 
     companion object {
         const val MAX_TRACKS = 1000
-        /** How long the queue waits when the catalog has no calls left this minute. */
-        var BUSY_WAIT_MS = 20_000L
-        /** How long the songs of someone with too many requests open wait before the queue looks again. */
-        const val LIMIT_WAIT_MS = 60_000L
-        const val WAITS_FOR_LIMIT = "Waits until fewer of your requests are open"
     }
 }
 

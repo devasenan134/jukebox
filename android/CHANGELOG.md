@@ -8,6 +8,16 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## The Request Queue (0.22.0)
+
+### New
+- **Every Request goes to a queue.** Request on a song, Request all, and "Keep and request all" only put songs in the server's queue and answer at once; rows show Queued. The server then takes them one at a time: a song that's in the library now is filled in, a song someone already asked for joins that request, and only the rest are looked up in the music catalog.
+- **Album requests.** When two or more queued songs are from the same album, the album is requested once for all of them, and each song fills in when it arrives.
+- **No limit on requests.** The limit of 20 open requests per person is gone.
+
+### Server
+- `request_queue` (schema 29): each person's songs once (duplicates dropped), worked through in order, waiting quietly when Apple's catalog is out of calls for the minute. `POST /imports/request` answers `{status, note}` and takes the whole song (`artists`, `durationMs`, `isrc`).
+
 ## Request All, Queued (0.21.1)
 
 ### Improved

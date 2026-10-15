@@ -133,7 +133,7 @@ export function PlaylistScreen() {
     try {
       const asked = await social.requestMissing(id, m.id)
       missing.set({ songs: gaps.map((g) => (g.id === m.id ? asked : g)), filled: 0 })
-      toast(asked.queued ? "The music catalog is busy. It's queued and will be requested in a minute" : 'Requested. It joins the playlist when it arrives')
+      toast(asked.queued ? "Queued. It's requested shortly and joins the playlist when it arrives" : asked.request ? 'Requested. It joins the playlist when it arrives' : asked.note || 'Done')
     } catch (e) {
       toast((e as Error).message || "Couldn't request it", true)
     }
@@ -144,7 +144,7 @@ export function PlaylistScreen() {
     setRequestingAll(true)
     try {
       missing.set(await social.requestAllMissing(id))
-      toast(`Requesting ${toRequest.length === 1 ? 'it' : `${toRequest.length} songs`}, a few a minute. They join the playlist when they arrive`)
+      toast(`Queued ${toRequest.length === 1 ? 'it' : `${toRequest.length} songs`}. They're requested shortly and join the playlist when they arrive`)
     } catch (e) {
       toast((e as Error).message || "Couldn't request them", true)
     }
@@ -210,7 +210,7 @@ export function PlaylistScreen() {
           )}
           {(toRequest.length > 0 || queued > 0) && (
             <div className="body-medium muted" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px 12px', flexWrap: 'wrap' }}>
-              {queued > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner size={16} />Requesting {queued} {queued === 1 ? 'song' : 'songs'}, a few a minute.</span>}
+              {queued > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner size={16} />Requesting {queued} {queued === 1 ? 'song' : 'songs'}…</span>}
               {toRequest.length > 0 && (
                 <>
                   {toRequest.length === 1 ? "1 song isn't requested yet." : `${toRequest.length} songs aren't requested yet.`}

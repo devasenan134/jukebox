@@ -235,7 +235,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                             if (toRequest.isEmpty()) {
                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                 Text(
-                                    "Requesting $queued ${if (queued == 1) "song" else "songs"}, a few a minute.",
+                                    "Requesting $queued ${if (queued == 1) "song" else "songs"}…",
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.weight(1f),
                                 )
@@ -254,7 +254,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                                             .onSuccess {
                                                 missing = it.songs
                                                 val n = toRequest.size
-                                                Toast.makeText(context, "Requesting ${if (n == 1) "it" else "$n songs"}, a few a minute. They join the playlist when they arrive", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "Queued ${if (n == 1) "it" else "$n songs"}. They're requested shortly and join the playlist when they arrive", Toast.LENGTH_LONG).show()
                                             }
                                             .onFailure { Toast.makeText(context, it.message ?: "Couldn't request them", Toast.LENGTH_LONG).show() }
                                         requestingAll = false
@@ -271,7 +271,11 @@ fun PlaylistScreen(id: String, nav: Nav) {
                             runCatching { app.social.api.requestMissing(playlist.id, m.id) }
                                 .onSuccess { asked ->
                                     missing = missing.map { if (it.id == m.id) asked else it }
-                                    val text = if (asked.queued) "The music catalog is busy. It's queued and will be requested in a minute" else "Requested. It joins the playlist when it arrives"
+                                    val text = when {
+                                        asked.queued -> "Queued. It's requested shortly and joins the playlist when it arrives"
+                                        asked.request != null -> "Requested. It joins the playlist when it arrives"
+                                        else -> asked.note ?: "Done"
+                                    }
                                     Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
                                 }
                                 .onFailure { Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show() }

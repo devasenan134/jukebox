@@ -353,15 +353,8 @@ class MusicRequests(
         val item = catalog.lookup(catalogId.take(100)) ?: throw notFoundOrBusy()
         if (shelf()?.find(item) != null) throw ApiError(HttpStatusCode.Conflict, "It's already in the library")
         val key = matchKey(item)
-        // Admins fill the requests themselves, so theirs aren't limited.
-        val admin = isAdmin(me)
         val (id, isNew) = db.tx {
-            val open = queryOne(
-                "SELECT count(*) FROM music_request_askers a JOIN music_requests r ON r.id = a.request_id WHERE a.user_id = ? AND r.status = 'open'", me.id,
-            ) { it.getInt(1) } ?: 0
             val existing = queryOne("SELECT id, status FROM music_requests WHERE match_key = ?", key) { it.getLong(1) to it.getString(2) }
-            val asked = existing != null && queryOne("SELECT 1 FROM music_request_askers WHERE request_id = ? AND user_id = ?", existing.first, me.id) { true } != null
-            if (!(asked && existing?.second == "open") && open >= MAX_OPEN && !admin) throw ApiError(HttpStatusCode.TooManyRequests, "You can have up to $MAX_OPEN requests waiting")
             val itemJson = json.encodeToString(CatalogItem.serializer(), item)
             val id = when {
                 existing == null -> insert(
@@ -386,12 +379,16 @@ class MusicRequests(
         return db.tx { dto(id, me.id) }!!
     }
 
-    /** Whether [me] has as many requests waiting as they may (admins never do). */
-    suspend fun atLimit(me: UserDto): Boolean = !isAdmin(me) && (db.tx {
-        queryOne(
-            "SELECT count(*) FROM music_request_askers a JOIN music_requests r ON r.id = a.request_id WHERE a.user_id = ? AND r.status = 'open'", me.id,
-        ) { it.getInt(1) }
-    } ?: 0) >= MAX_OPEN
+    /** Adds [me] to request [id] (someone asked for the same music already); null if it was declined or is gone. */
+    suspend fun join(me: UserDto, id: Long): MusicRequestDto? = db.tx {
+        val status = queryOne("SELECT status FROM music_requests WHERE id = ?", id) { it.getString(1) }
+        if (status == null || status == "declined") return@tx null
+        update("INSERT OR IGNORE INTO music_request_askers (request_id, user_id, asked_at) VALUES (?, ?, ?)", id, me.id, now())
+        dto(id, me.id)
+    }
+
+    /** Whether the catalog is out of calls for now. */
+    suspend fun catalogBusy(): Boolean = catalog.busy()
 
     /** The catalog didn't have it, or (when it's making no more calls for now) couldn't be asked. */
     suspend fun notFoundOrBusy(what: String = "Couldn't find that in the catalog"): ApiError =
@@ -729,7 +726,6 @@ class MusicRequests(
     }
 
     companion object {
-        const val MAX_OPEN = 20
         const val CATALOG_BUSY = "The music catalog is busy. Try again in a minute"
         /** A file name in a request's folder: no folders, nothing hidden. */
         private val SAFE_FILE = Regex("""^[^/\\\u0000.][^/\\\u0000]{0,200}$""")

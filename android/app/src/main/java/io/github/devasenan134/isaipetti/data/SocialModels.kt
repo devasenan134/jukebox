@@ -570,7 +570,11 @@ data class ImportCreated(val playlistId: String, val songCount: Int = 0, val mis
 
 /** A song of a saved playlist: one of the library's ([songId]), or one it doesn't have ([track]), kept greyed out to request. */
 @Serializable
-data class ImportItem(val songId: String? = null, val track: ImportedTrack? = null, val requestId: Long? = null)
+data class ImportItem(val songId: String? = null, val track: ImportedTrack? = null)
+
+/** What became of a song asked for: "queued", "requested", "in_library" or "not_found" (see [note]). */
+@Serializable
+data class QueuedRequest(val status: String = "queued", val note: String? = null)
 
 /** A song of a playlist the library doesn't have: before the song at [before] (the end if past it), and its request. */
 @Serializable

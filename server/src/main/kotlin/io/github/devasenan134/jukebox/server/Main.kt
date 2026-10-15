@@ -174,7 +174,7 @@ fun Application.jukeboxServer(
     }
     val limiter = RateLimiter(maxPerMinute = 10)
     // Missing songs of playlists queued to be requested, made into requests at the pace the catalog allows.
-    imports?.let { launch { it.requestQueued() } }
+    imports?.queue?.let { launch { it.run() } }
     // Every 10 minutes, forget chat pictures nobody can see any more.
     launch {
         delay(30.seconds)
@@ -409,7 +409,8 @@ fun Application.jukeboxServer(
                 fun importsOn() = imports ?: throw ApiError(HttpStatusCode.NotFound, "Importing is off on this server")
                 post("/preview") { call.respond(importsOn().preview(call.receive())) }
                 post { call.respond(importsOn().create(call.me(), call.receive())) }
-                post("/request") { call.respond(importsOn().request(call.me(), call.receive())) }
+                // Asking for a song while checking an import: it waits in the request queue.
+                post("/request") { call.respond(importsOn().requestTrack(call.me(), call.receive())) }
             }
 
             // Requests for music that isn't in the library; admins answer them.

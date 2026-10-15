@@ -1,5 +1,5 @@
 import type {
-  CatalogResults, HomeMixes, ImportedTrack, ImportItem, ImportPreview, LibrarySearchResults, MissingSong, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist, PlaylistMissing,
+  CatalogResults, HomeMixes, ImportedTrack, ImportItem, ImportPreview, LibrarySearchResults, MissingSong, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist, PlaylistMissing, QueuedRequest,
   SessionResponse, SocialUser, SongRef,
 } from './types'
 import type {
@@ -124,7 +124,8 @@ export const social = {
   importPreview: (o: { url?: string; text?: string; name?: string }) => post<ImportPreview>('/imports/preview', o),
   importCreate: (name: string, items: ImportItem[], requestAll = false) =>
     post<{ playlistId: string; songCount: number; missingCount: number }>('/imports', { name, items, requestAll }),
-  importRequest: (t: ImportedTrack) => post<MusicRequest>('/imports/request', { title: t.title, artist: t.artists[0], album: t.album, catalogId: t.catalogId }),
+  /** Asks for a song of an import being checked: it waits in the server's request queue. */
+  importRequest: (t: ImportedTrack) => post<QueuedRequest>('/imports/request', { ...t, artist: t.artists[0] }),
 
   /** A playlist's songs the library doesn't have (kept from an import); ones that arrived are filled in first. */
   playlistMissing: (id: string) => get<PlaylistMissing>(`/playlists/${enc(id)}/missing`),

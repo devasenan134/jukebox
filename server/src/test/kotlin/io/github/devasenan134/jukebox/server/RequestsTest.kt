@@ -7,7 +7,6 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -346,7 +345,9 @@ class PlaylistMissingTest {
         assertEquals(listOf(0, 1), missing.songs.map { it.before }) // before Kanave Kanave, and at the end
         assertEquals(listOf("s1"), listening.playlist(1, id).songIds) // players only ever see real songs
 
-        val asked = imports.requestMissing(alice, id, missing.songs[0].id)
+        assertTrue(imports.requestMissing(alice, id, missing.songs[0].id).queued) // waits in the queue
+        while (imports.queue!!.next()) Unit
+        val asked = imports.missing(alice, id).songs[0]
         assertEquals("open", asked.request!!.status)
         assertEquals(asked.request.id, imports.missing(alice, id).songs[0].request?.id)
 
@@ -366,66 +367,118 @@ class PlaylistMissingTest {
 }
 
 class RequestQueueTest {
-    /** A catalog that's busy (finds nothing, says so) until [freeAfter] searches were turned away. */
-    private class BusyCatalog(val items: List<CatalogItem>, var freeAfter: Int) : Catalog {
+    /** A catalog that's busy (finds nothing, says so) for its first [busyFor] searches, and counts its searches. */
+    private class BusyCatalog(val items: List<CatalogItem>, var busyFor: Int = 0) : Catalog {
         var busyNow = false
+        var searches = 0
         override suspend fun search(query: String): List<CatalogItem> {
-            busyNow = freeAfter-- > 0
-            return if (busyNow) emptyList() else items.filter { Fuzzy.match(Fuzzy.words(query), Fuzzy.words(it.title)) > 0 }
+            searches++
+            busyNow = busyFor-- > 0
+            if (busyNow) return emptyList()
+            val q = Fuzzy.words(query)
+            return items.filter { Fuzzy.match(q, Fuzzy.words(it.title)) > 0 || Fuzzy.match(q, Fuzzy.words(it.movie)) > 0 }
         }
         override suspend fun lookup(id: String) = items.firstOrNull { it.id == id }
         override suspend fun busy() = busyNow
     }
 
-    @Test
-    fun `request all waits out a busy catalog, and says which songs it couldn't find`(): Unit = runBlocking {
-        PlaylistImports.BUSY_WAIT_MS = 0
-        val db = Db(File.createTempFile("jukebox-queue", ".db").apply { delete(); deleteOnExit() }.path)
-        db.tx { update("INSERT INTO users (id, username, display_name, created_at) VALUES (1, 'alice', 'Alice', 0)") }
-        val catalog = BusyCatalog(
-            listOf(CatalogItem("itunes-song-3", "song", "Nenjukkulle", "Kadal", 2012), CatalogItem("itunes-song-4", "song", "Moongil Thottam", "Kadal", 2012)),
-            freeAfter = 1,
-        )
-        val requests = MusicRequests(db, GrowingMusic(), catalog, Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
-        val listening = io.github.devasenan134.jukebox.server.library.Listening(db)
-        val imports = PlaylistImports(db, GrowingMusic(), listening, requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
-        val alice = UserDto(1, "alice", "Alice")
+    private val alice = UserDto(1, "alice", "Alice")
+    private val bob = UserDto(2, "bob", "Bob")
 
-        val id = imports.create(
+    private class Setup(val db: Db, val catalog: BusyCatalog, val music: GrowingMusic, val requests: MusicRequests, val listening: io.github.devasenan134.jukebox.server.library.Listening, val imports: PlaylistImports) {
+        val queue get() = imports.queue!!
+        suspend fun drain() { while (queue.next()) Unit }
+    }
+
+    private fun setUp(catalog: BusyCatalog): Setup {
+        RequestQueue.BUSY_WAIT_MS = 0
+        val db = Db(File.createTempFile("jukebox-queue", ".db").apply { delete(); deleteOnExit() }.path)
+        runBlocking { db.tx { listOf(1L to "alice", 2L to "bob").forEach { (id, n) -> update("INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, 0)", id, n, n) } } }
+        val music = GrowingMusic()
+        val requests = MusicRequests(db, music, catalog, Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
+        val listening = io.github.devasenan134.jukebox.server.library.Listening(db)
+        val imports = PlaylistImports(db, music, listening, requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
+        return Setup(db, catalog, music, requests, listening, imports)
+    }
+
+    @Test
+    fun `requests wait in the queue, a busy catalog is waited out, and a song it doesn't have says so`(): Unit = runBlocking {
+        val s = setUp(
+            BusyCatalog(
+                listOf(CatalogItem("itunes-song-3", "song", "Nenjukkulle", "Kadal", 2012), CatalogItem("itunes-song-4", "song", "Moongil Thottam", "Kadal", 2012)),
+                busyFor = 1,
+            ),
+        )
+        val id = s.imports.create(
             alice,
             ImportCreateRequest(
-                "Kadal",
+                "Mix",
                 items = listOf(ImportedTrack("Nenjukkulle"), ImportedTrack("Moongil Thottam"), ImportedTrack("Nothing like it")).map { ImportItem(track = it) },
                 requestAll = true,
             ),
         ).playlistId
-        assertTrue(imports.missing(alice, id).songs.all { it.queued })
+        assertTrue(s.imports.missing(alice, id).songs.all { it.queued })
+        assertEquals(0, s.catalog.searches) // nothing asked of the catalog while you wait
 
-        while (imports.requestNext()) Unit // the first try finds the catalog busy and comes back to it
-        val songs = imports.missing(alice, id).songs
+        s.drain()
+        val songs = s.imports.missing(alice, id).songs
         assertEquals(listOf("open", "open", null), songs.map { it.request?.status })
         assertEquals(listOf(false, false, false), songs.map { it.queued })
         assertTrue(songs[2].note!!.startsWith("Couldn't find"))
 
-        // A single Request while the catalog is busy is queued instead of failing.
-        catalog.freeAfter = 1
-        val again = imports.requestMissing(alice, id, songs[2].id)
-        assertTrue(again.queued)
+        // Asking again for one that's requested changes nothing; the one it couldn't find is tried again.
+        assertEquals("requested", s.imports.requestTrack(alice, ImportRequestMusic("Nenjukkulle")).status)
+        assertEquals("queued", s.imports.requestMissing(alice, id, songs[2].id).let { if (it.queued) "queued" else "?" })
     }
 
     @Test
-    fun `admins have no limit on open requests, everyone else waits at it`(): Unit = runBlocking {
-        val db = Db(File.createTempFile("jukebox-limit", ".db").apply { delete(); deleteOnExit() }.path)
-        db.tx {
-            update("INSERT INTO users (id, username, display_name, created_at) VALUES (1, 'alice', 'Alice', 0)")
-            update("INSERT INTO users (id, username, display_name, created_at) VALUES (3, 'admin', 'Admin', 0)")
-            repeat(MusicRequests.MAX_OPEN) { n ->
-                val r = insert("INSERT INTO music_requests (match_key, catalog_id, item_json, status, created_at) VALUES (?, ?, '{}', 'open', 0)", "k$n", "c$n")
-                listOf(1L, 3L).forEach { update("INSERT INTO music_request_askers (request_id, user_id, asked_at) VALUES (?, ?, 0)", r, it) }
-            }
-        }
-        val requests = MusicRequests(db, GrowingMusic(), FakeCatalog(emptyList()), Push(db, RecordingPush()), isAdmin = { it.id == 3L }, adminIds = { listOf(3L) })
-        assertTrue(requests.atLimit(UserDto(1, "alice", "Alice")))
-        assertFalse(requests.atLimit(UserDto(3, "admin", "Admin")))
+    fun `a song in the library is filled in, and a song someone asked for already is joined, without the catalog`(): Unit = runBlocking {
+        val s = setUp(BusyCatalog(listOf(CatalogItem("itunes-song-3", "song", "Nenjukkulle", "Kadal", 2012))))
+        s.imports.requestTrack(bob, ImportRequestMusic("Nenjukkulle"))
+        s.drain()
+        assertEquals(1, s.catalog.searches)
+
+        val id = s.imports.create(
+            alice,
+            ImportCreateRequest("Mix", items = listOf(ImportItem(track = ImportedTrack("Nenjukkulle")), ImportItem(track = ImportedTrack("Kanave Kanave", listOf("Anirudh"), "David")))),
+        ).playlistId
+        // Kanave Kanave is in the library, but wasn't sure at import time: pretend it was queued anyway.
+        s.imports.requestAll(alice, id)
+        s.drain()
+        assertEquals(1, s.catalog.searches) // Alice joined Bob's request
+        val songs = s.imports.missing(alice, id).songs
+        assertEquals(listOf("Nenjukkulle"), songs.map { it.track.title }) // Kanave Kanave became a song of the playlist
+        assertEquals(listOf("bob", "alice"), songs.single().request!!.askedBy)
+    }
+
+    @Test
+    fun `two songs of one album are requested as the album`(): Unit = runBlocking {
+        val s = setUp(
+            BusyCatalog(
+                listOf(
+                    CatalogItem("itunes-movie-11", "movie", "Minsara Kanavu", "Minsara Kanavu", 1997, "A.R. Rahman", trackCount = 7),
+                    CatalogItem("itunes-song-21", "song", "Vennilave Vennilave", "Minsara Kanavu", 1997),
+                    CatalogItem("itunes-song-22", "song", "Strawberry Kanne", "Minsara Kanavu", 1997),
+                    CatalogItem("itunes-song-31", "song", "Narumugaye", "Iruvar", 1997),
+                ),
+            ),
+        )
+        val album = "Minsara Kanavu (Original Motion Picture Soundtrack)"
+        val id = s.imports.create(
+            alice,
+            ImportCreateRequest(
+                "90s",
+                items = listOf(
+                    ImportedTrack("Vennilave Vennilave", listOf("Hariharan"), album),
+                    ImportedTrack("Narumugaye", listOf("Unnikrishnan"), "Iruvar"),
+                    ImportedTrack("Strawberry Kanne", listOf("Krishnakumar"), album),
+                ).map { ImportItem(track = it) },
+                requestAll = true,
+            ),
+        ).playlistId
+        s.drain()
+        val songs = s.imports.missing(alice, id).songs
+        assertEquals(listOf("movie", "song", "movie"), songs.map { it.request?.item?.kind })
+        assertEquals(songs[0].request!!.id, songs[2].request!!.id) // one album request for both
     }
 }
