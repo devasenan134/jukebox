@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { MissingSong, Playlist, PlaylistMissing, Song } from '../api/types'
 import { mixSongToSong, mixSource, MIX_AUTHOR } from '../api/types'
-import { social } from '../api/social'
+import { social, SocialError } from '../api/social'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { activity, useRecentPlaylists } from '../state/history'
@@ -12,7 +12,7 @@ import { useSession } from '../state/session'
 import { Cover, formatDuration, formatTotalDuration, likeCount, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
 import { usePhotoPicker } from '../ui/PhotoPicker'
 import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
-import { Dialog, ErrorBox, Icon, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
+import { Dialog, ErrorBox, Icon, IconButton, MoreMenu, NameDialog, Spinner, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover, mixTint, updatedText } from '../ui/mixes'
 import { useNav } from '../ui/nav'
 import { keys, playlistChanged } from '../state/queries'
@@ -78,6 +78,8 @@ export function PlaylistScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filled, id])
   const mineNow = data.data != null && data.data.owner === username
+  // Asking for every missing song not asked for yet, in turn: how far it got.
+  const [requestingAll, setRequestingAll] = useState<{ done: number; total: number } | null>(null)
   // How many friends liked a playlist you made (your own like doesn't count).
   const likeTotal = useLoad<Record<string, number>>(['playlist-likes', id, mineNow], () => (mineNow ? social.playlistLikeCounts([id]) : Promise.resolve({})), 30_000).data?.[id] ?? 0
   const cover = usePhotoPicker({
@@ -128,6 +130,33 @@ export function PlaylistScreen() {
     } catch (e) {
       toast((e as Error).message || "Couldn't request it", true)
     }
+  }
+  const toRequest = gaps.filter((m) => !m.request || m.request.status === 'declined')
+  const requestAll = async () => {
+    const list = toRequest
+    let current = gaps
+    let asked = 0
+    let failed = 0
+    setRequestingAll({ done: 0, total: list.length })
+    for (const m of list) {
+      try {
+        const made = await social.requestMissing(id, m.id)
+        current = current.map((g) => (g.id === m.id ? made : g))
+        missing.set({ songs: current, filled: 0 })
+        asked++
+      } catch (e) {
+        failed++
+        // Too many requests waiting: the rest would fail the same way.
+        if (e instanceof SocialError && e.code === 429) {
+          toast(e.message, true)
+          break
+        }
+      }
+      setRequestingAll({ done: asked + failed, total: list.length })
+    }
+    setRequestingAll(null)
+    if (asked) toast(`Requested ${asked} ${asked === 1 ? 'song' : 'songs'}. They join the playlist when they arrive${failed ? `. ${failed} couldn't be requested` : ''}`, failed > 0)
+    else if (failed) toast("Couldn't request them. They may not be in the catalog", true)
   }
   const removeMissing = (m: MissingSong) => change(() => social.removeMissing(id, m.id), 'Removed from this playlist')
   const missingRow = (m: MissingSong) => (
@@ -185,6 +214,18 @@ export function PlaylistScreen() {
             <div className="hero-bar">
               {menu}
               <span className="muted">{gaps.length ? 'None of its songs are in the library yet.' : mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
+            </div>
+          )}
+          {(toRequest.length > 0 || requestingAll) && (
+            <div className="body-medium muted" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px 12px', flexWrap: 'wrap' }}>
+              {requestingAll ? (
+                <><Spinner size={18} />Requesting {requestingAll.done + 1} of {requestingAll.total}…</>
+              ) : (
+                <>
+                  {toRequest.length === 1 ? "1 song isn't in the library." : `${toRequest.length} songs aren't in the library.`}
+                  <button className="btn tonal small" onClick={() => void requestAll()}>Request all</button>
+                </>
+              )}
             </div>
           )}
           <div className="tracks">

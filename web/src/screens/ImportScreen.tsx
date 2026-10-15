@@ -1,10 +1,12 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ImportItem, ImportPreview, ImportRow, MixSong } from '../api/types'
-import { social } from '../api/social'
+import { catalog } from '../api/catalog'
+import { social, SocialError } from '../api/social'
+import { pause as pausePlayer } from '../player/player'
 import { useMyPlaylists } from '../state/library'
 import { playlistChanged } from '../state/queries'
 import { Cover, formatDuration, ScreenHeader } from '../ui/components'
-import { Checkbox, Icon, Menu, Spinner, toast } from '../ui/kit'
+import { Checkbox, Dialog, Icon, IconButton, Menu, Spinner, toast } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
 // Importing a playlist (ui/library/ImportScreen.kt in the app): paste a link to a Spotify, Apple Music or YouTube
@@ -98,7 +100,13 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
   // Songs the library doesn't have: left out, or kept in their place (greyed out, to request).
   const [keepMissing, setKeepMissing] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Asking for every missing song in turn: how far it got.
+  const [requestingAll, setRequestingAll] = useState<{ done: number; total: number } | null>(null)
+  // Going through the matches it wasn't sure of, one at a time.
+  const [reviewing, setReviewing] = useState(false)
   const found = preview.rows.filter((r) => r.match).length
+  const unsure = preview.rows.flatMap((r, i) => ((r.match && !r.sure) || (!r.match && r.choices.length) ? [i] : []))
+  const toRequest = preview.rows.flatMap((_, i) => (!chosen[i] && requested[i] === undefined ? [i] : []))
   const songs = chosen.filter((s, i) => s && included[i]) as MixSong[]
   const missing = preview.rows.filter((_, i) => !chosen[i]).length
   const items: ImportItem[] = preview.rows.flatMap((r, i): ImportItem[] => {
@@ -121,6 +129,32 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
       setRequested((r) => { const n = { ...r }; delete n[i]; return n })
       toast((e as Error).message || "Couldn't request it", true)
     }
+  }
+  const requestAll = async () => {
+    const list = toRequest
+    setRequestingAll({ done: 0, total: list.length })
+    let asked = 0
+    let failed = 0
+    for (const i of list) {
+      setRequested((r) => ({ ...r, [i]: 'busy' }))
+      try {
+        const made = await social.importRequest(preview.rows[i].track)
+        setRequested((r) => ({ ...r, [i]: made.id }))
+        asked++
+      } catch (e) {
+        setRequested((r) => { const n = { ...r }; delete n[i]; return n })
+        failed++
+        // Too many requests waiting: the rest would fail the same way.
+        if (e instanceof SocialError && e.code === 429) {
+          toast(e.message, true)
+          break
+        }
+      }
+      setRequestingAll({ done: asked + failed, total: list.length })
+    }
+    setRequestingAll(null)
+    if (asked) toast(`Requested ${asked} ${asked === 1 ? 'song' : 'songs'}${failed ? `. ${failed} couldn't be requested (not in the catalog, or already asked for)` : ''}`, failed > 0)
+    else if (failed) toast("Couldn't request them. They may not be in the catalog", true)
   }
   const save = async () => {
     setSaving(true)
@@ -149,6 +183,18 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
           {found < preview.rows.length && ' The others can be requested.'}
         </div>
         {preview.note && <div className="body-small muted" style={{ marginTop: 4 }}>{preview.note}</div>}
+        {(unsure.length > 0 || toRequest.length > 0 || requestingAll) && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            {unsure.length > 0 && (
+              <button className="btn tonal" onClick={() => setReviewing(true)}><Icon name="hearing" size={18} />Check {unsure.length} unsure {unsure.length === 1 ? 'match' : 'matches'}</button>
+            )}
+            {requestingAll ? (
+              <span className="body-medium muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Spinner size={18} />Requesting {requestingAll.done + 1} of {requestingAll.total}…</span>
+            ) : toRequest.length > 0 && (
+              <button className="btn tonal" onClick={() => void requestAll()}><Icon name="library_add" size={18} />Request all missing ({toRequest.length})</button>
+            )}
+          </div>
+        )}
         {missing > 0 && (
           <div style={{ marginTop: 12 }}>
             <div className="body-medium">{missing === 1 ? 'The song that isn\'t in the library:' : `The ${missing} songs that aren't in the library:`}</div>
@@ -170,6 +216,16 @@ function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; on
           <button className="btn text" onClick={onBack}>Start over</button>
         </div>
       </div>
+      {reviewing && (
+        <UnsureReview
+          rows={preview.rows}
+          indices={unsure}
+          chosen={chosen}
+          source={SOURCES[preview.source] ?? preview.source}
+          onDecide={choose}
+          onClose={() => setReviewing(false)}
+        />
+      )}
       <div style={{ padding: '0 8px 24px' }}>
         {preview.rows.map((row, i) => (
           <ImportRowView
@@ -238,5 +294,101 @@ function ImportRowView({ row, chosen, included, request, onInclude, onChoose, on
         />
       )}
     </div>
+  )
+}
+
+/** The preview player, apart from the music player so the queue is left alone. */
+let previewAudio: HTMLAudioElement | null = null
+
+/**
+ * The matches it wasn't sure of, one at a time: the song as the other service has it next to the library's
+ * best guess, which can be played for a moment. Same song takes it; Not this one shows the next guess (and
+ * after the last, leaves the song out); Skip keeps it as it is.
+ */
+function UnsureReview({ rows, indices, chosen, source, onDecide, onClose }: {
+  rows: ImportRow[]
+  indices: number[]
+  chosen: (MixSong | undefined)[]
+  source: string
+  onDecide: (i: number, s: MixSong | undefined) => void
+  onClose: () => void
+}) {
+  const [at, setAt] = useState(0)
+  const [guess, setGuess] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  useEffect(() => () => previewAudio?.pause(), [])
+  const i = indices[at]
+  const row = rows[i]
+  // The one chosen now first, then the others it could be.
+  const guesses = row ? [chosen[i] ?? row.match, ...row.choices].filter((s, n, all): s is MixSong => !!s && all.findIndex((x) => x?.id === s.id) === n) : []
+  const song = guesses[guess]
+
+  const stop = () => {
+    previewAudio?.pause()
+    setPlaying(false)
+  }
+  const next = () => {
+    stop()
+    setGuess(0)
+    if (at + 1 >= indices.length) {
+      toast('All checked')
+      onClose()
+    } else setAt(at + 1)
+  }
+  const play = () => {
+    if (!song) return
+    if (!previewAudio) previewAudio = new Audio()
+    const a = previewAudio
+    if (playing) return stop()
+    pausePlayer()
+    a.src = catalog.streamUrl(song.id)
+    // A bit into the song, where it's more itself than its first notes.
+    a.onloadedmetadata = () => { if (a.duration > 60) a.currentTime = Math.min(a.duration * 0.3, 60) }
+    a.onended = () => setPlaying(false)
+    a.onerror = () => { setPlaying(false); toast("Couldn't play it") }
+    void a.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
+  }
+  if (!row) return null
+  const t = row.track
+  const search = `https://www.youtube.com/results?search_query=${encodeURIComponent([t.title, ...t.artists.slice(0, 2)].join(' '))}`
+
+  return (
+    <Dialog
+      title={`Is it the same song? (${at + 1} of ${indices.length})`}
+      onClose={() => { stop(); onClose() }}
+      actions={
+        <>
+          <button className="btn text" onClick={next}>Skip</button>
+          <button className="btn tonal" onClick={() => {
+            stop()
+            if (guess + 1 < guesses.length) setGuess(guess + 1)
+            else { onDecide(i, undefined); next() }
+          }}>{guess + 1 < guesses.length ? 'Not this one' : 'None of these'}</button>
+          <button className="btn" disabled={!song} onClick={() => { onDecide(i, song); next() }}>Same song</button>
+        </>
+      }
+    >
+      <div style={{ color: 'var(--on-surface)', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 'min(420px, 80vw)' }}>
+        <div>
+          <div className="body-small muted">On {source}</div>
+          <div className="title-medium">{t.title}</div>
+          <div className="body-small muted">{[t.artists.join(', '), t.album, t.durationMs ? formatDuration(t.durationMs / 1000) : null].filter(Boolean).join(' · ')}</div>
+          <a className="body-small" href={search} target="_blank" rel="noreferrer">Hear it on YouTube</a>
+        </div>
+        {song && (
+          <div>
+            <div className="body-small muted">In the library{guesses.length > 1 ? ` (guess ${guess + 1} of ${guesses.length})` : ''}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+              <Cover coverArt={song.coverArt} size={150} corner={6} style={{ width: 56, height: 56, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="title-medium ellipsis">{song.title}</div>
+                <div className="body-small muted ellipsis">{[song.album, song.artist, formatDuration(song.duration)].filter(Boolean).join(' · ')}</div>
+              </div>
+              <IconButton icon={playing ? 'pause' : 'play_arrow'} label={playing ? 'Pause' : 'Play a bit'} filled onClick={play} />
+            </div>
+          </div>
+        )}
+      </div>
+    </Dialog>
   )
 }

@@ -50,6 +50,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.devasenan134.isaipetti.data.ImportItem
+import io.github.devasenan134.isaipetti.data.SocialException
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import io.github.devasenan134.isaipetti.R
 import io.github.devasenan134.isaipetti.data.ImportPreview
 import io.github.devasenan134.isaipetti.data.ImportRow
 import io.github.devasenan134.isaipetti.data.MixSong
@@ -201,7 +215,13 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
     // Songs the library doesn't have: left out, or kept in their place (greyed out, to request).
     var keepMissing by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    // Asking for every missing song in turn: how many are done, of how many (null when not asking).
+    var requestingAll by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    // Going through the matches it wasn't sure of, one at a time.
+    var reviewing by remember { mutableStateOf(false) }
     val found = preview.rows.count { it.match != null }
+    val unsure = preview.rows.indices.filter { i -> preview.rows[i].let { (it.match != null && !it.sure) || (it.match == null && it.choices.isNotEmpty()) } }
+    val toRequest = preview.rows.indices.filter { chosen[it] == null && it !in requested }
     val songs = chosen.indices.mapNotNull { i -> chosen[i]?.takeIf { included[i] } }
     val missing = chosen.count { it == null }
     val items = preview.rows.indices.mapNotNull { i ->
@@ -213,6 +233,14 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
         }
     }
 
+    if (reviewing) {
+        UnsureReview(
+            preview, unsure, chosen,
+            source = SOURCES[preview.source] ?: preview.source,
+            onDecide = { i, s -> chosen[i] = s; included[i] = s != null },
+            onClose = { reviewing = false },
+        )
+    }
     LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
             ScreenHeader("Import a playlist", onBack = onBack)
@@ -224,6 +252,46 @@ private fun ImportReview(preview: ImportPreview, onBack: () -> Unit, onSaved: (S
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 preview.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (unsure.isNotEmpty()) {
+                    FilledTonalButton(onClick = { reviewing = true }) {
+                        Text("Check ${unsure.size} unsure ${if (unsure.size == 1) "match" else "matches"}")
+                    }
+                }
+                requestingAll?.let { (done, total) ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text("Requesting ${done + 1} of $total…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } ?: run {
+                    if (toRequest.isNotEmpty()) FilledTonalButton(onClick = {
+                        val list = toRequest
+                        requestingAll = 0 to list.size
+                        scope.launch {
+                            var asked = 0
+                            var failed = 0
+                            for (i in list) {
+                                requested[i] = null
+                                val result = runCatching { app.social.api.importRequest(preview.rows[i].track) }
+                                result.onSuccess { requested[i] = it.id; asked++ }
+                                result.onFailure { requested.remove(i); failed++ }
+                                // Too many requests waiting: the rest would fail the same way.
+                                val tooMany = (result.exceptionOrNull() as? SocialException)?.takeIf { it.code == 429 }
+                                if (tooMany != null) {
+                                    Toast.makeText(context, tooMany.message, Toast.LENGTH_LONG).show()
+                                    break
+                                }
+                                requestingAll = (asked + failed) to list.size
+                            }
+                            requestingAll = null
+                            val text = when {
+                                asked > 0 -> "Requested $asked ${if (asked == 1) "song" else "songs"}" + if (failed > 0) ". $failed couldn't be requested" else ""
+                                failed > 0 -> "Couldn't request them. They may not be in the catalog"
+                                else -> null
+                            }
+                            text?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+                        }
+                    }) { Text("Request all missing (${toRequest.size})") }
+                }
                 if (missing > 0) {
                     Text(
                         if (missing == 1) "The song that isn't in the library:" else "The $missing songs that aren't in the library:",
@@ -356,6 +424,122 @@ private fun ImportRowView(
             }
         }
     }
+}
+
+/**
+ * The matches it wasn't sure of, one at a time (UnsureReview on the website): the song as the other service has
+ * it next to the library's best guess, which can be played for a moment on a player of its own (your queue is left
+ * alone). Same song takes it; Not this one shows the next guess (after the last, leaves the song out); Skip keeps it.
+ */
+@Composable
+private fun UnsureReview(
+    preview: ImportPreview,
+    indices: List<Int>,
+    chosen: List<MixSong?>,
+    source: String,
+    onDecide: (Int, MixSong?) -> Unit,
+    onClose: () -> Unit,
+) {
+    val app = LocalApp.current
+    val context = LocalContext.current
+    val uri = LocalUriHandler.current
+    var at by remember { mutableIntStateOf(0) }
+    var guess by remember { mutableIntStateOf(0) }
+    var playing by remember { mutableStateOf(false) }
+    val player = remember {
+        ExoPlayer.Builder(context)
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), false)
+            .build()
+    }
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+        }
+        player.addListener(listener)
+        onDispose { player.release() }
+    }
+    val i = indices.getOrNull(at) ?: return
+    val row = preview.rows[i]
+    // The one chosen now first, then the others it could be.
+    val guesses = (listOfNotNull(chosen[i] ?: row.match) + row.choices).distinctBy { it.id }
+    val song = guesses.getOrNull(guess)
+    fun stop() = player.stop()
+    fun next() {
+        stop()
+        guess = 0
+        if (at + 1 >= indices.size) {
+            Toast.makeText(context, "All checked", Toast.LENGTH_SHORT).show()
+            onClose()
+        } else at++
+    }
+    fun play(s: MixSong) {
+        if (playing) return stop()
+        if (app.player.nowPlaying.value.isPlaying) app.player.togglePlay()
+        player.setMediaItem(MediaItem.fromUri(app.api.streamUrl(s.id)))
+        player.prepare()
+        // A bit into the song, where it's more itself than its first notes.
+        if (s.duration > 60) player.seekTo(minOf(s.duration * 300L, 60_000L))
+        player.play()
+    }
+    val t = row.track
+    AlertDialog(
+        onDismissRequest = { stop(); onClose() },
+        title = { Text("Is it the same song? (${at + 1} of ${indices.size})") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column {
+                    Text("On $source", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(t.title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        listOfNotNull(t.artists.joinToString().ifEmpty { null }, t.album, t.durationMs?.let { formatDuration((it / 1000).toInt()) }).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = {
+                        uri.openUri("https://www.youtube.com/results?search_query=" + java.net.URLEncoder.encode((listOf(t.title) + t.artists.take(2)).joinToString(" "), "UTF-8"))
+                    }, contentPadding = PaddingValues(0.dp)) { Text("Hear it on YouTube") }
+                }
+                song?.let { s ->
+                    Column {
+                        Text(
+                            "In the library" + if (guesses.size > 1) " (guess ${guess + 1} of ${guesses.size})" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Cover(s.coverArt, Modifier.size(56.dp), size = 150, corner = 6.dp)
+                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                                Text(s.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    listOfNotNull(s.album, s.artist, formatDuration(s.duration)).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            IconButton(onClick = { play(s) }) {
+                                if (playing) Icon(painterResource(R.drawable.ic_pause), contentDescription = "Pause")
+                                else Icon(Icons.Filled.PlayArrow, contentDescription = "Play a bit")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onDecide(i, song); next() }, enabled = song != null) { Text("Same song") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { next() }) { Text("Skip") }
+                TextButton(onClick = {
+                    stop()
+                    if (guess + 1 < guesses.size) guess++ else { onDecide(i, null); next() }
+                }) { Text(if (guess + 1 < guesses.size) "Not this one" else "None of these") }
+            }
+        },
+    )
 }
 
 /** A Spotify, Apple Music or YouTube link in shared text ("Listen to X on Spotify: https://…"). */

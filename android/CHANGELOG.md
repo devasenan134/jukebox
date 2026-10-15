@@ -8,6 +8,15 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Sure Matches (0.21.0)
+
+### New
+- **Check unsure matches.** Importing a playlist, "Check N unsure matches" goes through the songs it wasn't sure of one at a time: the song as Spotify (or Apple Music, YouTube) has it next to the library's guess, which plays for a moment on its own player (your queue is left alone), with a link to hear the original on YouTube. Same song, Not this one (the next guess), or Skip.
+- **Request all.** One button requests every missing song, on the import screen and on a playlist with missing songs; it stops when you have too many requests waiting.
+
+### Fixed
+- **Website:** the icon of a playlist's missing songs showed as text.
+
 ## Missing Songs, Kept (0.20.0)
 
 ### New
