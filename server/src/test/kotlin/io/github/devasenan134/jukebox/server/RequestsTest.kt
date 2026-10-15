@@ -7,6 +7,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -410,5 +411,21 @@ class RequestQueueTest {
         catalog.freeAfter = 1
         val again = imports.requestMissing(alice, id, songs[2].id)
         assertTrue(again.queued)
+    }
+
+    @Test
+    fun `admins have no limit on open requests, everyone else waits at it`(): Unit = runBlocking {
+        val db = Db(File.createTempFile("jukebox-limit", ".db").apply { delete(); deleteOnExit() }.path)
+        db.tx {
+            update("INSERT INTO users (id, username, display_name, created_at) VALUES (1, 'alice', 'Alice', 0)")
+            update("INSERT INTO users (id, username, display_name, created_at) VALUES (3, 'admin', 'Admin', 0)")
+            repeat(MusicRequests.MAX_OPEN) { n ->
+                val r = insert("INSERT INTO music_requests (match_key, catalog_id, item_json, status, created_at) VALUES (?, ?, '{}', 'open', 0)", "k$n", "c$n")
+                listOf(1L, 3L).forEach { update("INSERT INTO music_request_askers (request_id, user_id, asked_at) VALUES (?, ?, 0)", r, it) }
+            }
+        }
+        val requests = MusicRequests(db, GrowingMusic(), FakeCatalog(emptyList()), Push(db, RecordingPush()), isAdmin = { it.id == 3L }, adminIds = { listOf(3L) })
+        assertTrue(requests.atLimit(UserDto(1, "alice", "Alice")))
+        assertFalse(requests.atLimit(UserDto(3, "admin", "Admin")))
     }
 }

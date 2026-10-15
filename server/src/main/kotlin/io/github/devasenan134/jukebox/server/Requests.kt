@@ -353,13 +353,15 @@ class MusicRequests(
         val item = catalog.lookup(catalogId.take(100)) ?: throw notFoundOrBusy()
         if (shelf()?.find(item) != null) throw ApiError(HttpStatusCode.Conflict, "It's already in the library")
         val key = matchKey(item)
+        // Admins fill the requests themselves, so theirs aren't limited.
+        val admin = isAdmin(me)
         val (id, isNew) = db.tx {
             val open = queryOne(
                 "SELECT count(*) FROM music_request_askers a JOIN music_requests r ON r.id = a.request_id WHERE a.user_id = ? AND r.status = 'open'", me.id,
             ) { it.getInt(1) } ?: 0
             val existing = queryOne("SELECT id, status FROM music_requests WHERE match_key = ?", key) { it.getLong(1) to it.getString(2) }
             val asked = existing != null && queryOne("SELECT 1 FROM music_request_askers WHERE request_id = ? AND user_id = ?", existing.first, me.id) { true } != null
-            if (!(asked && existing?.second == "open") && open >= MAX_OPEN) throw ApiError(HttpStatusCode.TooManyRequests, "You can have up to $MAX_OPEN requests waiting")
+            if (!(asked && existing?.second == "open") && open >= MAX_OPEN && !admin) throw ApiError(HttpStatusCode.TooManyRequests, "You can have up to $MAX_OPEN requests waiting")
             val itemJson = json.encodeToString(CatalogItem.serializer(), item)
             val id = when {
                 existing == null -> insert(
@@ -383,6 +385,13 @@ class MusicRequests(
         }
         return db.tx { dto(id, me.id) }!!
     }
+
+    /** Whether [me] has as many requests waiting as they may (admins never do). */
+    suspend fun atLimit(me: UserDto): Boolean = !isAdmin(me) && (db.tx {
+        queryOne(
+            "SELECT count(*) FROM music_request_askers a JOIN music_requests r ON r.id = a.request_id WHERE a.user_id = ? AND r.status = 'open'", me.id,
+        ) { it.getInt(1) }
+    } ?: 0) >= MAX_OPEN
 
     /** The catalog didn't have it, or (when it's making no more calls for now) couldn't be asked. */
     suspend fun notFoundOrBusy(what: String = "Couldn't find that in the catalog"): ApiError =

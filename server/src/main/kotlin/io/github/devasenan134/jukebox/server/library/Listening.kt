@@ -209,6 +209,11 @@ class Listening(private val db: Db, private val clock: () -> Long = System::curr
             .firstOrNull { it.queuedBy !in skipUsers }
     }
 
+    /** Says why all of [userId]'s queued songs wait ([note]), or (null) that they don't. */
+    suspend fun noteQueued(userId: Long, note: String?) = db.tx {
+        update("UPDATE playlist_missing SET request_note = ? WHERE queued_by = ?", note, userId)
+    }
+
     /** A queued song was requested ([requestId]), or couldn't be ([note], and with [keepQueued] it's tried again later). */
     suspend fun queueResult(id: Long, requestId: Long? = null, note: String? = null, keepQueued: Boolean = false) = db.tx {
         if (requestId != null) update("UPDATE playlist_missing SET request_id = ?, queued_by = NULL, request_note = NULL WHERE id = ?", requestId, id)

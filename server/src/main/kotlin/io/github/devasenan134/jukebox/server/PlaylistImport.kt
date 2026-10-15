@@ -230,7 +230,7 @@ class PlaylistImports(
     suspend fun requestQueued() {
         while (true) {
             val worked = runCatching { requestNext() }.onFailure { log.warn("Queued request failed", it) }.getOrDefault(false)
-            if (!worked) withTimeoutOrNull(10 * 60_000L) { wake.receive() }
+            if (!worked) withTimeoutOrNull(if (waiting.isEmpty()) 10 * 60_000L else LIMIT_WAIT_MS) { wake.receive() }
         }
     }
 
@@ -242,6 +242,13 @@ class PlaylistImports(
         val row = listening.nextQueued(waiting.keys) ?: return false
         val user = db.read { queryOne("SELECT * FROM users WHERE id = ?", row.queuedBy) { it.toUser() } }
             ?: return true.also { listening.queueResult(row.id) }
+        // Someone with too many requests open: their songs wait (checked before using any of the catalog's calls).
+        if (requests.atLimit(user)) {
+            waiting[user.id] = t + LIMIT_WAIT_MS
+            listening.noteQueued(user.id, WAITS_FOR_LIMIT)
+            return true
+        }
+        if (row.note == WAITS_FOR_LIMIT) listening.noteQueued(user.id, null)
         val t0 = track(row)
         try {
             val made = request(user, ImportRequestMusic(t0.title, t0.artists.firstOrNull(), t0.album, t0.catalogId))
@@ -250,8 +257,8 @@ class PlaylistImports(
             when (e.status) {
                 HttpStatusCode.ServiceUnavailable -> delay(BUSY_WAIT_MS) // the catalog's calls for this minute are used up
                 HttpStatusCode.TooManyRequests -> {
-                    waiting[user.id] = t + 10 * 60_000L
-                    listening.queueResult(row.id, note = "Waits until fewer of your requests are open", keepQueued = true)
+                    waiting[user.id] = t + LIMIT_WAIT_MS
+                    listening.noteQueued(user.id, WAITS_FOR_LIMIT)
                 }
                 HttpStatusCode.Conflict -> listening.queueResult(row.id) // it's in the library: filled in at the next look
                 else -> listening.queueResult(row.id, note = e.message)
@@ -323,6 +330,9 @@ class PlaylistImports(
         const val MAX_TRACKS = 1000
         /** How long the queue waits when the catalog has no calls left this minute. */
         var BUSY_WAIT_MS = 20_000L
+        /** How long the songs of someone with too many requests open wait before the queue looks again. */
+        const val LIMIT_WAIT_MS = 60_000L
+        const val WAITS_FOR_LIMIT = "Waits until fewer of your requests are open"
     }
 }
 
