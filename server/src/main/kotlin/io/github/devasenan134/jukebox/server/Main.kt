@@ -91,6 +91,13 @@ fun main(args: Array<String>) {
         println(eventJson.encodeToString(ImportReport.serializer(), report))
         return
     }
+    // JioSaavn's "similar songs" and play counts for the library (library/SongSignals.kt): jukebox import-saavn <saavn_reco.jsonl>
+    if (args.firstOrNull() == "import-saavn") {
+        val file = File(args.getOrNull(1) ?: error("import-saavn <saavn_reco.jsonl> is needed"))
+        val report = kotlinx.coroutines.runBlocking { io.github.devasenan134.jukebox.server.library.SongSignals(Db(config.dbPath)).importSaavn(file) }
+        println(report)
+        return
+    }
     embeddedServer(Netty, port = config.port) { jukeboxServer(config) }.start(wait = true)
 }
 

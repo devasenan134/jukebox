@@ -8,6 +8,7 @@ import io.github.devasenan134.jukebox.server.MusicSource
 import io.github.devasenan134.jukebox.server.Person
 import io.github.devasenan134.jukebox.server.PlaylistTaste
 import io.github.devasenan134.jukebox.server.moodScores
+import io.github.devasenan134.jukebox.server.zScores
 import io.github.devasenan134.jukebox.server.playlistTaste
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
@@ -166,7 +167,19 @@ class JukeboxLibrary(
                 }
             }
         }
-        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm)
+        // What other services know (SongSignals): songs their listeners play together, and how much each is played.
+        val index = snapshotIndex(songs)
+        val links = Array(songs.size) { IntArray(0) }
+        val plays = FloatArray(songs.size) { Float.NaN }
+        db.read {
+            query("SELECT recording_id, other_id FROM song_links ORDER BY recording_id, rank") { rs -> index[rs.getString(1)]?.let { it to index[rs.getString(2)] } }
+                .filter { it?.second != null }.groupBy({ it!!.first }, { it!!.second!! })
+                .forEach { (i, others) -> links[i] = others.distinct().toIntArray() }
+            query("SELECT recording_id, max(plays) FROM song_fame GROUP BY recording_id") { rs ->
+                index[rs.getString(1)]?.let { plays[it] = kotlin.math.ln(1.0 + rs.getLong(2)).toFloat() }
+            }
+        }
+        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm, links, zScores(plays))
     }
 
     private fun snapshotIndex(songs: List<LibrarySong>): Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }

@@ -436,6 +436,22 @@ class MixMakerTest {
     }
 
     @Test
+    fun `songs a big service's listeners play together come up in stations`() {
+        val base = Pretend.library()
+        // Song 5 (a melody) is linked to song 250, a classical piece that sounds nothing like it.
+        val links = Array(base.songs.size) { IntArray(0) }.also { it[5] = intArrayOf(250) }
+        val lib = LibrarySnapshot(base.songs, base.sound, base.moods, base.moodVectors, base.tempo, base.energy, "linked", base.rhythm, links)
+        // Where it ranks among everything like song 5: much higher with the link (it still has to fit somewhat).
+        fun rankOf(snapshot: LibrarySnapshot): Int {
+            val scores = maker(snapshot).similarTo(listOf(5), "Tamil")
+            return scores.indices.count { it != 5 && scores[it] > scores[250] } + 1
+        }
+        val withLink = rankOf(lib)
+        val without = rankOf(base)
+        assertTrue(withLink * 2 < without, "rank $withLink with the link, $without without")
+    }
+
+    @Test
     fun `every mix and station on Home has a cover design`() {
         val lib = Pretend.library()
         val home = maker(lib).home()

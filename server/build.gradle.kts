@@ -61,6 +61,17 @@ tasks.register<JavaExec>("runDev") {
 }
 
 // Prints the mixes a person would get, from a copy of jukebox.db and the analyzer's features.db:
+// The mixes' scoreboard (src/test/.../MixEval.kt): ./gradlew evaluateMixes -Pdb=jukebox.db -PfeaturesDb=features.db -Puser=<username>
+tasks.register<JavaExec>("evaluateMixes") {
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass.set("io.github.devasenan134.jukebox.server.MixEvalKt")
+    args(
+        project.findProperty("db") ?: "jukebox.db",
+        project.findProperty("featuresDb") ?: "",
+        project.findProperty("user") ?: "",
+    )
+}
+
 // ./gradlew previewMixes -Pdb=jukebox.db -PfeaturesDb=features.db -Puser=<username>
 tasks.register<JavaExec>("previewMixes") {
     classpath = sourceSets["test"].runtimeClasspath

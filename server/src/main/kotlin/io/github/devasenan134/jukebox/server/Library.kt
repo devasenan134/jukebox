@@ -44,6 +44,10 @@ class LibrarySnapshot(
     val version: String,
     /** How punchy the beats are (onset strength); NaN if unknown. */
     val rhythm: FloatArray = FloatArray(songs.size) { Float.NaN },
+    /** Per song: the songs a big service's listeners play with it (JioSaavn's recommendations), best first. */
+    val links: Array<IntArray> = Array(songs.size) { IntArray(0) },
+    /** Per song: how much it's played on that service (z-score of log plays); NaN if unknown. */
+    val fame: FloatArray = FloatArray(songs.size) { Float.NaN },
 ) {
     val index: Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }
 
@@ -57,6 +61,13 @@ class LibrarySnapshot(
         songs.forEachIndexed { i, s -> s.singers.forEach { getOrPut(it.id) { mutableListOf() } += i } }
     }
     val byAlbum: Map<String, List<Int>> = songs.indices.groupBy { songs[it].albumId }
+
+    /** Per song: the songs that list it in [links], with its place in their list. */
+    val linkedBy: Array<List<Pair<Int, Int>>> by lazy {
+        val out = Array(songs.size) { mutableListOf<Pair<Int, Int>>() }
+        links.forEachIndexed { from, list -> list.forEachIndexed { rank, to -> out[to] += from to rank } }
+        out.map { it.toList() }.toTypedArray()
+    }
     val people: Map<String, Person> = buildMap {
         songs.forEach { s -> s.composer?.let { put(it.id, it) }; s.singers.forEach { put(it.id, it) } }
     }
