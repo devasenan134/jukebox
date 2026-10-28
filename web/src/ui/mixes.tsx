@@ -173,10 +173,13 @@ function MixBento({ mixes, nav }: { mixes: Mix[]; nav: Nav }) {
   return (
     <div className="bento-pages">
       {pages.map((page, p) => (
-        <div key={p} className={`bento-page n${page.length}${p % 2 ? ' flip' : ''}`}>
-          {page.map((m, i) => (
-            <BentoTile key={m.id} mix={m} big={i === 0} onClick={() => nav.openMix(m.id)} />
-          ))}
+        <div key={p} className="bento-page">
+          {/* Inside the page, so its rows are measured against the page's width (cqw). */}
+          <div className={`bento-grid n${page.length}${p % 2 ? ' flip' : ''}`}>
+            {page.map((m, i) => (
+              <BentoTile key={m.id} mix={m} big={i === 0} onClick={() => nav.openMix(m.id)} />
+            ))}
+          </div>
         </div>
       ))}
     </div>
