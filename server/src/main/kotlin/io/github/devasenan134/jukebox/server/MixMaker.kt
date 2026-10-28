@@ -2,8 +2,14 @@ package io.github.devasenan134.jukebox.server
 
 import kotlinx.serialization.Serializable
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
+import java.time.MonthDay
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
@@ -33,7 +39,10 @@ data class MixSong(
 @Serializable
 data class MixDto(
     val id: String,
-    /** "daily", "discover", "repeat", "rewind", "new", "friends", "popular", "mood", "decade", "composer", "singer" or "radio". */
+    /**
+     * "daily", "daylist", "discover", "fresh", "repeat", "rewind", "new", "friends", "because", "deepcuts", "gems",
+     * "artistmix", "topic", "season", "popular", "mood", "decade", "score", "composer", "singer" or "radio".
+     */
     val kind: String,
     val title: String,
     /** One short line for the tile ("Ilaiyaraaja, Deva and more"). */
@@ -66,6 +75,9 @@ data class MixDto(
 /** How often someone skipped a song early vs. listened to it (reported by the app). */
 data class SkipStats(val skips: Int, val listens: Int)
 
+/** A list of songs Jukebox handed to this person on [day] (a mix they opened, or suggestions for a playlist). */
+class ShownList(val mixId: String, val day: LocalDate, val songs: List<Int>)
+
 /**
  * Makes every mix for one person out of the library and their listening. It only calculates:
  * reading the data and saving anything is done by [MixService].
@@ -87,6 +99,10 @@ class MixMaker(
     private val now: Long = System.currentTimeMillis(),
     /** Which songs people put together (played in one sitting, or in the same playlist). */
     private val together: Together = Together.EMPTY,
+    /** What this person was shown before today, so songs they keep passing over make room for others. */
+    private val shown: List<ShownList> = emptyList(),
+    /** Their time zone, for the time of day (daylist) and the day a week starts. */
+    private val zone: ZoneId = ZoneOffset.UTC,
 ) {
     private val n = lib.songs.size
     private val songs = lib.songs
@@ -99,6 +115,46 @@ class MixMaker(
     private fun eligibleScore(i: Int) = eligible(i) && songs[i].duration >= 20 && songs[i].score
 
     private val heard: Set<Int> = history.playCount.keys + history.plays.map { it.first }
+
+    // ---------- What you were shown ----------
+    //
+    // A song Jukebox showed you that you didn't go on to play comes up a little less next time, more so
+    // each time it's passed over, and it recovers over a few weeks (or at once, when you play it). Only
+    // what was shown before a mix's own day counts (today for daily mixes, Monday for weekly ones), so
+    // opening a mix doesn't change it under you.
+
+    private val monday: LocalDate = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    private val fatigueAsOf = java.util.concurrent.ConcurrentHashMap<LocalDate, Map<Int, Float>>()
+
+    /** How much each song was passed over before [day] (0 if not at all, at most [MAX_FATIGUE]). */
+    private fun fatigue(day: LocalDate = today): Map<Int, Float> = fatigueAsOf.getOrPut(day) {
+        val shownOn = HashMap<Int, MutableSet<LocalDate>>()
+        for (list in shown) {
+            if (!list.day.isBefore(day) || list.day.isBefore(day.minusDays(56))) continue
+            list.songs.forEach { shownOn.getOrPut(it) { mutableSetOf() } += list.day }
+        }
+        buildMap {
+            for ((i, days) in shownOn) {
+                val played = history.lastPlayed[i]?.let { LocalDate.ofInstant(Instant.ofEpochMilli(it), zone) }
+                val passed = days.filter { played == null || played.isBefore(it) }
+                val f = 0.7f * passed.sumOf { exp(-(day.toEpochDay() - it.toEpochDay()) / 14.0) }.toFloat()
+                if (f > 0.05f) put(i, f.coerceAtMost(MAX_FATIGUE))
+            }
+        }
+    }
+
+    private fun tired(i: Int, day: LocalDate = today) = fatigue(day)[i] ?: 0f
+
+    /** These scores, less how much each song was passed over before [day] ([factor] of it). */
+    private fun FloatArray.lessTired(day: LocalDate = today, factor: Float = 1f): FloatArray {
+        for ((i, f) in fatigue(day)) this[i] -= factor * f
+        return this
+    }
+
+    /** Songs earlier Discover Weeklies showed you (the 8 weeks before this one): this week's has others. */
+    private val shownInDiscover: Set<Int> by lazy {
+        shown.filter { it.mixId == "discover" && it.day.isBefore(monday) && !it.day.isBefore(monday.minusWeeks(8)) }.flatMapTo(HashSet()) { it.songs }
+    }
 
     /** How much this person likes each song they've interacted with. */
     val weights: Map<Int, Double> = buildMap {
@@ -230,35 +286,38 @@ class MixMaker(
     // ---------- Home ----------
 
     /**
-     * Two kinds of rows: the first two are made from this person's listening ("Made for <name>" in the
-     * app); the rest showcase the library, its composers and singers, and are the same for everyone.
+     * The first three rows are made from this person's listening ("Made for <name>" in the app): Made for
+     * you (the app puts what you played lately right after it), Your top mixes, which rotate from day to
+     * day, and Your stations. The rest showcase the library, its composers and singers.
      */
     fun home(): List<MixSection> {
-        val scores = scoreMixes()
         val madeForYou = buildList {
+            daylist()?.let(::add)
             addAll(dailyMixes())
             discover()?.let(::add)
+            freshForYou()?.let(::add)
             onRepeat()?.let(::add)
-            friendsMix()?.let(::add)
             rewind()?.let(::add)
-            if (hasScoreListening) {
-                addAll(scores.take(2).map { it.copy(personal = true) })
-            }
+            friendsMix()?.let(::add)
         }
+        val top = topMixes()
+        val inTop = top.map { it.id }.toSet()
         val charts = listOfNotNull(popular(), newArrivals())
         val composers = topPeople(composer = true)
         // Someone who composes and sings (Ilaiyaraaja, Anirudh) shows once, as a composer.
         val singers = topPeople(composer = false, count = 16).filter { s -> composers.none { it.id == s.id } }.take(8)
         return listOf(
             MixSection("made-for-you", "Made for you", madeForYou.map(::personalized)),
+            MixSection("top-mixes", "Your top mixes", top),
             MixSection("your-stations", "Your stations", yourStations().map { it.copy(personal = true) }),
-            MixSection("scores", "Themes and background scores", scores),
             MixSection("composers", "This is: composers", composers.mapNotNull { personMix(it, composer = true) }),
             MixSection("singers", "This is: artists", singers.mapNotNull { personMix(it, composer = false) }),
-            MixSection("moods", "Moods and vibes", MOODS.mapNotNull { mood(it) }),
+            // A mix already in Your top mixes isn't shown twice.
+            MixSection("moods", "Moods and vibes", MOODS.filter { "mood-${it.key}" !in inTop }.mapNotNull { mood(it) }),
+            MixSection("scores", "Themes and background scores", scoreMixes().filter { it.id !in inTop }),
             MixSection("artist-stations", "Composer and artist stations", artistStations()),
             MixSection("charts", "Popular and new", charts),
-            MixSection("decades", "Through the decades", decades()),
+            MixSection("decades", "Through the decades", decades().filter { it.id !in inTop }),
         ).filter { it.mixes.isNotEmpty() }
     }
 
@@ -266,8 +325,8 @@ class MixMaker(
     fun byId(id: String): MixDto? = findById(id)?.let(::personalized)
 
     /**
-     * Marks mixes made from this person's listening: Daily Mixes, Discover Weekly, On Repeat, Friends Mix and
-     * Rewind. Showcases (moods, decades, composers, singers, charts, their stations) are the same for everyone.
+     * Marks mixes made from this person's listening (see [PERSONAL_KINDS]). Showcases (moods, decades,
+     * composers, singers, charts, their stations) are for everyone, though moods and decades lean towards your taste.
      */
     private fun personalized(mix: MixDto): MixDto = mix.copy(
         personal = mix.personal || mix.kind in PERSONAL_KINDS,
@@ -275,9 +334,20 @@ class MixMaker(
 
     private fun findById(id: String): MixDto? {
         val parts = id.split("-", limit = 2)
+        val rest = parts.getOrNull(1)?.split("-").orEmpty()
         return when (parts[0]) {
             "daily" -> dailyMixes().firstOrNull { it.id == id }
+            "daylist" -> daylist()
             "discover" -> discover()
+            "fresh" -> freshForYou()
+            "because" -> rest.singleOrNull()?.let { lib.index[it] }?.let { because(it) }
+            "deepcuts" -> deepCuts()
+            "gems" -> hiddenGems()
+            "amix" -> if (rest.size == 2) lib.people[rest[1]]?.let { artistMix(it, composer = rest[0] == "c") } else null
+            "cmood" -> if (rest.size == 2) lib.people[rest[0]]?.let { p -> MOODS.firstOrNull { it.key == rest[1] }?.let { composerMood(p, it) } } else null
+            "cdecade" -> if (rest.size == 2) lib.people[rest[0]]?.let { p -> rest[1].toIntOrNull()?.let { composerDecade(p, it) } } else null
+            "pair" -> if (rest.size == 2) lib.people[rest[0]]?.let { c -> lib.people[rest[1]]?.let { pair(c, it) } } else null
+            "season" -> SEASONS.firstOrNull { it.key == parts.getOrNull(1) }?.let { season(it) }
             "repeat" -> onRepeat()
             "rewind" -> rewind()
             "new" -> newArrivals()
@@ -323,12 +393,18 @@ class MixMaker(
         val groups = (firsts + rest).take(6)
         val several = byLanguage.size > 1
 
+        // What you've played in the last two weeks leads, so the mixes follow what you're into lately.
+        val lately = history.plays.filter { it.second > now - 14 * DAY }.groupingBy { it.first }.eachCount()
         val used = mutableSetOf<Int>()
         return groups.mapIndexed { number, (language, group) ->
             val random = Random(personSeed * 31 + today.toEpochDay() * 7 + number)
-            val favourites = pick(group.associateWith { (weights[it] ?: 0.0).toFloat() }, 15, random, pool = 40, scoreOnly = false)
-            val scores = similarTo(group, language)
+            val favourites = pick(
+                group.associateWith { ((weights[it] ?: 0.0) + 1.5 * ln(1.0 + (lately[it] ?: 0))).toFloat() }, 15, random, pool = 40, scoreOnly = false,
+            )
+            // Songs like today's favourites (not the whole side of your taste), so the new ones change from day to day.
+            val scores = similarTo(favourites, language)
             for (i in 0 until n) scores[i] += 0.3f * affinity[i]
+            scores.lessTired()
             val fresh = pick(scores, 50 - favourites.size, random, pool = 150, exclude = favourites.toSet() + used + group, languages = setOfNotNull(language), scoreOnly = false)
             used += fresh
             val list = interleave(favourites, fresh)
@@ -341,15 +417,21 @@ class MixMaker(
         }
     }
 
-    /** 30 songs you haven't heard yet, picked for how you listen. Changes on Mondays. */
-    fun discover(): MixDto? {
-        if (likedSongs.size < 3) return null
+    /** This week's Discover Weekly songs (none if there's too little to go on). */
+    private val discoverSongs: List<Int> by lazy {
+        if (likedSongs.size < 3) return@lazy emptyList()
         val scores = similarTo(likedSongs.take(60), languages = yourLanguages.keys)
         for (i in 0 until n) scores[i] += 0.3f * affinity[i] + 0.4f * ln(1.0 + (friendsPlays[i] ?: 0)).toFloat()
-        val list = pickBlend(
+        scores.lessTired(monday)
+        pickBlend(
             scores.indices.associateWith { scores[it] }, 30, weekRandom, pool = 150, blend = yourLanguages,
-            exclude = heard + history.starred + history.playlisted.keys, maxPerAlbum = 1, maxPerPerson = 5, scoreOnly = false,
+            exclude = heard + history.starred + history.playlisted.keys + shownInDiscover, maxPerAlbum = 1, maxPerPerson = 5, scoreOnly = false,
         )
+    }
+
+    /** 30 songs you haven't heard yet, picked for how you listen, and not ones it showed you in the last weeks. Changes on Mondays. */
+    fun discover(): MixDto? {
+        val list = discoverSongs
         if (list.size < 10) return null
         return mix(
             "discover", "discover", "Discover Weekly", list, refresh = "weekly", subtitle = "New to you, picked for you",
@@ -412,6 +494,322 @@ class MixMaker(
         )
     }
 
+    // ---------- Made for you: new ones ----------
+
+    /** The part of the day it is where this person is (night until 5 am). */
+    private val dayPart: DayPart = Instant.ofEpochMilli(now).atZone(zone).hour.let(::partOf)
+
+    /**
+     * A mix for this time of day, named after it ("Tuesday night melodies"): what you usually play around
+     * this time, and new songs with the feeling that fits it best. Changes through the day.
+     */
+    fun daylist(): MixDto? {
+        if (!hasTaste || !lib.hasSound) return null
+        val part = dayPart
+        val atThisTime = history.plays
+            .filter { (i, at) -> at > now - 60 * DAY && eligibleSong(i) && partOf(Instant.ofEpochMilli(at).atZone(zone).hour) == part }
+            .groupingBy { it.first }.eachCount()
+        val seeds = atThisTime.keys.toList().ifEmpty { likedSongs.take(60) }
+        val random = Random(personSeed * 37 + today.toEpochDay() * 4 + DAY_PARTS.indexOf(part))
+        // The feeling that fits what you play at this time best, with some variety from day to day.
+        val vibe = part.vibes.mapNotNull { key -> MOODS.firstOrNull { it.key == key }?.takeIf { moodMembers(it) != null } }
+            .maxByOrNull { m ->
+                val fit = seeds.map { moodFit(m, it) }.filter { !it.isNaN() }.takeIf { it.isNotEmpty() }?.average() ?: 0.0
+                fit + 0.5 * gumbel(random)
+            } ?: return null
+        val members = moodMembers(vibe) ?: return null
+        val like = similarTo(seeds.take(80), languages = yourLanguages.keys)
+        val scores = members.mapValues { (i, fit) -> fit + 0.5f * like[i] + 0.4f * affinity[i] - tired(i) }.filterValues { !it.isNaN() }
+        // Your own songs for this time, unless they're the opposite of the feeling.
+        val yours = atThisTime.filterKeys { i -> moodFit(vibe, i).let { it.isNaN() || it > 0f } }
+            .mapValues { (i, count) -> (ln(1.0 + count) + 0.3 * (weights[i] ?: 0.0)).toFloat() }
+        val familiar = pick(yours, 10, random, pool = 30)
+        val fresh = pickBlend(scores, 40 - familiar.size, random, pool = 150, blend = yourLanguages, exclude = familiar.toSet())
+        if (fresh.size < 15) return null
+        val list = interleave(familiar, fresh)
+        val weekday = today.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+        return mix(
+            "daylist", "daylist", "$weekday ${part.name} ${vibe.noun}", list, refresh = "live", subtitle = "Changes through the day",
+            description = "Your ${weekday.lowercase()} ${part.name}: ${vibe.noun}, and what you usually play around this time. Changes through the day.",
+        )
+    }
+
+    /** Songs added to the library in the two weeks before Friday that suit you. Changes on Fridays. */
+    fun freshForYou(): MixDto? {
+        if (!hasTaste) return null
+        val added = songs.indices.filter { eligibleSong(it) && songs[it].addedAt > 0 }
+        if (added.isEmpty()) return null
+        // As for New Arrivals: the first big import isn't new.
+        val importedAt = added.map { songs[it].addedAt }.sorted()[added.size / 2]
+        val friday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.FRIDAY))
+        val until = friday.atStartOfDay(zone).toInstant().toEpochMilli()
+        val since = maxOf(importedAt + DAY, until - 14 * DAY)
+        val scores = added.filter { songs[it].addedAt in since until until && it !in heard && speaks(it, yourLanguages.keys) }
+            .associateWith { affinity[it] - tired(it, friday) }
+        val list = pick(scores, 30, Random(personSeed * 19 + friday.toEpochDay()), pool = 60, maxPerAlbum = 3, maxPerPerson = 10)
+        if (list.size < 5) return null
+        return mix(
+            "fresh", "fresh", "Fresh for You", list, refresh = "weekly", subtitle = "New in the library, for your taste",
+            description = "Songs added to the library in the two weeks before Friday, the ones that suit you first. Updates every Friday.",
+        )
+    }
+
+    // ---------- Your top mixes ----------
+    //
+    // A pool of mixes made from your listening (Because you played..., composer mixes, a composer's
+    // melodies or 90s, moods and decades you play, deep cuts, hidden gems, the season's songs), of which
+    // Home shows a different handful each day: the ones that suit you best come up most often.
+
+    /** A mix that could be in Your top mixes: how well it suits you, its sort (for variety) and whose it is. */
+    private class Candidate(val id: String, val fit: Double, val sort: String, val person: String? = null)
+
+    fun topMixes(): List<MixDto> {
+        if (!hasTaste && !hasScoreListening) return emptyList()
+        val candidates = mutableListOf<Candidate>()
+        SEASONS.filter { it.on(today) }.forEach { candidates += Candidate("season-${it.key}", 10.0, "season") }
+        if (hasTaste) {
+            becauseAnchors().forEach { candidates += Candidate("because-${songs[it].id}", 3.0, "because") }
+            candidates += Candidate("deepcuts", 1.6, "deepcuts")
+            candidates += Candidate("gems", 1.3, "gems")
+            val composers = composerLove.entries.filter { (lib.byComposer[it.key]?.size ?: 0) >= 15 }.sortedByDescending { it.value }.take(4)
+            for ((id, love) in composers) {
+                candidates += Candidate("amix-c-$id", 1.0 + 2 * love, "artist", id)
+                val theirs = lib.byComposer.getValue(id).filter(::eligibleSong)
+                for (mood in MOODS) {
+                    if (mood.noun == null) continue
+                    val members = moodMembers(mood) ?: continue
+                    if (theirs.count { it in members } >= 15) candidates += Candidate("cmood-$id-${mood.key}", 0.6 + 1.5 * love + moodShare(mood), "topic", id)
+                }
+                val decades = theirs.filter { songs[it].year > 1900 }.groupingBy { songs[it].year / 10 * 10 }.eachCount().filterValues { it >= 15 }
+                if (decades.size >= 2) decades.keys.forEach { candidates += Candidate("cdecade-$id-$it", 0.5 + 1.5 * love, "topic", id) }
+            }
+            singerLove.entries.filter { (lib.bySinger[it.key]?.size ?: 0) >= 15 && composers.none { c -> c.key == it.key } }
+                .sortedByDescending { it.value }.take(2)
+                .forEach { (id, love) -> candidates += Candidate("amix-s-$id", 0.8 + 1.5 * love, "artist", id) }
+            topPairs().forEach { (c, singer, fit) -> candidates += Candidate("pair-$c-$singer", fit, "topic", c) }
+            MOODS.mapNotNull { m -> moodMembers(m)?.let { m to moodShare(m) } }.filter { it.second >= 0.05 }
+                .sortedByDescending { it.second }.take(3).forEach { (m, share) -> candidates += Candidate("mood-${m.key}", 0.8 + 3 * share, "mood") }
+            likedSongs.filter { songs[it].year > 1900 }.groupingBy { songs[it].year / 10 * 10 }.eachCount()
+                .mapValues { it.value.toDouble() / likedSongs.size }.filterValues { it >= 0.1 }.entries
+                .sortedByDescending { it.value }.take(2).forEach { (start, share) -> candidates += Candidate("decade-$start", 0.6 + 2 * share, "decade") }
+        }
+        if (hasScoreListening) SCORE_VIBES.forEach { candidates += Candidate("score-${it.key}", 0.9, "score") }
+
+        val random = dayRandom
+        val ranked = candidates.map { it to it.fit + 0.7 * gumbel(random) }.sortedByDescending { it.second }.map { it.first }
+        val perSort = HashMap<String, Int>()
+        val perPerson = HashMap<String, Int>()
+        val out = mutableListOf<MixDto>()
+        for (c in ranked) {
+            if (out.size >= TOP_MIXES) break
+            if ((perSort[c.sort] ?: 0) >= (TOP_MIX_CAPS[c.sort] ?: 1)) continue
+            if (c.person != null && (perPerson[c.person] ?: 0) >= 2) continue
+            val mix = findById(c.id) ?: continue
+            out += mix.copy(personal = true)
+            perSort.merge(c.sort, 1, Int::plus)
+            c.person?.let { perPerson.merge(it, 1, Int::plus) }
+        }
+        return out
+    }
+
+    /** How much of your favourite songs have [mood] (0 to 1). */
+    private fun moodShare(mood: Mood): Double {
+        val members = moodMembers(mood) ?: return 0.0
+        return if (likedSongs.isEmpty()) 0.0 else likedSongs.count { it in members }.toDouble() / likedSongs.size
+    }
+
+    /** Up to 3 songs you played this past week, a different few each day, one per movie. */
+    private fun becauseAnchors(): List<Int> {
+        val week = history.plays.filter { (i, at) -> at > now - 7 * DAY && (eligibleSong(i) || eligibleScore(i)) }.groupingBy { it.first }.eachCount()
+        return week.entries.sortedByDescending { it.value }.take(8).map { it.key }.shuffled(dayRandom).distinctBy { songs[it].albumId }.take(3)
+    }
+
+    /** The composer and singer pairs you love most (3 or more favourites together), with how much. */
+    private fun topPairs(): List<Triple<String, String, Double>> {
+        val together = HashMap<Pair<String, String>, Double>()
+        for (i in likedSongs) {
+            val c = songs[i].composer?.id ?: continue
+            songs[i].singers.forEach { s -> if (s.id != c) together.merge(c to s.id, weights[i] ?: 0.0, Double::plus) }
+        }
+        val counts = likedSongs.flatMap { i -> songs[i].composer?.id?.let { c -> songs[i].singers.map { c to it.id } }.orEmpty() }.groupingBy { it }.eachCount()
+        val best = together.values.maxOrNull() ?: return emptyList()
+        return together.entries.filter { (counts[it.key] ?: 0) >= 3 }.sortedByDescending { it.value }.take(3)
+            .map { (pair, w) -> Triple(pair.first, pair.second, 0.6 + 1.2 * w / best) }
+    }
+
+    /** [anchor] and 29 songs that go with it. */
+    fun because(anchor: Int): MixDto? {
+        val s = songs[anchor]
+        if (!eligibleSong(anchor) && !eligibleScore(anchor)) return null
+        val language = lib.language[anchor]
+        val scores = similarTo(listOf(anchor), language)
+        for (i in 0 until n) scores[i] += 0.25f * affinity[i]
+        scores.lessTired()
+        val random = Random(personSeed * 29 + today.toEpochDay() * 3 + anchor)
+        val list = listOf(anchor) + pick(
+            scores, 29, random, pool = 100, exclude = setOf(anchor), maxPerAlbum = 2, maxPerPerson = 8,
+            languages = setOfNotNull(language), scoreOnly = s.score,
+        )
+        if (list.size < 10) return null
+        return mix(
+            "because-${s.id}", "because", "Because you played ${s.title}", list, refresh = "daily", subtitle = namesIn(list),
+            description = "Songs that go with ${s.title} (${s.album}), which you've been playing lately.",
+        )
+    }
+
+    /** A composer's or singer's songs (the ones you like first) and music like theirs, half and half. */
+    fun artistMix(person: Person, composer: Boolean): MixDto? {
+        val theirs = (if (composer) lib.byComposer[person.id] else lib.bySinger[person.id]).orEmpty().filter(::eligibleSong)
+        if (theirs.size < 8) return null
+        val language = mainLanguage(theirs)
+        val random = Random(personSeed * 23 + today.toEpochDay() * 5 + person.id.hashCode())
+        val own = theirs.associateWith { i ->
+            (weights[i] ?: 0.0).toFloat() + 0.5f * affinity[i] + 0.2f * ln(1.0 + (popularity[i] ?: 0)).toFloat() - tired(i)
+        }
+        val mine = pick(own, 25, random, pool = 60, maxPerAlbum = 3, maxPerPerson = 25, languages = setOfNotNull(language))
+        val like = similarTo(theirs.sortedByDescending { weights[it] ?: 0.0 }.take(40), language)
+        for (i in 0 until n) like[i] += 0.3f * affinity[i]
+        like.lessTired()
+        val others = pick(like, 25, random, pool = 120, exclude = theirs.toSet(), maxPerAlbum = 2, maxPerPerson = 5, languages = setOfNotNull(language))
+        val list = interleave(mine, others, fromA = 1, fromB = 1)
+        if (list.size < 15) return null
+        return mix(
+            "amix-${if (composer) "c" else "s"}-${person.id}", "artistmix", "${person.name} Mix", list, refresh = "daily",
+            subtitle = namesIn(list, first = person.name), covers = listOf("ar-${person.id}"), round = true,
+            description = "${person.name} and music like theirs, picked for you. Updates every day.",
+        )
+    }
+
+    /** A composer's songs with one feeling: "Ilaiyaraaja Melodies". */
+    fun composerMood(person: Person, mood: Mood): MixDto? {
+        val noun = mood.noun ?: return null
+        val members = moodMembers(mood) ?: return null
+        val theirs = lib.byComposer[person.id].orEmpty().filter { it in members && eligibleSong(it) }
+        if (theirs.size < 15) return null
+        val scores = theirs.associateWith { i -> members.getValue(i) + 0.5f * affinity[i] + 0.3f * (weights[i] ?: 0.0).toFloat() - tired(i) }
+        val random = Random(personSeed * 41 + today.toEpochDay() + (person.id + mood.key).hashCode())
+        val list = pick(scores, 30, random, pool = 80, maxPerAlbum = 3, maxPerPerson = 30, languages = setOfNotNull(mainLanguage(theirs)))
+        if (list.size < 12) return null
+        return mix(
+            "cmood-${person.id}-${mood.key}", "topic", "${person.name} ${titleCase(noun)}", list, refresh = "daily",
+            subtitle = namesIn(list, first = person.name), color = mood.color,
+            description = "${titleCase(noun)} composed by ${person.name}, the ones that suit you first. Updates every day.",
+        )
+    }
+
+    /** A composer's songs from one decade: "90s Ilaiyaraaja". */
+    fun composerDecade(person: Person, start: Int): MixDto? {
+        val theirs = lib.byComposer[person.id].orEmpty().filter { eligibleSong(it) && songs[it].year in start until start + 10 }
+        if (theirs.size < 15) return null
+        val scores = theirs.associateWith { i ->
+            (weights[i] ?: 0.0).toFloat() + 0.5f * affinity[i] + 0.3f * ln(1.0 + (popularity[i] ?: 0)).toFloat() - tired(i)
+        }
+        val random = Random(personSeed * 43 + today.toEpochDay() + person.id.hashCode() + start)
+        val list = pick(scores, 30, random, pool = 80, maxPerAlbum = 3, maxPerPerson = 30)
+        if (list.size < 12) return null
+        return mix(
+            "cdecade-${person.id}-$start", "topic", "${decadeName(start)} ${person.name}", list, refresh = "daily",
+            subtitle = namesIn(list, first = person.name), color = DECADE_COLORS[(start / 10) % DECADE_COLORS.size],
+            description = "${person.name}'s songs from $start to ${start + 9}, the ones that suit you first. Updates every day.",
+        )
+    }
+
+    /** Songs one composer made with one singer: "Ilaiyaraaja & S. Janaki". */
+    fun pair(composer: Person, singer: Person): MixDto? {
+        val theirs = lib.byComposer[composer.id].orEmpty().filter { i -> eligibleSong(i) && songs[i].singers.any { it.id == singer.id } }
+        if (theirs.size < 10) return null
+        val scores = theirs.associateWith { i ->
+            (weights[i] ?: 0.0).toFloat() + 0.5f * affinity[i] + 0.3f * ln(1.0 + (popularity[i] ?: 0)).toFloat() - tired(i)
+        }
+        val random = Random(personSeed * 47 + today.toEpochDay() + (composer.id + singer.id).hashCode())
+        val list = pick(scores, 30, random, pool = 80, maxPerAlbum = 3, maxPerPerson = 30)
+        return mix(
+            "pair-${composer.id}-${singer.id}", "topic", "${composer.name} & ${singer.name}", list, refresh = "daily",
+            subtitle = "Composed by ${composer.name}, sung by ${singer.name}",
+            description = "Songs ${composer.name} composed and ${singer.name} sang, the ones that suit you first. Updates every day.",
+        )
+    }
+
+    /** Songs you've never played from the albums you play most. Changes on Mondays. */
+    fun deepCuts(): MixDto? {
+        val love = HashMap<String, Double>()
+        for (i in likedSongs) love.merge(songs[i].albumId, (weights[i] ?: 0.0).coerceAtLeast(0.0), Double::plus)
+        for (album in history.starredAlbums) love.merge(album, 2.0, Double::plus)
+        val albums = love.entries.sortedByDescending { it.value }.take(30)
+        val most = albums.firstOrNull()?.value?.takeIf { it > 0 } ?: return null
+        val scores = HashMap<Int, Float>()
+        for ((album, l) in albums) {
+            for (i in lib.byAlbum[album].orEmpty()) {
+                if (i in heard || i in history.starred || !eligibleSong(i)) continue
+                scores[i] = (2 * l / most).toFloat() + 0.5f * affinity[i] - tired(i, monday)
+            }
+        }
+        val list = pick(scores, 30, Random(personSeed * 53 + monday.toEpochDay()), pool = 80, maxPerAlbum = 3, maxPerPerson = 10)
+        if (list.size < 10) return null
+        return mix(
+            "deepcuts", "deepcuts", "Deep Cuts", list, refresh = "weekly", subtitle = "From albums you love",
+            description = "Songs you've never played from the albums you play the most. Updates every Monday.",
+        )
+    }
+
+    /** Songs for your taste from albums nobody on this server has played. Changes on Mondays. */
+    fun hiddenGems(): MixDto? {
+        if (likedSongs.size < 3) return null
+        val played = popularity.filterValues { it > 0 }.keys.mapTo(HashSet()) { songs[it].albumId }
+        val skip = heard + history.starred + history.playlisted.keys + discoverSongs
+        val like = similarTo(likedSongs.take(60), languages = yourLanguages.keys)
+        val scores = HashMap<Int, Float>()
+        for (i in 0 until n) {
+            if (songs[i].albumId in played || i in skip || like[i].isNaN()) continue
+            scores[i] = 0.5f * like[i] + affinity[i] - tired(i, monday)
+        }
+        val list = pickBlend(
+            scores, 30, Random(personSeed * 59 + monday.toEpochDay()), pool = 150, blend = yourLanguages,
+            exclude = skip, maxPerAlbum = 1, maxPerPerson = 4,
+        )
+        if (list.size < 15) return null
+        return mix(
+            "gems", "gems", "Hidden Gems", list, refresh = "weekly", subtitle = "From albums nobody here has played",
+            description = "Songs for your taste from albums no one on this server has played yet. Updates every Monday.",
+        )
+    }
+
+    /** Festivals and seasons: Pongal, rain songs, Deepavali... while it's their time. */
+    data class Season(
+        val key: String,
+        val title: String,
+        val subtitle: String,
+        /** Words in a song's title that make it this season's (each matches the start of a word: "mazhai" also finds "mazhaiyil"). */
+        val words: Set<String>,
+        /** Descriptions from the analyzer for its feeling, and how much each counts. */
+        val moods: Map<String, Float>,
+        val color: String,
+        val on: (LocalDate) -> Boolean,
+    )
+
+    fun season(season: Season): MixDto? {
+        if (!season.on(today)) return null
+        val feelings = season.moods.filterKeys { it in lib.moods }
+        val scores = HashMap<Int, Float>()
+        for (i in 0 until n) {
+            if (!eligibleSong(i)) continue
+            val title = songs[i].title.lowercase()
+            val titleWords = title.split(NOT_LETTERS)
+            val named = season.words.count { w -> if (' ' in w) w in title else titleWords.any { it.startsWith(w) } }
+            val feel = if (feelings.isEmpty() || lib.sound[i] == null) Float.NaN
+            else feelings.entries.sumOf { (k, w) -> (lib.moods.getValue(k)[i] * w).toDouble() }.toFloat() / feelings.values.sum()
+            if (named == 0 && (feel.isNaN() || feel < 1.2f)) continue
+            scores[i] = 3f * named + (if (feel.isNaN()) 0f else feel) + 0.4f * affinity[i] - tired(i)
+        }
+        val random = Random(personSeed * 61 + today.toEpochDay() + season.key.hashCode())
+        val list = pickBlend(scores, 40, random, pool = 150, blend = yourLanguages, maxPerAlbum = 2)
+        if (list.size < 20) return null
+        return mix(
+            "season-${season.key}", "season", season.title, list, refresh = "daily", subtitle = season.subtitle, color = season.color,
+            description = "${season.subtitle}. Songs named for it first, then ones with its feeling. Updates every day.",
+        )
+    }
+
     /** The most played songs by everyone on this server. */
     fun popular(): MixDto? {
         val list = popularity.entries.filter { eligibleSong(it.key) && speaks(it.key, yourLanguages.keys) }.sortedByDescending { it.value }.map { it.key }.take(50)
@@ -452,10 +850,14 @@ class MixMaker(
          * a Western-style song from a Tamil film doesn't belong with thappu drums.
          */
         val indianSound: Boolean = false,
+        /** What its songs are called in titles ("melodies": "Ilaiyaraaja Melodies", "Tuesday night melodies"); null if it doesn't make one. */
+        val noun: String? = null,
     )
 
     fun mood(mood: Mood): MixDto? {
-        val members = moodMembers(mood) ?: return null
+        val fits = moodMembers(mood) ?: return null
+        // The songs that suit you come first (for someone who hasn't played anything yet, it's the same for all).
+        val members = if (hasTaste) fits.mapValues { (i, fit) -> fit + 0.5f * affinity[i] } else fits
         val random = Random(today.toEpochDay() * 13 + mood.key.hashCode())
         // A music culture (Kuthu, Kollywood Mass, Carnatic) stays in its language; a feeling (Sad, Chill) blends yours.
         val list = when {
@@ -492,8 +894,13 @@ class MixMaker(
         return s
     }
 
+    private val membersOf = java.util.concurrent.ConcurrentHashMap<String, Map<Int, Float>>()
+
     /** Songs that clearly have this mood, with how strongly; null if the library wasn't analyzed or has too few. */
-    private fun moodMembers(mood: Mood): Map<Int, Float>? {
+    private fun moodMembers(mood: Mood): Map<Int, Float>? =
+        membersOf.getOrPut(mood.key) { findMoodMembers(mood) ?: emptyMap() }.takeIf { it.isNotEmpty() }
+
+    private fun findMoodMembers(mood: Mood): Map<Int, Float>? {
         if (!lib.hasSound || (mood.parts.keys + mood.requires.keys).any { it !in lib.moods }) return null
         val rivals = MOODS.filter { it.group != null && it.group == mood.group && it != mood && (it.parts.keys + it.requires.keys).all { k -> k in lib.moods } }
         val members = buildMap {
@@ -516,12 +923,11 @@ class MixMaker(
     fun decade(start: Int): MixDto? {
         val members = songs.indices.filter { eligibleSong(it) && songs[it].year in start until start + 10 && speaks(it, yourLanguages.keys) }
         if (members.size < 20) return null
-        val scores = members.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() }
+        val scores = members.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() + if (hasTaste) 0.7f * affinity[it] else 0f }
         val list = pickBlend(scores, 50, Random(today.toEpochDay() * 7 + start), pool = 250, blend = yourLanguages, scoreOnly = false)
-        val name = if (start >= 2000) "${start}s" else "${start % 100}s"
         return mix(
-            "decade-$start", "decade", "$name Mix", list, refresh = "daily", subtitle = namesIn(list), color = DECADE_COLORS[(start / 10) % DECADE_COLORS.size],
-            description = "Songs from $start to ${start + 9}, the most played first. Updates every day.",
+            "decade-$start", "decade", "${decadeName(start)} Mix", list, refresh = "daily", subtitle = namesIn(list), color = DECADE_COLORS[(start / 10) % DECADE_COLORS.size],
+            description = "Songs from $start to ${start + 9}, the most played and the ones that suit you first. Updates every day.",
         )
     }
 
@@ -615,7 +1021,7 @@ class MixMaker(
         }
         // A station stays in its seed's language (a composer's or singer's: their main one).
         val language = mainLanguage(seeds)
-        val scores = similarTo(seeds, language)
+        val scores = similarTo(seeds, language).lessTired(factor = 0.5f)
         if (kind == "song") for (i in 0 until n) scores[i] += 0.25f * affinity[i]
         val skip = exclude.mapNotNull { lib.index[it] }.toMutableSet()
         val first = if (kind == "song" && exclude.isEmpty()) seeds else emptyList()
@@ -638,7 +1044,7 @@ class MixMaker(
         // A playlist can be in more than one language on purpose: suggest in each one it has plenty of.
         val known = seeds.mapNotNull { lib.language[it] }
         val languages = known.groupingBy { it }.eachCount().filter { it.value >= 0.25 * known.size }.keys
-        val scores = similarTo(seeds, languages = languages)
+        val scores = similarTo(seeds, languages = languages).lessTired(factor = 0.5f)
         for (i in 0 until n) scores[i] += 0.2f * affinity[i]
         val ranked = pick(
             scores, count * (page + 1), Random(0), pool = count * (page + 1),
@@ -808,6 +1214,13 @@ class MixMaker(
         return counts.mapValues { it.value / max }
     }
 
+    private fun decadeName(start: Int) = if (start >= 2000) "${start}s" else "${start % 100}s"
+
+    private fun titleCase(words: String) = words.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+
+    /** Random noise for picking "the best, with some variety" (Gumbel: adding it and taking the top is a weighted draw). */
+    private fun gumbel(random: Random) = -ln(-ln(random.nextDouble().coerceIn(1e-12, 1 - 1e-12)))
+
     /** "Ilaiyaraaja, S. Janaki and more": the composers and singers heard most in a mix. */
     private fun namesIn(list: List<Int>, first: String? = null): String {
         val composers = list.mapNotNull { songs[it].composer?.name }.groupingBy { it }.eachCount()
@@ -900,7 +1313,63 @@ class MixMaker(
         const val DAY = 24 * 60 * 60 * 1000L
 
         /** Mixes made from someone's own listening; everything else is a showcase, the same for everyone. */
-        val PERSONAL_KINDS = setOf("daily", "discover", "repeat", "rewind", "friends")
+        val PERSONAL_KINDS = setOf(
+            "daily", "daylist", "discover", "fresh", "repeat", "rewind", "friends", "because", "deepcuts", "gems", "artistmix", "topic", "season",
+        )
+
+        /** The most a song's score drops for being passed over again and again. */
+        const val MAX_FATIGUE = 3f
+
+        /** How many mixes Your top mixes shows, and at most how many of each sort. */
+        const val TOP_MIXES = 10
+        val TOP_MIX_CAPS = mapOf("season" to 2, "because" to 2, "artist" to 2, "topic" to 3, "mood" to 2, "decade" to 1, "score" to 2)
+
+        private val NOT_LETTERS = Regex("""[^\p{L}]+""")
+
+        /** A part of the day, from [from] o'clock, and the feelings its daylist can have. */
+        class DayPart(val name: String, val from: Int, val vibes: List<String>)
+
+        val DAY_PARTS = listOf(
+            DayPart("morning", 5, listOf("devotional", "melody", "happy", "chill")),
+            DayPart("afternoon", 12, listOf("happy", "party", "melody", "romance")),
+            DayPart("evening", 17, listOf("romance", "melody", "happy", "classical")),
+            DayPart("night", 21, listOf("chill", "sad", "romance", "melody")),
+        )
+
+        fun partOf(hour: Int): DayPart = DAY_PARTS.lastOrNull { hour >= it.from } ?: DAY_PARTS.last()
+
+        private fun between(day: LocalDate, from: MonthDay, to: MonthDay) = MonthDay.from(day).let { !it.isBefore(from) && !it.isAfter(to) }
+
+        /** Deepavali's date, which moves with the moon. */
+        private val DEEPAVALI = listOf("2026-11-08", "2027-10-29", "2028-10-17", "2029-11-05", "2030-10-26").map(LocalDate::parse)
+
+        val SEASONS = listOf(
+            Season(
+                "pongal", "Pongal Kondattam", "Harvest festival songs", setOf("pongal", "pongalo", "jallikattu", "sankranti", "sankranthi", "bhogi", "kummi"),
+                mapOf("kuthu" to 1f, "happy" to 0.5f), "#C0561B",
+            ) { between(it, MonthDay.of(1, 10), MonthDay.of(1, 17)) },
+            Season(
+                "valentine", "Kadhal Week", "Love songs for Valentine's week", setOf("kadhal", "kaadhal", "prema", "pyaar", "ishq", "love"),
+                mapOf("romantic" to 1f, "melody" to 0.4f), "#B03A5B",
+            ) { between(it, MonthDay.of(2, 8), MonthDay.of(2, 14)) },
+            Season(
+                "rain", "Rain Songs", "For grey skies and the smell of rain",
+                setOf("mazhai", "mazha", "megham", "megam", "megame", "meghame", "thooral", "saaral", "rain", "monsoon", "varsham", "vaana", "baarish", "barish", "barsaat", "sawan", "saawan"),
+                mapOf("melody" to 0.6f, "chill" to 0.4f, "romantic" to 0.4f), "#3B6E8F",
+            ) { between(it, MonthDay.of(6, 15), MonthDay.of(8, 31)) || between(it, MonthDay.of(10, 15), MonthDay.of(12, 10)) },
+            Season(
+                "deepavali", "Deepavali Celebration", "Festival songs for Deepavali", setOf("deepavali", "diwali", "deepam", "pattasu", "pataka", "patakha"),
+                mapOf("happy" to 0.8f, "party" to 0.6f), "#E0A21B",
+            ) { day -> DEEPAVALI.any { !day.isBefore(it.minusDays(7)) && !day.isAfter(it.plusDays(1)) } },
+            Season(
+                "christmas", "Christmas Songs", "Carols and Christmas cheer", setOf("christmas", "xmas", "jingle", "santa", "carol", "bethlehem", "yesu", "jesus", "merry"),
+                mapOf("devotional" to 0.6f, "happy" to 0.4f), "#1E7F4E",
+            ) { between(it, MonthDay.of(12, 15), MonthDay.of(12, 26)) },
+            Season(
+                "newyear", "New Year Party", "Songs to ring in the new year", setOf("new year", "newyear", "happy new"),
+                mapOf("party" to 1f), "#D2462D",
+            ) { between(it, MonthDay.of(12, 27), MonthDay.of(12, 31)) || between(it, MonthDay.of(1, 1), MonthDay.of(1, 2)) },
+        )
 
         val SCORE_VIBES = listOf(
             ScoreVibe(
@@ -962,31 +1431,31 @@ class MixMaker(
         val MOODS = listOf(
             Mood(
                 "chill", "Chill Mix", "Calm, soft and easy", mapOf("chill" to 1f, "melody" to 0.5f), energy = -1f, color = "#3B6E8F",
-                maxEnergy = 0.3f, maxRhythm = 0.3f, vetoes = mapOf("party" to 1.0f), group = "calm",
+                maxEnergy = 0.3f, maxRhythm = 0.3f, vetoes = mapOf("party" to 1.0f), group = "calm", noun = "chill",
             ),
-            Mood("romance", "Romance Mix", "Love songs and duets", mapOf("romantic" to 1f, "melody" to 0.4f), color = "#B03A5B"),
-            Mood("happy", "Feel Good Mix", "Bright, happy songs", mapOf("happy" to 1f), energy = 0.3f, color = "#E0A21B"),
-            Mood("party", "Party Mix", "Loud, fast, made for dancing", mapOf("party" to 1f, "kuthu" to 0.5f), energy = 1f, color = "#D2462D"),
+            Mood("romance", "Romance Mix", "Love songs and duets", mapOf("romantic" to 1f, "melody" to 0.4f), color = "#B03A5B", noun = "love songs"),
+            Mood("happy", "Feel Good Mix", "Bright, happy songs", mapOf("happy" to 1f), energy = 0.3f, color = "#E0A21B", noun = "feel-good songs"),
+            Mood("party", "Party Mix", "Loud, fast, made for dancing", mapOf("party" to 1f, "kuthu" to 0.5f), energy = 1f, color = "#D2462D", noun = "party songs"),
             Mood(
                 "kuthu", "Kuthu Mix", "Folk beats and thappu drums", mapOf("kuthu" to 1f), energy = 0.5f, color = "#C0561B", language = "Tamil",
-                vetoes = mapOf("melody" to 1.0f, "sad" to 1.0f), indianSound = true,
+                vetoes = mapOf("melody" to 1.0f, "sad" to 1.0f), indianSound = true, noun = "kuthu songs",
             ),
             Mood(
                 "mass", "Kollywood Mass", "Hero intros and mass beats", mapOf("heroic" to 1f, "kuthu" to 0.5f, "party" to 0.3f), energy = 1f,
-                color = "#A3271F", language = "Tamil", vetoes = mapOf("melody" to 1.2f, "sad" to 1.0f), indianSound = true,
+                color = "#A3271F", language = "Tamil", vetoes = mapOf("melody" to 1.2f, "sad" to 1.0f), indianSound = true, noun = "mass songs",
             ),
-            Mood("sad", "Sad Songs", "For the heavy-hearted", mapOf("sad" to 1f), energy = -0.3f, color = "#4A5A7A"),
-            Mood("melody", "Melody Mix", "Soft film melodies", mapOf("melody" to 1f), color = "#5B7F4A", oneLanguage = true),
+            Mood("sad", "Sad Songs", "For the heavy-hearted", mapOf("sad" to 1f), energy = -0.3f, color = "#4A5A7A", noun = "sad songs"),
+            Mood("melody", "Melody Mix", "Soft film melodies", mapOf("melody" to 1f), color = "#5B7F4A", oneLanguage = true, noun = "melodies"),
             Mood("workout", "Workout Mix", "Big energy to keep you moving", mapOf("heroic" to 1f, "party" to 0.5f), energy = 1f, color = "#8C2F39"),
-            Mood("devotional", "Devotional", "Bhakti songs and hymns", mapOf("devotional" to 1f), color = "#B5651D", oneLanguage = true),
-            Mood("classical", "Carnatic Touch", "Songs with a classical soul", mapOf("classical" to 1f), color = "#6D4C8F", oneLanguage = true),
+            Mood("devotional", "Devotional", "Bhakti songs and hymns", mapOf("devotional" to 1f), color = "#B5651D", oneLanguage = true, noun = "devotional songs"),
+            Mood("classical", "Carnatic Touch", "Songs with a classical soul", mapOf("classical" to 1f), color = "#6D4C8F", oneLanguage = true, noun = "classical songs"),
             Mood(
                 "focus", "Focus", "Mostly instrumental, easy to work to", mapOf("instrumental" to 1f, "chill" to 0.4f), energy = -0.5f, color = "#2F6B6B",
                 maxRhythm = 0.5f, requires = mapOf("instrumental" to 1.5f), vetoes = mapOf("party" to 1.5f), group = "calm",
             ),
             Mood(
                 "sleep", "Sleep", "Lullabies and quiet songs", mapOf("lullaby" to 1f, "chill" to 0.7f), energy = -1f, color = "#28335C",
-                maxEnergy = -0.2f, maxRhythm = -0.3f, vetoes = mapOf("party" to 0.5f), group = "calm",
+                maxEnergy = -0.2f, maxRhythm = -0.3f, vetoes = mapOf("party" to 0.5f), group = "calm", noun = "lullabies",
             ),
             Mood("retro", "Retro Mix", "Old-school sound", mapOf("retro" to 1f), color = "#8A6A3B", oneLanguage = true),
         )

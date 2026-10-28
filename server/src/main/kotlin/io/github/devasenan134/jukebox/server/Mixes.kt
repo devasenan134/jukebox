@@ -43,7 +43,8 @@ private val log = LoggerFactory.getLogger("jukebox.mixes")
  *
  * Nothing is stored as a finished list: every mix is worked out from the library and your listening
  * whenever one of them changed. That's what keeps them up to date: a new song that fits a mix appears
- * in it as soon as Jukebox has scanned it (and the analyzer has listened to it).
+ * in it as soon as Jukebox has scanned it (and the analyzer has listened to it). What each person was
+ * shown is kept (suggestion_lists), so songs they keep passing over make room for others.
  */
 class MixService(
     private val db: Db,
@@ -219,13 +220,19 @@ class MixService(
         val history = source.history(user.id, lib)
         val skips = skips(user.id, lib)
         val friends = friendsPlays(user.id, lib)
-        val today = LocalDate.ofInstant(java.time.Instant.ofEpochMilli(clock()), zone)
+        val time = java.time.Instant.ofEpochMilli(clock()).atZone(zone)
+        val today = time.toLocalDate()
+        // The daylist changes with the part of the day.
+        val dayPart = MixMaker.partOf(time.hour).name
         val (togetherVersion, together) = together(lib)
-        val key = listOf(lib.version, history.version, skips.hashCode(), friends.hashCode(), today, togetherVersion).joinToString("|")
+        val key = listOf(lib.version, history.version, skips.hashCode(), friends.hashCode(), today, dayPart, togetherVersion).joinToString("|")
         if (cached != null && cached.key == key) return Built(key, cached.lib, cached.maker, cached.home, clock()).also { built[user.id] = it }
 
         val popularity = source.popularity(lib)
-        val maker = MixMaker(lib, history, skips, popularity, friends, personSeed = user.id * 1_000_003L, today = today, now = clock(), together = together)
+        val maker = MixMaker(
+            lib, history, skips, popularity, friends, personSeed = user.id * 1_000_003L, today = today, now = clock(), together = together,
+            shown = shown(user.id, lib, today), zone = zone,
+        )
         val home = remember(user.id, maker.home())
         return Built(key, lib, maker, home, clock()).also { built[user.id] = it }
     }
@@ -248,6 +255,26 @@ class MixService(
         together = current
         togetherAt = clock()
         return current
+    }
+
+    /**
+     * The lists of songs [userId] was shown in the 10 weeks before [today] (mixes they opened and suggestions
+     * for their playlists). Of a mix, only its first 25 songs count: few people scroll further.
+     */
+    private suspend fun shown(userId: Long, lib: LibrarySnapshot, today: LocalDate): List<ShownList> {
+        val start = today.atStartOfDay(zone).toInstant().toEpochMilli()
+        val rows = db.read {
+            query(
+                """SELECT l.id, l.mix_id, l.served_at, s.song_id FROM suggestion_lists l JOIN suggestions s ON s.list_id = l.id
+                   WHERE l.user_id = ? AND l.kind IN ('mix', 'recommend') AND l.served_at >= ? AND l.served_at < ?
+                     AND (l.kind = 'recommend' OR s.position < 25)""",
+                userId, start - 70 * MixMaker.DAY, start,
+            ) { rs -> Triple(rs.getLong(1), rs.getString(2) to rs.getLong(3), rs.getString(4)) }
+        }
+        return rows.groupBy { it.first }.values.map { list ->
+            val (mixId, at) = list.first().second
+            ShownList(mixId, java.time.Instant.ofEpochMilli(at).atZone(zone).toLocalDate(), list.mapNotNull { lib.index[it.third] })
+        }
     }
 
     /** Sets each mix's [MixDto.updatedAt] to when its songs last changed (kept in the database). */

@@ -67,11 +67,41 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
    - **Affinity:** Calculates cosine similarity (dot product) between each song in the library and the user's taste centroid, adjusted for composer/singer preference.
    - **Language Affinity:** Determines language proportions from the user's listening history to prevent unnatural cross-language bleed.
 
-2. **Mix Categories:**
-   - **Daily Mixes (Up to 6):** Favourites split by language, clustered by acoustic embeddings using **k-means clustering**, and padded with similar tracks.
-   - **Mood Mixes:** Scores songs against prompt embeddings (z-score normalized dot product) combined with acoustic constraints (e.g., Party requires high energy and tempo; Chill restricts energy).
-   - **Discover Weekly:** 30 unheard songs matching the taste centroid, refreshed on Mondays.
-   - **On Repeat & Rewind:** Recent heavy rotations vs. past favorites not played in over 30 days.
+2. **Passed-over songs (fatigue):** `suggestion_lists` says which songs each person was shown (the first 25
+   songs of a mix they opened, and playlist suggestions). A song shown on a day and not played since loses
+   $0.7 \cdot e^{-\text{days ago}/14}$ for each such day (at most 3) in personal mixes, half that in stations and
+   playlist suggestions. Only lists shown before the mix's own day count (today for daily mixes, Monday for
+   weekly ones), so opening a mix doesn't change it.
+
+3. **Home rows, in order:** Made for you (the apps put Recently played and Jump back in right after it),
+   Your top mixes, Your stations, then the showcases (This is: composers and artists, the moods and
+   decades not already in Your top mixes, scores, artist stations, charts).
+
+4. **Made for you:**
+   - **Daylist:** named for the weekday and part of the day ("Tuesday night melodies"; morning from 5,
+     afternoon 12, evening 17, night 21, in `TIME_ZONE`). Its feeling is the one, of the part's few, that
+     best fits what you play at that time (with some day-to-day variety); 10 of your songs for that time
+     and 30 new ones with the feeling.
+   - **Daily Mixes (Up to 6):** Favourites split by language, clustered by acoustic embeddings using **k-means clustering**.
+     Each day 15 favourites are drawn (plays of the last 14 days count extra) and the new songs are the ones like those 15.
+   - **Discover Weekly:** 30 unheard songs matching the taste centroid, refreshed on Mondays, never songs an
+     earlier Discover Weekly showed in the 8 weeks before.
+   - **Fresh for You:** songs added to the library in the two weeks before Friday that suit you, refreshed on Fridays.
+   - **On Repeat & Rewind, Friends Mix:** Recent heavy rotations vs. past favorites not played in over 45 days; what friends play.
+
+5. **Your top mixes:** a pool of candidates, each with a fit; each day 10 are drawn (fit + Gumbel noise from
+   the day, so the best come up most often), at most 2 per composer and a few per sort:
+   - **Because you played X** (songs from the last 7 days), **Deep Cuts** (unplayed songs from your most-played
+     albums), **Hidden Gems** (albums nobody on the server has played);
+   - **<Composer> Mix** / **<Singer> Mix** (theirs and music like theirs), **<Composer> Melodies** (composer × mood),
+     **90s <Composer>**, **<Composer> & <Singer>**;
+   - the mood and decade mixes you play most, score vibes for score listeners;
+   - **Seasons** while it's their time (Pongal, Kadhal Week, Rain Songs, Deepavali, Christmas, New Year): songs
+     whose titles have the season's words first, then songs with its feeling.
+
+6. **Other mixes:**
+   - **Mood Mixes:** Scores songs against prompt embeddings (z-score normalized dot product) combined with acoustic
+     constraints (e.g., Party requires high energy and tempo; Chill restricts energy); songs that suit you come first.
    - **Stations & Radio:** Combines sound similarity with the **"Played Together"** graph from [`Together.kt`](file:///home/devs/code/jukebox/server/src/main/kotlin/io/github/devasenan134/jukebox/server/Together.kt) (tracks frequently played in the same session or co-occurring in user playlists across the server).
 
 ### How Mixes are Saved and Cached

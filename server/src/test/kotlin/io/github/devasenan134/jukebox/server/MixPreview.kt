@@ -36,6 +36,7 @@ fun main(args: Array<String>) = runBlocking {
     val playlists = source.playlists(lib)
     val maker = MixMaker(
         lib, history, emptyMap(), source.popularity(lib), emptyMap(), personSeed = username.hashCode().toLong(), today = LocalDate.now(),
+        zone = java.time.ZoneId.systemDefault(),
         together = Together.build(emptyList(), playlists),
     )
     println("\n${playlists.size} playlists count towards which songs go together")

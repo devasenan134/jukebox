@@ -188,7 +188,8 @@ class MixMakerTest {
         val lib = Pretend.library()
         val fan = maker(lib).home()
         val stranger = MixMaker(lib, History.EMPTY, emptyMap(), (100 until 130).associateWith { 3 }, emptyMap(), personSeed = 7, today = today, now = now).home()
-        val showcases = setOf("composers", "singers", "moods", "artist-stations", "charts", "decades")
+        // Moods and decades lean towards your taste, so only these are exactly alike.
+        val showcases = setOf("composers", "singers", "artist-stations", "charts")
         for (id in showcases) {
             val a = fan.firstOrNull { it.id == id } ?: continue
             val b = stranger.first { it.id == id }
@@ -196,7 +197,12 @@ class MixMakerTest {
             assertTrue(a.mixes.none { it.personal }, id)
         }
         assertTrue(fan.first { it.id == "made-for-you" }.mixes.all { it.personal })
+        assertTrue(fan.first { it.id == "top-mixes" }.mixes.all { it.personal })
         assertTrue(fan.first { it.id == "your-stations" }.mixes.all { it.personal && it.endless })
+        // Yours first: Made for you, Your top mixes, Your stations; and no mix twice on Home.
+        assertEquals(listOf("made-for-you", "top-mixes", "your-stations"), fan.take(3).map { it.id })
+        val ids = fan.flatMap { it.mixes }.map { it.id }
+        assertEquals(ids.size, ids.toSet().size, "no mix twice: $ids")
         assertTrue(fan.first { it.id == "composers" }.mixes.all { it.title.startsWith("This Is ") })
     }
 
@@ -249,6 +255,109 @@ class MixMakerTest {
         assertTrue(daily.isNotEmpty())
         assertTrue(daily.first().songs.count { style(it.id) == 0 } > daily.first().songs.size / 2)
         assertTrue(maker.home().none { it.id == "moods" })
+    }
+
+    // ---------- keeping mixes fresh ----------
+
+    @Test
+    fun `songs you were shown and passed over make room for others`() {
+        val lib = Pretend.library()
+        val yesterday = today.minusDays(1)
+        val before = maker(lib).dailyMixes().first().songs.map { it.id }
+        val fresh = before.filter { lib.index.getValue(it) !in 0 until 40 }.take(20)
+        // Those songs were shown on three days, and never played.
+        val shown = (1..3L).map { ShownList("daily-1", today.minusDays(it), fresh.map { id -> lib.index.getValue(id) }) }
+        val after = MixMaker(
+            lib, melodyFan(lib), emptyMap(), emptyMap(), emptyMap(), 42, today, now, shown = shown,
+        ).dailyMixes().first().songs.map { it.id }
+        val kept = after.count { it in fresh }
+        assertTrue(kept < fresh.size / 2, "most passed-over songs gave way: $kept of ${fresh.size} still there")
+        // Songs you went on to play aren't held against you.
+        val playedAll = melodyFan(lib).let { h ->
+            val ids = fresh.map { lib.index.getValue(it) }
+            History(h.playCount, h.lastPlayed + ids.associateWith { now }, h.plays, h.starred, h.starredAlbums, h.starredArtists, h.rating)
+        }
+        val forgiven = MixMaker(lib, playedAll, emptyMap(), emptyMap(), emptyMap(), 42, today, now, shown = shown)
+        val plain = MixMaker(lib, playedAll, emptyMap(), emptyMap(), emptyMap(), 42, today, now)
+        assertEquals(plain.dailyMixes().first().songs.map { it.id }, forgiven.dailyMixes().first().songs.map { it.id })
+        assertTrue(yesterday.isBefore(today))
+    }
+
+    @Test
+    fun `discover has new songs every week and doesn't change during it`() {
+        val lib = Pretend.library()
+        val monday = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+        val thisWeek = assertNotNull(maker(lib).discover()).songs.map { it.id }
+        // Opening it on Monday doesn't change it on Wednesday.
+        val openedMonday = listOf(ShownList("discover", monday, thisWeek.map { lib.index.getValue(it) }))
+        val wednesday = monday.plusDays(2)
+        val later = MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), mapOf(120 to 4), 42, wednesday, now, shown = openedMonday)
+        assertEquals(thisWeek, assertNotNull(later.discover()).songs.map { it.id })
+        // Next week's has none of them.
+        val nextWeek = MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), mapOf(120 to 4), 42, monday.plusWeeks(1), now, shown = openedMonday)
+        val next = assertNotNull(nextWeek.discover()).songs.map { it.id }
+        assertTrue(next.none { it in thisWeek }, "repeated: ${next.filter { it in thisWeek }}")
+    }
+
+    @Test
+    fun `your top mixes change from day to day and every one of them can be opened`() {
+        val lib = Pretend.library()
+        val days = (0 until 5L).map { d ->
+            MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), emptyMap(), 42, today.plusDays(d), now).topMixes()
+        }
+        assertTrue(days.all { it.size >= 4 }, "sizes ${days.map { it.size }}")
+        assertTrue(days.map { day -> day.map { it.id } }.toSet().size > 1, "the same top mixes every day")
+        val kinds = days.flatten().map { it.kind }.toSet()
+        assertTrue("because" in kinds && "artistmix" in kinds, "kinds: $kinds")
+        val maker = maker(lib)
+        for (mix in days.first()) {
+            val opened = assertNotNull(maker.byId(mix.id), mix.id)
+            assertEquals(mix.songs.map { it.id }, opened.songs.map { it.id }, mix.id)
+            assertTrue(opened.songs.size >= 10, "${mix.id} has ${opened.songs.size} songs")
+        }
+        // "Because you played" starts with that song and stays in its style.
+        val because = assertNotNull(maker.byId("because-song3"))
+        assertEquals("song3", because.songs.first().id)
+        assertTrue(because.songs.count { style(it.id) == 0 } > because.songs.size * 0.8)
+        // A composer's melodies are theirs, and melodies.
+        val composer = lib.songs[3].composer!!
+        val melodies = assertNotNull(maker.byId("cmood-${composer.id}-melody"))
+        assertTrue(melodies.songs.all { s -> lib.songs[lib.index.getValue(s.id)].composer?.id == composer.id })
+        assertEquals("${composer.name} Melodies", melodies.title)
+    }
+
+    @Test
+    fun `the daylist is named for the time of day`() {
+        val lib = Pretend.library()
+        val zone = java.time.ZoneId.of("Asia/Kolkata")
+        fun at(hour: Int): MixDto {
+            val time = today.atTime(hour, 30).atZone(zone)
+            return assertNotNull(
+                MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), emptyMap(), 42, today, time.toInstant().toEpochMilli(), zone = zone).byId("daylist"),
+            )
+        }
+        val morning = at(8)
+        val night = at(23)
+        assertTrue(morning.title.startsWith("Friday morning "), morning.title)
+        assertTrue(night.title.startsWith("Friday night "), night.title)
+        assertTrue(morning.songs.size >= 20)
+        assertTrue(morning.personal)
+    }
+
+    @Test
+    fun `seasonal mixes come in their season, songs named for it first`() {
+        val rain = (0 until 5).map { i ->
+            Pretend.song(1000 + i, 0).copy(id = "rain$i", title = "Mazhaiyil Nanaigiren $i", albumId = "rain$i", album = "Rain $i") to Pretend.sound(0)
+        }
+        val lib = Pretend.library(rain)
+        val season = MixMaker.SEASONS.first { it.key == "rain" }
+        val inSeason = MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), emptyMap(), 42, LocalDate.of(2026, 10, 28), now)
+        val mix = assertNotNull(inSeason.season(season))
+        assertTrue(mix.songs.take(8).count { it.id.startsWith("rain") } >= 4, mix.songs.take(8).map { it.title }.toString())
+        assertTrue(inSeason.topMixes().first().id == "season-rain")
+        val outOfSeason = MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), emptyMap(), 42, LocalDate.of(2027, 3, 1), now)
+        assertEquals(null, outOfSeason.season(season))
+        assertTrue(outOfSeason.topMixes().none { it.kind == "season" })
     }
 
     @Test
@@ -307,7 +416,7 @@ class MixMakerTest {
         val scoreRecs = maker.recommend(listOf("score0", "score1"), 5, 0)
         assertTrue(scoreRecs.all { it.id.startsWith("score") }, "recommendations for score playlist must only be scores")
 
-        // 5. When user listens to BGMs, score mixes are featured in Made for You
+        // 5. When user listens to BGMs, score mixes come up in Your top mixes
         val bgmFanHistory = History(
             playCount = mapOf(lib.index.getValue("score0") to 10, lib.index.getValue("score1") to 8),
             lastPlayed = mapOf(lib.index.getValue("score0") to now, lib.index.getValue("score1") to now),
@@ -316,8 +425,8 @@ class MixMakerTest {
         )
         val bgmMaker = maker(lib, history = bgmFanHistory)
         val home = bgmMaker.home()
-        val madeForYou = home.first { it.id == "made-for-you" }
-        assertTrue(madeForYou.mixes.any { it.id.startsWith("score-") }, "BGM fan gets score mixes in Made for You")
+        val top = home.first { it.id == "top-mixes" }
+        assertTrue(top.mixes.any { it.id.startsWith("score-") }, "BGM fan gets score mixes in Your top mixes")
     }
 }
 
