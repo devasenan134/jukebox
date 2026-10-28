@@ -74,8 +74,8 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
    weekly ones), so opening a mix doesn't change it.
 
 3. **Home rows, in order:** Made for you (the apps put Recently played and Jump back in right after it),
-   Your top mixes, Your stations, then the showcases (This is: composers and artists, the moods and
-   decades not already in Your top mixes, scores, artist stations, charts).
+   Your top mixes, Your stations, then the showcases (the moods and decades not already in Your top mixes,
+   scores, composer and artist stations, charts). "This Is" mixes aren't on Home; composer and singer pages open them.
 
 4. **Made for you:**
    - **Daylist:** named for the weekday and part of the day ("Tuesday night melodies"; morning from 5,
@@ -105,7 +105,7 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
    composer you've played most in 14 days, Discovery, the mood you play most, then your favourite songs (7 in all).
    The apps send the songs skipped in a station (`POST /mixes/radio` `skipped`); the next songs lose
    $0.6 \cdot \max(0, \text{likeness to the skipped})$, and the apps drop all but the next 2 queued songs and ask again.
-   The composer and singer rows (and their stations, the next ones down) rotate daily from the library's 30
+   Composer and artist stations (4 of each) rotate daily from the library's 30
    biggest plus your 5 favourites: $3 \cdot \text{your share} - 0.05 \cdot \text{rank} + \text{Gumbel noise}$.
 
 7. **"New" badge** (`isNew`): a mix that comes (back) to your Home after a week or more away is New for a day

@@ -204,7 +204,10 @@ class MixMakerTest {
         assertEquals(listOf("made-for-you", "top-mixes", "your-stations"), fan.take(3).map { it.id })
         val ids = fan.flatMap { it.mixes }.map { it.id }
         assertEquals(ids.size, ids.toSet().size, "no mix twice: $ids")
-        assertTrue(fan.first { it.id == "composers" }.mixes.all { it.title.startsWith("This Is ") })
+        // Composers and singers are on Home only as stations; their This Is mixes still open by id.
+        assertTrue(fan.none { it.id == "composers" || it.id == "singers" })
+        assertTrue(fan.first { it.id == "artist-stations" }.mixes.all { it.endless })
+        assertNotNull(maker(lib).byId("composer-composer1")).let { assertTrue(it.title.startsWith("This Is ")) }
     }
 
     @Test
@@ -240,7 +243,7 @@ class MixMakerTest {
         val ids = home.flatMap { it.mixes }.map { it.id }
         assertTrue("popular" in ids)
         assertTrue(ids.any { it.startsWith("mood-") })
-        assertTrue(ids.any { it.startsWith("composer-") })
+        assertTrue(ids.any { it.startsWith("radio-composer-") })
         assertTrue(ids.none { it.startsWith("daily-") })
         // Without listening, nothing is "made for" them yet.
         assertTrue(home.flatMap { it.mixes }.none { it.personal })

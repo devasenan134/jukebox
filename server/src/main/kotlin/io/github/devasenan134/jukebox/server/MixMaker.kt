@@ -293,7 +293,7 @@ class MixMaker(
     /**
      * The first three rows are made from this person's listening ("Made for <name>" in the app): Made for
      * you (the app puts what you played lately right after it), Your top mixes, which rotate from day to
-     * day, and Your stations. The rest showcase the library, its composers and singers.
+     * day, and Your stations. The rest showcase the library: moods, scores, composer and artist stations, charts, decades.
      */
     fun home(): List<MixSection> {
         val madeForYou = buildList {
@@ -308,15 +308,11 @@ class MixMaker(
         val top = topMixes()
         val inTop = top.map { it.id }.toSet()
         val charts = listOfNotNull(popular(), newArrivals())
-        val composers = topPeople(composer = true)
-        // Someone who composes and sings (Ilaiyaraaja, Anirudh) shows once, as a composer.
-        val singers = topPeople(composer = false, count = 16).filter { s -> composers.none { it.id == s.id } }.take(8)
+        // Composers and singers are on Home as stations only (their This Is mixes open from their pages).
         return listOf(
             MixSection("made-for-you", "Made for you", madeForYou.map(::personalized)),
             MixSection("top-mixes", "Your top mixes", top),
             MixSection("your-stations", "Your stations", yourStations().map { it.copy(personal = true) }),
-            MixSection("composers", "This is: composers", composers.mapNotNull { personMix(it, composer = true) }),
-            MixSection("singers", "This is: artists", singers.mapNotNull { personMix(it, composer = false) }),
             // A mix already in Your top mixes isn't shown twice.
             MixSection("moods", "Moods and vibes", MOODS.filter { "mood-${it.key}" !in inTop }.mapNotNull { mood(it) }),
             MixSection("scores", "Themes and background scores", scoreMixes().filter { it.id !in inTop }),
@@ -1009,11 +1005,11 @@ class MixMaker(
         return ids.distinct().take(YOUR_STATIONS).map(::stationSummary)
     }
 
-    /** Stations for composers and singers: the ones after those in the This Is rows, so they're different people. */
+    /** Stations for 4 composers and 4 singers, a different set each day (see [topPeople]). */
     fun artistStations(): List<MixDto> {
-        val composers = topPeople(composer = true, count = 12).let { if (it.size >= 12) it.drop(8) else it.take(4) }
+        val composers = topPeople(composer = true, count = 4)
         // Someone who composes and sings (Anirudh) gets one station, not two.
-        val singers = topPeople(composer = false, count = 24).filter { s -> composers.none { it.id == s.id } }.let { if (it.size >= 12) it.drop(8) else it }.take(4)
+        val singers = topPeople(composer = false, count = 8).filter { s -> composers.none { it.id == s.id } }.take(4)
         return composers.map { stationSummary("radio-composer-${it.id}") } + singers.map { stationSummary("radio-singer-${it.id}") }
     }
 
