@@ -13,6 +13,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -89,6 +90,7 @@ class PlaybackService : MediaSessionService() {
 
         startScrobbling(player)
         rememberQueues(player)
+        shuffleFromCurrent(player)
         stopAtClipEnds(player)
         // Lyrics over the lock screen when the screen goes off while music plays (if that's on in Settings).
         lockScreenLyrics = LockScreenLyrics(this) { player.isPlaying }.also { it.register() }
@@ -223,6 +225,33 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<MutableList<MediaItem>> = Futures.immediateFuture(
             mediaItems.map { it.buildUpon().setUri(songUri(it.mediaId)).build() }.toMutableList()
         )
+    }
+
+    /**
+     * A shuffled queue starts with the song that's playing and then plays every other song once, in a random
+     * order. The player's own shuffle order is random over the whole queue, so a queue started on a random song
+     * (Shuffle on a playlist), or shuffle turned on mid-queue, would skip every song shuffled before the current
+     * one. Songs added later (Play next, a station's next batch) keep the player's own placing.
+     */
+    @OptIn(UnstableApi::class)
+    private fun shuffleFromCurrent(player: ExoPlayer) {
+        fun reshuffle() {
+            val count = player.mediaItemCount
+            val current = player.currentMediaItemIndex
+            if (!player.shuffleModeEnabled || count < 2 || current !in 0 until count) return
+            val rest = (0 until count).filter { it != current }.shuffled()
+            player.setShuffleOrder(DefaultShuffleOrder((listOf(current) + rest).toIntArray(), System.nanoTime()))
+        }
+        player.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                if (shuffleModeEnabled) reshuffle()
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // A whole new queue (setMediaItems), not just the next song.
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) reshuffle()
+            }
+        })
     }
 
     /**

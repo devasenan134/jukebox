@@ -8,6 +8,11 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Every Song, Shuffled (2.5.2)
+
+### Fixed
+- **Shuffle plays the whole playlist.** Shuffle on a playlist (or turning shuffle on while one plays) started part-way through the shuffled order, so the songs shuffled before it never played. It now starts with the first song and plays every other song once, in a random order.
+
 ## Bigger Labels (2.5.1)
 
 ### Improved
