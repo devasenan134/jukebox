@@ -61,6 +61,9 @@ class MixService(
     @Volatile private var together: Pair<String, Together>? = null
     @Volatile private var togetherAt = 0L
 
+    /** Each person's time zone, as their app last said (until then, the server's). */
+    private val zones = ConcurrentHashMap<Long, ZoneId>()
+
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val rebuilding = ConcurrentHashMap<Long, Job>()
 
@@ -85,7 +88,8 @@ class MixService(
         background.launch { runCatching { source.snapshot() } }
     }
 
-    suspend fun home(user: UserDto): HomeMixes {
+    suspend fun home(user: UserDto, timeZone: String? = null): HomeMixes {
+        timeZone?.let { runCatching { ZoneId.of(it) }.getOrNull() }?.let { zones[user.id] = it }
         val b = current(user)
         return HomeMixes(b.home.map { s -> s.copy(mixes = s.mixes.map { it.summary() }) }, b.lib.analyzed, b.lib.songs.size)
     }
@@ -220,18 +224,19 @@ class MixService(
         val history = source.history(user.id, lib)
         val skips = skips(user.id, lib)
         val friends = friendsPlays(user.id, lib)
+        val zone = zones[user.id] ?: zone
         val time = java.time.Instant.ofEpochMilli(clock()).atZone(zone)
         val today = time.toLocalDate()
         // The daylist changes with the part of the day.
         val dayPart = MixMaker.partOf(time.hour).name
         val (togetherVersion, together) = together(lib)
-        val key = listOf(lib.version, history.version, skips.hashCode(), friends.hashCode(), today, dayPart, togetherVersion).joinToString("|")
+        val key = listOf(lib.version, history.version, skips.hashCode(), friends.hashCode(), today, dayPart, zone, togetherVersion).joinToString("|")
         if (cached != null && cached.key == key) return Built(key, cached.lib, cached.maker, cached.home, clock()).also { built[user.id] = it }
 
         val popularity = source.popularity(lib)
         val maker = MixMaker(
             lib, history, skips, popularity, friends, personSeed = user.id * 1_000_003L, today = today, now = clock(), together = together,
-            shown = shown(user.id, lib, today), zone = zone,
+            shown = shown(user.id, lib, today, zone), zone = zone,
         )
         val home = remember(user.id, maker.home())
         return Built(key, lib, maker, home, clock()).also { built[user.id] = it }
@@ -261,7 +266,7 @@ class MixService(
      * The lists of songs [userId] was shown in the 10 weeks before [today] (mixes they opened and suggestions
      * for their playlists). Of a mix, only its first 25 songs count: few people scroll further.
      */
-    private suspend fun shown(userId: Long, lib: LibrarySnapshot, today: LocalDate): List<ShownList> {
+    private suspend fun shown(userId: Long, lib: LibrarySnapshot, today: LocalDate, zone: ZoneId): List<ShownList> {
         val start = today.atStartOfDay(zone).toInstant().toEpochMilli()
         val rows = db.read {
             query(

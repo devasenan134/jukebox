@@ -426,7 +426,8 @@ fun Application.jukeboxServer(
             // Mixes, playlists and stations by Jukebox.
             route("/mixes") {
                 fun mixesOn() = mixes ?: throw ApiError(HttpStatusCode.NotFound, "Mixes are off on this server")
-                get { call.respond(mixesOn().home(call.me())) }
+                // ?tz=America/Toronto: the app's time zone, for the daylist and the days mixes change on.
+                get { call.respond(mixesOn().home(call.me(), call.request.queryParameters["tz"])) }
                 get("/followed") { call.respond(mixesOn().followed(call.me())) }
                 post("/radio") { call.respond(mixesOn().radio(call.me(), call.receive())) }
                 post("/recommend") { call.respond(mixesOn().recommend(call.me(), call.receive())) }

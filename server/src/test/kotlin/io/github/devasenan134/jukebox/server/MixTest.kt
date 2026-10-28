@@ -461,6 +461,10 @@ class MixApiTest {
         assertTrue(summaries.all { it.songs.isEmpty() && it.author == AUTHOR })
         assertTrue(summaries.filterNot { it.endless }.all { it.songCount > 0 && it.updatedAt > 0 })
 
+        // The app says its time zone; one Java doesn't know is ignored.
+        assertEquals(HttpStatusCode.OK, client.get("/mixes?tz=America/Toronto") { bearerAuth(token) }.status)
+        assertEquals(HttpStatusCode.OK, client.get("/mixes?tz=Mars/Olympus") { bearerAuth(token) }.status)
+
         val daily = client.get("/mixes/daily-1") { bearerAuth(token) }.body<MixDto>()
         assertTrue(daily.songs.isNotEmpty())
         assertEquals(HttpStatusCode.NotFound, client.get("/mixes/daily-99") { bearerAuth(token) }.status)

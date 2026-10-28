@@ -108,7 +108,7 @@ export const social = {
     ids.length ? get<Record<string, number>>(`/likes/playlists/counts?ids=${ids.map(enc).join(',')}`) : Promise.resolve({}),
 
   // Mixes, playlists and stations by Jukebox.
-  mixes: () => get<HomeMixes>('/mixes'),
+  mixes: () => get<HomeMixes>(`/mixes?tz=${enc(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
   mix: (id: string) => get<Mix>(`/mixes/${enc(id)}`),
   followedMixes: () => get<Mix[]>('/mixes/followed'),
   followMix: (id: string) => send<void>('PUT', `/mixes/${enc(id)}/follow`, ''),

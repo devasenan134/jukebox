@@ -79,7 +79,7 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
 
 4. **Made for you:**
    - **Daylist:** named for the weekday and part of the day ("Tuesday night melodies"; morning from 5,
-     afternoon 12, evening 17, night 21, in `TIME_ZONE`). Its feeling is the one, of the part's few, that
+     afternoon 12, evening 17, night 21, in the time zone the app sends with `GET /mixes?tz=`, else `MIX_TIMEZONE`). Its feeling is the one, of the part's few, that
      best fits what you play at that time (with some day-to-day variety); 10 of your songs for that time
      and 30 new ones with the feeling.
    - **Daily Mixes (Up to 6):** Favourites split by language, clustered by acoustic embeddings using **k-means clustering**.

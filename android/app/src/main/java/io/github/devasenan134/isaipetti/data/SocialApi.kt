@@ -71,7 +71,8 @@ class SocialApi(
     suspend fun unlikePlaylist(id: String) = send<Unit>("DELETE", "/likes/playlists/${java.net.URLEncoder.encode(id, "UTF-8")}", null)
 
     // Mixes, playlists and stations by Isai Pettai.
-    suspend fun mixes(): HomeMixes = get("/mixes")
+    /** Sends the phone's time zone, for the daylist and the days mixes change on. */
+    suspend fun mixes(): HomeMixes = get("/mixes?tz=${enc(java.time.ZoneId.systemDefault().id)}")
     suspend fun mix(id: String): Mix = get("/mixes/${enc(id)}")
 
     /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */

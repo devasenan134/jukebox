@@ -34,13 +34,33 @@ fun main(args: Array<String>) = runBlocking {
     }
 
     val playlists = source.playlists(lib)
+    // As the server does: skips, and what was shown before today (see MixService.shown).
+    val zone = System.getenv("MIX_TIMEZONE")?.let { java.time.ZoneId.of(it) } ?: java.time.ZoneId.systemDefault()
+    val today = LocalDate.now(zone)
+    val start = today.atStartOfDay(zone).toInstant().toEpochMilli()
+    val skips = db.tx {
+        query("SELECT song_id, sum(skipped), sum(1 - skipped) FROM plays WHERE user_id = ? GROUP BY song_id", userId ?: -1) { rs ->
+            lib.index[rs.getString(1)]?.let { it to SkipStats(rs.getInt(2), rs.getInt(3)) }
+        }.filterNotNull().toMap()
+    }
+    val shown = db.tx {
+        query(
+            """SELECT l.id, l.mix_id, l.served_at, s.song_id FROM suggestion_lists l JOIN suggestions s ON s.list_id = l.id
+               WHERE l.user_id = ? AND l.kind IN ('mix', 'recommend') AND l.served_at >= ? AND l.served_at < ? AND (l.kind = 'recommend' OR s.position < 25)""",
+            userId ?: -1, start - 70 * MixMaker.DAY, start,
+        ) { rs -> Triple(rs.getLong(1), rs.getString(2) to rs.getLong(3), rs.getString(4)) }
+    }.groupBy { it.first }.values.map { list ->
+        ShownList(list.first().second.first, java.time.Instant.ofEpochMilli(list.first().second.second).atZone(zone).toLocalDate(), list.mapNotNull { lib.index[it.third] })
+    }
+    println("${shown.size} lists shown before today, ${skips.size} songs with skips; time zone $zone")
     val maker = MixMaker(
-        lib, history, emptyMap(), source.popularity(lib), emptyMap(), personSeed = username.hashCode().toLong(), today = LocalDate.now(),
-        zone = java.time.ZoneId.systemDefault(),
-        together = Together.build(emptyList(), playlists),
+        lib, history, skips, source.popularity(lib), emptyMap(), personSeed = (userId ?: 0L) * 1_000_003L, today = today,
+        zone = zone, together = Together.build(emptyList(), playlists), shown = shown,
     )
     println("\n${playlists.size} playlists count towards which songs go together")
-    for (section in maker.home()) {
+    val extra = listOf("deepcuts", "gems", "fresh") + maker.topMixes().map { it.id }.filter { it.startsWith("because-") }.take(1)
+    val sections = maker.home() + MixSection("extra", "Not on Home today", extra.mapNotNull { maker.byId(it) })
+    for (section in sections) {
         println("\n##### ${section.title}")
         for (mix in section.mixes) {
             val mixLanguages = mix.songs.mapNotNull { s -> lib.index[s.id] }.groupingBy { languages[it] ?: "unknown" }.eachCount()

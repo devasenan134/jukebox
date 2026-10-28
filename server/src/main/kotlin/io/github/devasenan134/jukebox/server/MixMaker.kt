@@ -521,7 +521,7 @@ class MixMaker(
         val like = similarTo(seeds.take(80), languages = yourLanguages.keys)
         val scores = members.mapValues { (i, fit) -> fit + 0.5f * like[i] + 0.4f * affinity[i] - tired(i) }.filterValues { !it.isNaN() }
         // Your own songs for this time, unless they're the opposite of the feeling.
-        val yours = atThisTime.filterKeys { i -> moodFit(vibe, i).let { it.isNaN() || it > 0f } }
+        val yours = atThisTime.filterKeys { i -> moodFit(vibe, i).let { it.isNaN() || it >= 0.5f } }
             .mapValues { (i, count) -> (ln(1.0 + count) + 0.3 * (weights[i] ?: 0.0)).toFloat() }
         val familiar = pick(yours, 10, random, pool = 30)
         val fresh = pickBlend(scores, 40 - familiar.size, random, pool = 150, blend = yourLanguages, exclude = familiar.toSet())
@@ -575,12 +575,16 @@ class MixMaker(
             for ((id, love) in composers) {
                 candidates += Candidate("amix-c-$id", 1.0 + 2 * love, "artist", id)
                 val theirs = lib.byComposer.getValue(id).filter(::eligibleSong)
+                // Only feelings you listen to: how a song sounds isn't a sure sign of every mood (a composer's "devotional" may not be).
                 for (mood in MOODS) {
                     if (mood.noun == null) continue
                     val members = moodMembers(mood) ?: continue
-                    if (theirs.count { it in members } >= 15) candidates += Candidate("cmood-$id-${mood.key}", 0.6 + 1.5 * love + moodShare(mood), "topic", id)
+                    val share = moodShare(mood)
+                    if (share >= 0.08 && theirs.count { it in members } >= 15) {
+                        candidates += Candidate("cmood-$id-${mood.key}", 0.4 + 1.2 * love + 3 * share, "topic", id)
+                    }
                 }
-                val decades = theirs.filter { songs[it].year > 1900 }.groupingBy { songs[it].year / 10 * 10 }.eachCount().filterValues { it >= 15 }
+                val decades = theirs.filter { songs[it].year > 1900 }.groupingBy { songs[it].year / 10 * 10 }.eachCount().filterValues { it >= 25 }
                 if (decades.size >= 2) decades.keys.forEach { candidates += Candidate("cdecade-$id-$it", 0.5 + 1.5 * love, "topic", id) }
             }
             singerLove.entries.filter { (lib.bySinger[it.key]?.size ?: 0) >= 15 && composers.none { c -> c.key == it.key } }
@@ -599,12 +603,16 @@ class MixMaker(
         val ranked = candidates.map { it to it.fit + 0.7 * gumbel(random) }.sortedByDescending { it.second }.map { it.first }
         val perSort = HashMap<String, Int>()
         val perPerson = HashMap<String, Int>()
+        // One of a composer's melodies, mass songs or 90s a day: they'd share too many songs.
+        val topicOf = HashSet<String>()
         val out = mutableListOf<MixDto>()
         for (c in ranked) {
             if (out.size >= TOP_MIXES) break
             if ((perSort[c.sort] ?: 0) >= (TOP_MIX_CAPS[c.sort] ?: 1)) continue
             if (c.person != null && (perPerson[c.person] ?: 0) >= 2) continue
+            if (c.sort == "topic" && c.person != null && c.person in topicOf) continue
             val mix = findById(c.id) ?: continue
+            if (c.sort == "topic" && c.person != null) topicOf += c.person
             out += mix.copy(personal = true)
             perSort.merge(c.sort, 1, Int::plus)
             c.person?.let { perPerson.merge(it, 1, Int::plus) }
@@ -700,7 +708,7 @@ class MixMaker(
     /** A composer's songs from one decade: "90s Ilaiyaraaja". */
     fun composerDecade(person: Person, start: Int): MixDto? {
         val theirs = lib.byComposer[person.id].orEmpty().filter { eligibleSong(it) && songs[it].year in start until start + 10 }
-        if (theirs.size < 15) return null
+        if (theirs.size < 25) return null
         val scores = theirs.associateWith { i ->
             (weights[i] ?: 0.0).toFloat() + 0.5f * affinity[i] + 0.3f * ln(1.0 + (popularity[i] ?: 0)).toFloat() - tired(i)
         }
