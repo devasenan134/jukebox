@@ -8,6 +8,14 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Now Playing on the Mac (2.5.3)
+
+### New
+- **The Mac app shows in macOS Now Playing.** What's playing, with its cover, now appears in Control Center, on the media keys and AirPods, and in apps that read Now Playing like Boring Notch; their play, pause, next, previous and seeking control Jukebox.
+
+### Fixed
+- **Music pauses when your headphones go.** On the Mac app (and the website in a browser), when the Bluetooth headphones or speaker you're listening on disconnect or are unplugged, Jukebox pauses instead of carrying on through the speakers. Switching to another output that's still connected doesn't pause.
+
 ## Every Song, Shuffled (2.5.2)
 
 ### Fixed
