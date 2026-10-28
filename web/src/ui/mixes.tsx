@@ -106,11 +106,14 @@ export function MixCover({ mix, size = 150, fill }: { mix: Mix; size?: number; f
   )
 }
 
-/** A tile on Home: the artwork, then the mix's one-line description. */
+/** A tile on Home: the artwork (with "New" on a mix that's new to your Home), then the mix's one-line description. */
 export function MixCard({ mix, onClick }: { mix: Mix; onClick: () => void }) {
   return (
     <div className="card tile" onClick={onClick}>
-      <MixCover mix={mix} size={192} fill />
+      <div style={{ position: 'relative' }}>
+        <MixCover mix={mix} size={192} fill />
+        {mix.isNew && <span className="mix-new">New</span>}
+      </div>
       <div className="body-small muted clamp2" style={{ marginTop: 6 }}>{mix.subtitle}</div>
     </div>
   )

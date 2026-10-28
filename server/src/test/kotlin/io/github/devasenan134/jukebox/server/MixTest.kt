@@ -13,6 +13,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.time.LocalDate
 import kotlin.math.sqrt
@@ -188,8 +189,8 @@ class MixMakerTest {
         val lib = Pretend.library()
         val fan = maker(lib).home()
         val stranger = MixMaker(lib, History.EMPTY, emptyMap(), (100 until 130).associateWith { 3 }, emptyMap(), personSeed = 7, today = today, now = now).home()
-        // Moods and decades lean towards your taste, so only these are exactly alike.
-        val showcases = setOf("composers", "singers", "artist-stations", "charts")
+        // Moods and decades lean towards your taste, and the composers and singers rotate for each person: only charts are alike.
+        val showcases = setOf("charts")
         for (id in showcases) {
             val a = fan.firstOrNull { it.id == id } ?: continue
             val b = stranger.first { it.id == id }
@@ -360,6 +361,77 @@ class MixMakerTest {
         assertTrue(outOfSeason.topMixes().none { it.kind == "season" })
     }
 
+    // ---------- stations that move ----------
+
+    @Test
+    fun `your stations follow what you played this week`() {
+        val lib = Pretend.library()
+        // A melody fan who played two kuthu songs (style 1) a lot this week.
+        val base = melodyFan(lib)
+        val week = (1..6).flatMap { listOf(150 to now - it * 3_600_000L, 170 to now - it * 3_600_000L - 60_000) }
+        val history = History(base.playCount, base.lastPlayed, week + base.plays, base.starred, base.starredAlbums, base.starredArtists, base.rating)
+        val maker = MixMaker(lib, history, emptyMap(), emptyMap(), emptyMap(), 42, today, now)
+        val ids = maker.yourStations().map { it.id }
+        assertTrue(ids.any { it == "radio-song-song150" || it == "radio-song-song170" } ||
+            maker.topMixes().any { it.id == "because-song150" || it.id == "because-song170" }, "this week's songs lead: $ids")
+        assertTrue(MixMaker.DISCOVERY in ids, ids.toString())
+        assertTrue(ids.any { it.startsWith("radio-composer-") }, ids.toString())
+        assertTrue(maker.yourStations().all { it.endless })
+    }
+
+    @Test
+    fun `mood, decade and discovery stations`() {
+        val lib = Pretend.library()
+        val maker = maker(lib)
+        val sad = assertNotNull(maker.radio("radio-mood-sad", emptySet(), 20, Random(1)))
+        assertEquals("Sad Songs Radio", sad.title)
+        assertTrue(sad.songs.all { style(it.id) == 0 } && sad.songs.size == 20)
+        val nineties = assertNotNull(maker.radio("radio-decade-1990", emptySet(), 20, Random(1)))
+        assertTrue(nineties.songs.all { it.year in 1990..1999 }, nineties.songs.map { it.year }.toString())
+        val discovery = assertNotNull(maker.radio(MixMaker.DISCOVERY, emptySet(), 20, Random(1)))
+        val played = (0 until 40).map { "song$it" }.toSet()
+        assertTrue(discovery.songs.none { it.id in played })
+        assertEquals(null, maker.radio("radio-mood-nope", emptySet(), 20, Random(1)))
+        assertEquals(null, maker.radio("radio-decade-1850", emptySet(), 20, Random(1)))
+        // Next batches skip what was played.
+        val next = assertNotNull(maker.radio("radio-mood-sad", sad.songs.map { it.id }.toSet(), 20, Random(2)))
+        assertTrue(next.songs.none { s -> sad.songs.any { it.id == s.id } })
+    }
+
+    @Test
+    fun `a station turns away from what you skip`() {
+        val lib = Pretend.library()
+        val maker = maker(lib)
+        // Discovery for a melody fan is mostly melody; skip melody songs and it turns to other styles.
+        fun melody(skipped: List<String>) = (1..5).sumOf { r ->
+            maker.radio(MixMaker.DISCOVERY, emptySet(), 20, Random(r.toLong()), skipped)!!.songs.count { style(it.id) == 0 }
+        }
+        val skipped = (60 until 66).map { "song$it" }
+        assertTrue(melody(skipped) < melody(emptyList()), "${melody(skipped)} vs ${melody(emptyList())}")
+        assertTrue(maker.radio(MixMaker.DISCOVERY, emptySet(), 20, Random(1), skipped)!!.songs.none { it.id in skipped })
+    }
+
+    @Test
+    fun `composers and singers on Home rotate from day to day`() {
+        val lib = Pretend.library()
+        val days = (0 until 6L).map { d ->
+            MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), emptyMap(), 42, today.plusDays(d), now).topPeople(composer = true, count = 4).map { it.id }
+        }
+        assertTrue(days.toSet().size > 1, "the same composers every day: $days")
+        // The ones you play come up most: melody composers (composer0..composer4).
+        val yours = days.flatten().count { it.removePrefix("composer").toInt() < 5 }
+        assertTrue(yours > days.flatten().size / 2, "$yours of ${days.flatten().size}")
+    }
+
+    @Test
+    fun `weekly mixes are new on their first two days`() {
+        val lib = Pretend.library()
+        val monday = LocalDate.of(2027, 1, 18)
+        fun discover(day: LocalDate) = MixMaker(lib, melodyFan(lib), emptyMap(), emptyMap(), mapOf(120 to 4), 42, day, now).discover()!!.isNew
+        assertTrue(discover(monday) && discover(monday.plusDays(1)))
+        assertTrue(!discover(monday.plusDays(2)) && !discover(monday.plusDays(6)))
+    }
+
     @Test
     fun `songs and score tracks are generated separately in mixes, stations, and recommendations`() {
         val scoreTracks = (0 until 20).map { i ->
@@ -441,6 +513,36 @@ private class FakeMusic : MusicSource {
 
 class MixApiTest {
     @Test
+    fun `a mix that comes to Home after a week away is new for a day`(): Unit = runBlocking {
+        val path = File.createTempFile("jukebox-new", ".db").apply { delete(); deleteOnExit() }.path
+        val music = FakeMusic()
+        val userId = addAccount(path, "alice")
+        val start = 1_800_000_000_000L
+        fun plays(at: Long, songs: IntRange) = History(
+            playCount = songs.associateWith { 4 }, lastPlayed = songs.associateWith { at }, plays = songs.map { it to at },
+            starred = emptySet(), starredAlbums = emptySet(), starredArtists = emptySet(), rating = emptyMap(),
+        )
+        music.histories[userId] = plays(start, 0 until 30)
+        var clock = start
+        val service = MixService(Db(path), music, java.time.ZoneOffset.UTC) { clock }
+        val user = UserDto(userId, "alice", "alice")
+        // Someone's first Home has nothing new.
+        val first = service.home(user).sections.flatMap { it.mixes }
+        assertTrue(first.none { it.isNew }, first.filter { it.isNew }.map { it.id }.toString())
+        // Their listening changes: a mix that wasn't there before (Because you played a kuthu song) is new; Daily Mix 1 isn't.
+        clock += 3_600_000L
+        music.histories[userId] = plays(clock, 0 until 30).let { h ->
+            History(h.playCount + (150 to 6), h.lastPlayed + (150 to clock), List(6) { 150 to clock - it } + h.plays, emptySet(), emptySet(), emptySet(), emptyMap())
+        }
+        service.home(user) // the first call answers at once and works out the new one in the background
+        kotlinx.coroutines.delay(1_500)
+        val later = service.home(user).sections.flatMap { it.mixes }
+        val appeared = later.filter { m -> first.none { it.id == m.id } }
+        assertTrue(appeared.isNotEmpty() && appeared.all { it.isNew }, "appeared: ${appeared.map { it.id to it.isNew }}")
+        assertTrue(later.first { it.id == "daily-1" }.isNew.not())
+    }
+
+    @Test
     fun `home, a mix, radio, saving and plays`() = testApplication {
         val music = FakeMusic()
         val now = System.currentTimeMillis()
@@ -520,6 +622,13 @@ class MixApiTest {
             ) { it.getInt(1) }
             assertEquals((10 until 15).toList(), second)
         }
+
+        // A station told what was skipped doesn't bring it back.
+        val steered = client.post("/mixes/radio") {
+            bearerAuth(token); contentType(ContentType.Application.Json)
+            setBody(RadioRequest("radio-song-song3", count = 10, skipped = listOf(station.songs[1].id)))
+        }.body<MixDto>()
+        assertTrue(steered.songs.none { it.id == station.songs[1].id })
     }
 }
 

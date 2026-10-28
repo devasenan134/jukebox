@@ -367,12 +367,16 @@ data class UserStats(
 
 @Serializable data class DayHours(val date: String, val hours: Double)
 
+/** One sort of mix over the last 30 days, everyone together: opened (a station: started), songs played and skipped. */
+@Serializable data class MixStats(val name: String, val opened: Int = 0, val played: Int = 0, val skipped: Int = 0)
+
 @Serializable
 data class ListeningStats(
     val generatedAt: Long,
     val users: List<UserStats> = emptyList(),
     val daily: List<DayHours> = emptyList(),
     val hourOfDay: List<Double> = emptyList(),
+    val mixes: List<MixStats> = emptyList(),
 )
 
 // Search by Isai Pettai (the friends server): forgives spelling, and knows lyricists and actors.

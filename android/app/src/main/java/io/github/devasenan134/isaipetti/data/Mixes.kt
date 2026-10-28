@@ -32,7 +32,7 @@ data class MixSong(
 @Serializable
 data class Mix(
     val id: String,
-    /** "daily", "discover", "repeat", "rewind", "new", "friends", "popular", "mood", "decade", "composer", "singer" or "radio". */
+    /** "daily", "daylist", "discover", "fresh", "because", "artistmix", "topic", "season", "mood", "decade", "composer", "singer", "radio"... */
     val kind: String = "",
     val title: String = "",
     val subtitle: String = "",
@@ -50,6 +50,8 @@ data class Mix(
     val endless: Boolean = false,
     /** Picked for your taste: shown as "Made for <your name>". */
     val personal: Boolean = false,
+    /** Shows "New": back on your Home after a week or more away, or a weekly mix in its new week. */
+    val isNew: Boolean = false,
     val songs: List<MixSong> = emptyList(),
 ) {
     /** What the player remembers a queue was started from. Stations keep growing while this is playing. */

@@ -195,7 +195,7 @@ export const mixSongToSong = (m: MixSong): Song => ({ ...m })
 
 export interface Mix {
   id: string
-  /** "daily", "discover", "repeat", "rewind", "new", "friends", "popular", "mood", "decade", "composer", "singer" or "radio". */
+  /** "daily", "daylist", "discover", "fresh", "because", "artistmix", "topic", "season", "mood", "decade", "composer", "singer", "radio"... */
   kind: string
   title: string
   subtitle: string
@@ -213,6 +213,8 @@ export interface Mix {
   endless: boolean
   /** Picked for your taste: shown as "Made for <your name>". */
   personal: boolean
+  /** Shows "New": back on your Home after a week or more away, or a weekly mix in its new week. */
+  isNew?: boolean
   songs: MixSong[]
 }
 

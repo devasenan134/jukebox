@@ -65,6 +65,8 @@ data class MixDto(
     val endless: Boolean = false,
     /** Picked for this person's taste (the app shows "Made for <name>"); false for ones everyone gets alike. */
     val personal: Boolean = false,
+    /** Shown with a "New" badge: back on your Home after a week or more away, or a weekly mix on its new week. */
+    val isNew: Boolean = false,
     val songs: List<MixSong> = emptyList(),
 ) {
     fun summary() = copy(songs = emptyList(), songCount = songs.size.takeIf { it > 0 } ?: songCount)
@@ -281,6 +283,9 @@ class MixMaker(
     }
 
     private val dayRandom get() = Random(personSeed * 31 + today.toEpochDay())
+
+    /** Whether a weekly mix that changes on [day] is in its first two days (it shows "New"). */
+    private fun newWeek(day: DayOfWeek) = today.dayOfWeek == day || today.dayOfWeek == day.plus(1)
     private val weekRandom get() = Random(personSeed * 17 + today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).toEpochDay())
 
     // ---------- Home ----------
@@ -436,7 +441,7 @@ class MixMaker(
         return mix(
             "discover", "discover", "Discover Weekly", list, refresh = "weekly", subtitle = "New to you, picked for you",
             description = "Your weekly mixtape of songs you haven't played yet, chosen for how you listen. Updates every Monday.",
-        )
+        ).copy(isNew = newWeek(DayOfWeek.MONDAY))
     }
 
     /** What you've played the most in the last 30 days. */
@@ -551,7 +556,7 @@ class MixMaker(
         return mix(
             "fresh", "fresh", "Fresh for You", list, refresh = "weekly", subtitle = "New in the library, for your taste",
             description = "Songs added to the library in the two weeks before Friday, the ones that suit you first. Updates every Friday.",
-        )
+        ).copy(isNew = newWeek(DayOfWeek.FRIDAY))
     }
 
     // ---------- Your top mixes ----------
@@ -757,7 +762,7 @@ class MixMaker(
         return mix(
             "deepcuts", "deepcuts", "Deep Cuts", list, refresh = "weekly", subtitle = "From albums you love",
             description = "Songs you've never played from the albums you play the most. Updates every Monday.",
-        )
+        ).copy(isNew = newWeek(DayOfWeek.MONDAY))
     }
 
     /** Songs for your taste from albums nobody on this server has played. Changes on Mondays. */
@@ -779,7 +784,7 @@ class MixMaker(
         return mix(
             "gems", "gems", "Hidden Gems", list, refresh = "weekly", subtitle = "From albums nobody here has played",
             description = "Songs for your taste from albums no one on this server has played yet. Updates every Monday.",
-        )
+        ).copy(isNew = newWeek(DayOfWeek.MONDAY))
     }
 
     /** Festivals and seasons: Pongal, rain songs, Deepavali... while it's their time. */
@@ -939,12 +944,20 @@ class MixMaker(
         )
     }
 
-    /** The composers or singers this person plays most; or, before they've played anything, the library's biggest. */
-    /** The library's biggest composers or singers: the most songs, and the most played by everyone. */
+    /**
+     * Composers or singers for Home: from the library's 30 biggest (the most songs, and the most played by
+     * everyone) and the ones you play most, a different set each day; the ones you play come up most often.
+     */
     fun topPeople(composer: Boolean, count: Int = 8): List<Person> {
         val source = if (composer) lib.byComposer else lib.bySinger
-        val picked = source.entries.sortedByDescending { (_, list) -> list.size + 5 * list.sumOf { popularity[it] ?: 0 } }.map { it.key }
-        return picked.filter { (source[it]?.size ?: 0) >= 8 }.mapNotNull { lib.people[it] }.take(count)
+        val love = if (composer) composerLove else singerLove
+        val biggest = source.entries.filter { it.value.size >= 8 }
+            .sortedByDescending { (_, list) -> list.size + 5 * list.sumOf { popularity[it] ?: 0 } }.map { it.key }.take(PEOPLE_POOL)
+        val yours = love.entries.filter { (source[it.key]?.size ?: 0) >= 8 }.sortedByDescending { it.value }.map { it.key }.take(5)
+        val random = Random(personSeed * 71 + today.toEpochDay() * 2 + if (composer) 1 else 0)
+        return (biggest + yours).distinct()
+            .map { id -> id to 3.0 * (love[id] ?: 0.0) - 0.05 * biggest.indexOf(id).let { if (it < 0) PEOPLE_POOL else it } + gumbel(random) }
+            .sortedByDescending { it.second }.mapNotNull { lib.people[it.first] }.take(count)
     }
 
     /**
@@ -968,15 +981,39 @@ class MixMaker(
 
     // ---------- Stations ----------
 
-    /** Stations from the songs this person plays most (none until they've played some). */
-    fun yourStations(): List<MixDto> =
-        if (!hasTaste && !hasScoreListening) emptyList() else liked.filter { eligibleSong(it) || eligibleScore(it) }.take(6).map { stationSummary("radio-song-${songs[it].id}") }
+    /**
+     * Your stations, from what you've played lately: a few songs of this past week (a different few each day,
+     * not the ones Because you played has), the composer you've played most lately, Discovery, and the feeling
+     * you play most; then the songs you like most. None until you've played something.
+     */
+    fun yourStations(): List<MixDto> {
+        if (!hasTaste && !hasScoreListening) return emptyList()
+        val ids = mutableListOf<String>()
+        val because = becauseAnchors().toSet()
+        history.plays.filter { (i, at) -> at > now - 7 * DAY && i !in because && (eligibleSong(i) || eligibleScore(i)) }
+            .groupingBy { it.first }.eachCount().entries.sortedByDescending { it.value }.take(10).map { it.key }
+            .shuffled(Random(personSeed * 67 + today.toEpochDay())).distinctBy { songs[it].albumId }.take(3)
+            .forEach { ids += "radio-song-${songs[it].id}" }
+        val lately = history.plays.filter { it.second > now - 14 * DAY }.mapNotNull { songs[it.first].composer?.id }.groupingBy { it }.eachCount()
+        (lately.maxByOrNull { it.value }?.key ?: composerLove.maxByOrNull { it.value }?.key)
+            ?.takeIf { (lib.byComposer[it]?.size ?: 0) >= 15 }?.let { ids += "radio-composer-$it" }
+        if (hasTaste) {
+            if (radioSeed(DISCOVERY) != null) ids += DISCOVERY
+            MOODS.mapNotNull { m -> moodMembers(m)?.let { m to moodShare(m) } }.maxByOrNull { it.second }
+                ?.takeIf { it.second >= 0.05 }?.let { ids += "radio-mood-${it.first.key}" }
+        }
+        for (i in liked) {
+            if (ids.size >= YOUR_STATIONS) break
+            if ((eligibleSong(i) || eligibleScore(i)) && i !in because) ids += "radio-song-${songs[i].id}"
+        }
+        return ids.distinct().take(YOUR_STATIONS).map(::stationSummary)
+    }
 
-    /** Stations for the library's biggest composers and singers, the same for everyone. */
+    /** Stations for composers and singers: the ones after those in the This Is rows, so they're different people. */
     fun artistStations(): List<MixDto> {
-        val composers = topPeople(composer = true, count = 4)
+        val composers = topPeople(composer = true, count = 12).let { if (it.size >= 12) it.drop(8) else it.take(4) }
         // Someone who composes and sings (Anirudh) gets one station, not two.
-        val singers = topPeople(composer = false, count = 8).filter { s -> composers.none { it.id == s.id } }.take(4)
+        val singers = topPeople(composer = false, count = 24).filter { s -> composers.none { it.id == s.id } }.let { if (it.size >= 12) it.drop(8) else it }.take(4)
         return composers.map { stationSummary("radio-composer-${it.id}") } + singers.map { stationSummary("radio-singer-${it.id}") }
     }
 
@@ -984,19 +1021,40 @@ class MixMaker(
         val (kind, key) = radioSeed(id) ?: error("bad station $id")
         val title: String
         val covers: List<String>
+        var color = colorFor(id)
+        var description = "Plays endlessly: songs that sound like this, picked as you listen."
         when (kind) {
             "song" -> songs[lib.index.getValue(key)].let { title = "${it.title} Radio"; covers = listOf(it.coverArt) }
             "album" -> songs[lib.byAlbum.getValue(key).first()].let { title = "${it.album} Radio"; covers = listOf(it.coverArt) }
+            "mood" -> MOODS.first { it.key == key }.let { m ->
+                title = "${m.title.removeSuffix(" Mix")} Radio"
+                covers = moodMembers(m).orEmpty().entries.sortedByDescending { it.value + affinity[it.key] }.map { songs[it.key].coverArt }.distinct().take(4)
+                color = m.color
+                description = "Plays endlessly: ${m.subtitle.lowercase()}, the songs that suit you first."
+            }
+            "decade" -> key.toInt().let { d ->
+                title = "${decadeName(d)} Radio"
+                covers = songs.indices.filter { songs[it].year in d until d + 10 }.sortedByDescending { affinity[it] }.map { songs[it].coverArt }.distinct().take(4)
+                color = DECADE_COLORS[(d / 10) % DECADE_COLORS.size]
+                description = "Plays endlessly: songs from $d to ${d + 9}, the ones that suit you first."
+            }
+            "discovery" -> {
+                title = "Discovery Station"
+                covers = likedSongs.take(4).map { songs[it].coverArt }
+                description = "Plays endlessly: songs you haven't heard yet, picked for you as you listen."
+            }
             else -> lib.people.getValue(key).let { title = "${it.name} Radio"; covers = listOf("ar-${it.id}") }
         }
         return MixDto(
-            id = id, kind = "radio", title = title, subtitle = "Station", endless = true, refresh = "live",
-            description = "Plays endlessly: songs that sound like this, picked as you listen.",
-            covers = covers, round = kind == "composer" || kind == "singer", color = colorFor(id), updatedAt = now,
+            id = id, kind = "radio", title = title, subtitle = "Station", endless = true, refresh = "live", description = description,
+            covers = covers, round = kind == "composer" || kind == "singer", color = color, updatedAt = now,
         )
     }
 
-    /** ("song" | "album" | "composer" | "singer", id) from "radio-song-<id>", or null if it doesn't exist. */
+    /**
+     * ("song" | "album" | "composer" | "singer" | "mood" | "decade" | "discovery", key) from "radio-song-<id>",
+     * "radio-mood-chill", "radio-decade-1990" or [DISCOVERY]; null if there's no such station (or too few songs for it).
+     */
     fun radioSeed(id: String): Pair<String, String>? {
         val parts = id.split("-", limit = 3)
         if (parts.size != 3 || parts[0] != "radio") return null
@@ -1005,17 +1063,26 @@ class MixMaker(
             "song" -> key in lib.index
             "album" -> key in lib.byAlbum
             "composer", "singer" -> key in lib.people
+            "mood" -> MOODS.firstOrNull { it.key == key }?.let { moodMembers(it) } != null
+            "decade" -> key.toIntOrNull()?.let { d -> songs.indices.count { eligibleSong(it) && songs[it].year in d until d + 10 } >= 20 } == true
+            "discovery" -> key == "new" && likedSongs.size >= 3
             else -> false
         }
         return if (known) kind to key else null
     }
 
     /**
-     * The next [count] songs of a station, skipping [exclude] (what it already played). The first batch
-     * of a song's station starts with that song.
+     * The next [count] songs of a station, skipping [exclude] (what it already played) and steering away from
+     * songs like [skipped] (the ones skipped while it played). The first batch of a song's station starts with that song.
      */
-    fun radio(id: String, exclude: Set<String>, count: Int, random: Random): MixDto? {
+    fun radio(id: String, exclude: Set<String>, count: Int, random: Random, skipped: Collection<String> = emptyList()): MixDto? {
         val (kind, key) = radioSeed(id) ?: return null
+        val skip = (exclude + skipped).mapNotNull { lib.index[it] }.toSet()
+        val avoid = skippedLike(skipped.mapNotNull { lib.index[it] })
+        if (kind == "mood" || kind == "decade" || kind == "discovery") {
+            val list = tasteStation(kind, key, skip, count, random, avoid)
+            return stationSummary(id).copy(songs = list.map(::song), songCount = list.size)
+        }
         val seeds = when (kind) {
             "song" -> listOf(lib.index.getValue(key))
             "album" -> lib.byAlbum.getValue(key)
@@ -1031,7 +1098,7 @@ class MixMaker(
         val language = mainLanguage(seeds)
         val scores = similarTo(seeds, language).lessTired(factor = 0.5f)
         if (kind == "song") for (i in 0 until n) scores[i] += 0.25f * affinity[i]
-        val skip = exclude.mapNotNull { lib.index[it] }.toMutableSet()
+        if (avoid != null) for (i in 0 until n) scores[i] -= avoid[i]
         val first = if (kind == "song" && exclude.isEmpty()) seeds else emptyList()
         // A composer's or singer's own songs come up often, but not only them.
         val list = first + pick(
@@ -1042,6 +1109,46 @@ class MixMaker(
             scoreOnly = isScoreStation,
         )
         return stationSummary(id).copy(songs = list.map(::song), songCount = list.size)
+    }
+
+    /**
+     * The next songs of a station about a feeling, a decade, or songs new to you (Discovery): in the languages
+     * you listen to (a feeling that belongs to one language stays in it), the ones that suit you first.
+     */
+    private fun tasteStation(kind: String, key: String, skip: Set<Int>, count: Int, random: Random, avoid: FloatArray?): List<Int> {
+        var blend = yourLanguages
+        val scores: Map<Int, Float> = when (kind) {
+            "mood" -> {
+                val mood = MOODS.first { it.key == key }
+                when {
+                    mood.language != null -> blend = mapOf(mood.language to 1.0)
+                    mood.oneLanguage && homeLanguage != null -> blend = mapOf(homeLanguage!! to 1.0)
+                }
+                moodMembers(mood).orEmpty().mapValues { (i, fit) -> fit + 0.6f * affinity[i] - 0.5f * tired(i) }
+            }
+            "decade" -> {
+                val start = key.toInt()
+                songs.indices.filter { eligibleSong(it) && songs[it].year in start until start + 10 }
+                    .associateWith { affinity[it] + 0.3f * ln(1.0 + (popularity[it] ?: 0)).toFloat() - 0.5f * tired(it) }
+            }
+            else -> {
+                val like = similarTo(likedSongs.take(60), languages = yourLanguages.keys)
+                val known = heard + history.starred + history.playlisted.keys
+                (0 until n).filter { it !in known && !like[it].isNaN() }.associateWith { 0.5f * like[it] + affinity[it] - 0.5f * tired(it) }
+            }
+        }
+        val steered = if (avoid == null) scores else scores.mapValues { (i, v) -> v - avoid[i] }
+        return pickBlend(steered, count, random, pool = 150, blend = blend, exclude = skip, maxPerAlbum = 2, maxPerPerson = 6)
+    }
+
+    /**
+     * How much to hold each song back for being like the ones skipped in this station (how they sound, who
+     * made and sang them), so the station turns away from them; null if nothing was skipped.
+     */
+    private fun skippedLike(skipped: List<Int>): FloatArray? {
+        if (skipped.isEmpty()) return null
+        val like = similarTo(skipped.takeLast(20))
+        return FloatArray(n) { i -> 0.6f * (like[i].takeIf { !it.isNaN() } ?: 0f).coerceAtLeast(0f) }
     }
 
     /** Songs to add to a playlist made of [songIds], best first. [page] > 0 gives the next ones. */
@@ -1324,6 +1431,38 @@ class MixMaker(
         val PERSONAL_KINDS = setOf(
             "daily", "daylist", "discover", "fresh", "repeat", "rewind", "friends", "because", "deepcuts", "gems", "artistmix", "topic", "season",
         )
+
+        /** The Discovery station: endless songs new to you. */
+        const val DISCOVERY = "radio-discovery-new"
+
+        /** How many of the library's biggest composers (or singers) Home's rows rotate through, and how many stations Your stations has. */
+        private const val PEOPLE_POOL = 30
+        private const val YOUR_STATIONS = 7
+
+        /** The sort of mix an id is, for statistics: "daily-3" and "daily-1" are both "Daily Mixes". */
+        fun family(mixId: String): String = when (mixId.substringBefore('-')) {
+            "daily" -> "Daily Mixes"
+            "daylist" -> "Time of day"
+            "discover" -> "Discover Weekly"
+            "fresh" -> "Fresh for You"
+            "repeat" -> "On Repeat"
+            "rewind" -> "Rewind"
+            "friends" -> "Friends Mix"
+            "because" -> "Because you played"
+            "deepcuts" -> "Deep Cuts"
+            "gems" -> "Hidden Gems"
+            "amix" -> "Composer and singer mixes"
+            "cmood", "cdecade", "pair" -> "Composer melodies, decades, pairs"
+            "season" -> "Seasons"
+            "mood" -> "Moods"
+            "decade" -> "Decades"
+            "score" -> "Background scores"
+            "composer", "singer" -> "This Is"
+            "popular" -> "Top 50"
+            "new" -> "New Arrivals"
+            "radio" -> "Stations"
+            else -> "Other"
+        }
 
         /** The most a song's score drops for being passed over again and again. */
         const val MAX_FATIGUE = 3f

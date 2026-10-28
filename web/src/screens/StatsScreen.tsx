@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { RangeStats, TopItem, UserStats } from '../api/socialTypes'
+import type { MixStats, RangeStats, TopItem, UserStats } from '../api/socialTypes'
 import { social } from '../api/social'
 import { Avatar } from '../social/avatars'
 import { useSession } from '../state/session'
@@ -78,9 +78,49 @@ export function StatsScreen() {
             describe={(i) => `${String(i).padStart(2, '0')}:00–${String((i + 1) % 24).padStart(2, '0')}:00: ${hoursText(data.hourOfDay[i])}`}
             ticks={data.hourOfDay.map((_, i) => (i % 6 === 0 ? `${String(i).padStart(2, '0')}:00` : ''))}
           />
+          <MixTable mixes={data.mixes ?? []} />
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * How each sort of mix did: opened, songs played from it, and how many of those were skipped in their first
+ * 30 seconds (the bar; lower is better).
+ */
+function MixTable({ mixes }: { mixes: MixStats[] }) {
+  if (!mixes.length) return null
+  return (
+    <>
+      <SectionTitle>Mixes, last 30 days</SectionTitle>
+      <div className="body-small muted" style={{ marginBottom: 8 }}>Everyone together. Skipped: moved on within 30 seconds.</div>
+      <table className="mix-stats">
+        <thead>
+          <tr><th>Mix</th><th>Opened</th><th>Played</th><th>Skipped</th></tr>
+        </thead>
+        <tbody>
+          {mixes.map((m) => {
+            const rate = m.played ? m.skipped / m.played : 0
+            return (
+              <tr key={m.name}>
+                <td>{m.name}</td>
+                <td>{m.opened.toLocaleString('en')}</td>
+                <td>{m.played.toLocaleString('en')}</td>
+                <td>
+                  {m.played ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="meter" style={{ width: 64 }}><span style={{ width: `${rate * 100}%` }} /></span>
+                      {Math.round(rate * 100)}%
+                    </span>
+                  ) : '–'}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </>
   )
 }
 

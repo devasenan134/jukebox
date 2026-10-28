@@ -114,7 +114,8 @@ export const social = {
   followMix: (id: string) => send<void>('PUT', `/mixes/${enc(id)}/follow`, ''),
   unfollowMix: (id: string) => send<void>('DELETE', `/mixes/${enc(id)}/follow`),
   /** The next songs of a station, leaving out exclude (what it already played). */
-  radio: (id: string, exclude: string[], count = 25) => post<Mix>('/mixes/radio', { id, exclude, count }),
+  /** The next songs of a station: none of [exclude] (played or queued), and less like [skipped] (skipped while it played). */
+  radio: (id: string, exclude: string[], count = 25, skipped: string[] = []) => post<Mix>('/mixes/radio', { id, exclude, count, skipped }),
   /** Songs that would fit a playlist made of songIds; page 1, 2... for more. */
   recommend: (songIds: string[], count = 10, page = 0) => post<MixSong[]>('/mixes/recommend', { songIds, count, page }),
   /** What was played and skipped, so mixes can learn. */

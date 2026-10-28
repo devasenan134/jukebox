@@ -223,11 +223,19 @@ export interface UserStats {
   /** Keys: "today", "7d", "30d", "all". */
   ranges: Record<string, RangeStats>
 }
+/** One sort of mix over the last 30 days, everyone together: opened (a station: started), songs played and skipped. */
+export interface MixStats {
+  name: string
+  opened: number
+  played: number
+  skipped: number
+}
 export interface ListeningStats {
   generatedAt: number
   users: UserStats[]
   daily: { date: string; hours: number }[]
   hourOfDay: number[]
+  mixes?: MixStats[]
 }
 
 // ---- Helpers the chat screens share (same wording as the Android app) ----

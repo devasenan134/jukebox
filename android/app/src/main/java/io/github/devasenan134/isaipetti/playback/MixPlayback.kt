@@ -88,12 +88,40 @@ class Stations(
 ) {
     private var fetching = false
 
+    /** Songs skipped in the station that's playing ([skipsOf]), so its next songs are less like them. */
+    private var skipsOf = ""
+    private val skips = mutableListOf<String>()
+
     init {
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED)) topUp()
             }
+
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                val movedOn = reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.mediaItemIndex != newPosition.mediaItemIndex
+                val item = oldPosition.mediaItem ?: return
+                val source = item.mediaMetadata.extras?.getString(EXTRA_SOURCE) ?: return
+                if (movedOn && oldPosition.positionMs < SKIP_BEFORE_MS && source.startsWith(Mix.SOURCE_PREFIX + "radio-")) steer(source, item.mediaId)
+            }
         })
+    }
+
+    /**
+     * A song of a station was skipped: the station keeps its next 2 songs and drops the rest, then asks for new
+     * ones that are less like what was skipped (the way a station steers as you listen).
+     */
+    private fun steer(source: String, songId: String) {
+        if (skipsOf != source) { skipsOf = source; skips.clear() }
+        skips += songId
+        if (skips.size > 50) skips.removeAt(0)
+        if (player.currentMediaItem?.mediaMetadata?.extras?.getString(EXTRA_SOURCE) != source) return
+        var kept = 0
+        // From the end, so the indexes of the ones still to check don't move.
+        val drop = (player.currentMediaItemIndex + 1 until player.mediaItemCount)
+            .filter { player.getMediaItemAt(it).mediaMetadata.extras?.getString(EXTRA_SOURCE) == source && kept++ >= 2 }
+        drop.asReversed().forEach { player.removeMediaItem(it) }
+        topUp()
     }
 
     private fun topUp() {
@@ -108,7 +136,8 @@ class Stations(
         fetching = true
         scope.launch {
             val queued = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-            runCatching { api.radio(stationId, queued.takeLast(500), count = 20) }.onSuccess { more ->
+            val skipped = if (skipsOf == source) skips.toList() else emptyList()
+            runCatching { api.radio(stationId, queued.takeLast(500), count = 20, skipped = skipped) }.onSuccess { more ->
                 // Still the same station? (You may have started something else meanwhile.)
                 if (player.currentMediaItem?.mediaMetadata?.extras?.getString(EXTRA_SOURCE) == source) {
                     player.addMediaItems(more.songs.map { it.toSong().toMediaItem(this@Stations.api, source = source) })
@@ -116,5 +145,9 @@ class Stations(
             }
             fetching = false
         }
+    }
+
+    private companion object {
+        const val SKIP_BEFORE_MS = 30_000L
     }
 }

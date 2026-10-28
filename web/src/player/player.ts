@@ -520,6 +520,7 @@ function reportTransition(item: QueueItem, finished: boolean) {
   })
   if (pending.length > 300) pending = pending.slice(-300)
   if (pending.length >= 10) void flushPlays()
+  if (!finished && playedMs < 30_000 && item.source?.startsWith(MIX_SOURCE_PREFIX + 'radio-')) steerStation(item.source, item.song.id)
 }
 
 async function flushPlays() {
@@ -534,6 +535,26 @@ async function flushPlays() {
 }
 setInterval(() => void flushPlays(), 60_000)
 addEventListener('pagehide', () => void flushPlays())
+
+/** Songs skipped in the station that's playing, so its next songs are less like them. */
+let stationSkips: { source: string; ids: string[] } = { source: '', ids: [] }
+
+/**
+ * A song of a station was skipped: the station keeps its next 2 songs and drops the rest, then asks for new
+ * ones that are less like what was skipped (the way a station steers as you listen).
+ */
+function steerStation(source: string, songId: string) {
+  if (stationSkips.source !== source) stationSkips = { source, ids: [] }
+  stationSkips.ids = [...stationSkips.ids, songId].slice(-50)
+  const s = st()
+  if (currentItem(s)?.source !== source) return
+  const pos = s.order.indexOf(s.current)
+  let kept = 0
+  const after = s.order.slice(pos + 1).filter((i) => s.items[i].source !== source || kept++ < 2)
+  if (after.length === s.order.length - pos - 1) return
+  setSt({ order: [...s.order.slice(0, pos + 1), ...after] })
+  afterChange()
+}
 
 /**
  * Keeps a station (a mix whose endless is set) playing forever: when fewer than 5 of its songs are
@@ -551,8 +572,9 @@ function topUpStation() {
   fetchingStation = true
   const stationId = source.slice(MIX_SOURCE_PREFIX.length)
   const queued = s.items.map((i) => i.song.id)
+  const skipped = stationSkips.source === source ? stationSkips.ids : []
   social
-    .radio(stationId, queued.slice(-500), 20)
+    .radio(stationId, queued.slice(-500), 20, skipped)
     .then((more) => {
       // Still the same station? (You may have started something else meanwhile.)
       if (currentItem()?.source === source) insert(toItems(more.songs.map((m) => ({ ...m })), source), false)

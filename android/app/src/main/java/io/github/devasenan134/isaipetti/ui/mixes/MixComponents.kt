@@ -131,11 +131,14 @@ private fun withHsl(color: Color, change: (FloatArray) -> Unit): Color {
     return Color(ColorUtils.HSLToColor(hsl))
 }
 
-/** A tile on Home: the artwork, then the mix's one-line description. */
+/** A tile on Home: the artwork (with "New" on a mix that's new to your Home), then the mix's one-line description. */
 @Composable
 fun MixCard(mix: Mix, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.width(UiSize.Tile).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
-        MixCover(mix, size = UiSize.Tile - 12.dp)
+        Box {
+            MixCover(mix, size = UiSize.Tile - 12.dp)
+            if (mix.isNew) NewBadge(Modifier.align(Alignment.TopEnd).padding((UiSize.Tile - 12.dp) / 18))
+        }
         Text(
             mix.subtitle,
             style = MaterialTheme.typography.bodySmall,
@@ -145,6 +148,22 @@ fun MixCard(mix: Mix, onClick: () -> Unit, modifier: Modifier = Modifier) {
             modifier = Modifier.padding(top = 6.dp),
         )
     }
+}
+
+/** "NEW" in the Saffron gradient, opposite the mark on a mix's artwork. */
+@Composable
+private fun NewBadge(modifier: Modifier = Modifier) {
+    Text(
+        "NEW",
+        color = Color(0xFF2B1300),
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 10.sp,
+        letterSpacing = 0.5.sp,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Brush.linearGradient(listOf(Color(0xFFFFE36E), Color(0xFFFF9F1C), Color(0xFFE5480B))))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
 }
 
 /** Home's rows of mixes ("Made for you", "Moods and vibes", ...). */

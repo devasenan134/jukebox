@@ -1,5 +1,7 @@
 package io.github.devasenan134.isaipetti.ui.settings
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -150,6 +152,22 @@ private fun StatsContent(stats: ListeningStats) {
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
+        if (stats.mixes.isNotEmpty()) {
+            item {
+                SectionTitle("Mixes, last 30 days")
+                Text(
+                    "Everyone together. Skipped: moved on within 30 seconds.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                MixStatsRow("Mix", "Opened", "Played", "Skipped", header = true)
+            }
+            items(stats.mixes, key = { "mix-${it.name}" }) { m ->
+                val rate = if (m.played > 0) m.skipped.toFloat() / m.played else 0f
+                MixStatsRow(m.name, "${m.opened}", "${m.played}", if (m.played > 0) "${(rate * 100).roundToInt()}%" else "–", fraction = rate.takeIf { m.played > 0 })
+            }
+        }
         item {
             Text(
                 "A song counts as played once half of it (or 4 minutes) is heard, and adds its full length. " +
@@ -158,6 +176,26 @@ private fun StatsContent(stats: ListeningStats) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(16.dp),
             )
+        }
+    }
+}
+
+/** A row of the mixes table: name, opened, played, and skipped (a bar and a share; lower is better). */
+@Composable
+private fun MixStatsRow(name: String, opened: String, played: String, skipped: String, header: Boolean = false, fraction: Float? = null) {
+    val style = if (header) MaterialTheme.typography.labelLarge else MaterialTheme.typography.bodyMedium
+    val color = if (header) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(name, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Text(opened, style = style, color = color, textAlign = TextAlign.End, modifier = Modifier.width(56.dp))
+        Text(played, style = style, color = color, textAlign = TextAlign.End, modifier = Modifier.width(56.dp))
+        Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            if (fraction != null) {
+                Box(Modifier.width(40.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                    Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(6.dp).clip(RoundedCornerShape(3.dp)).background(chartColor()))
+                }
+            }
+            Text(skipped, style = style, color = color, textAlign = TextAlign.End, modifier = Modifier.width(44.dp))
         }
     }
 }

@@ -99,7 +99,24 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
    - **Seasons** while it's their time (Pongal, Kadhal Week, Rain Songs, Deepavali, Christmas, New Year): songs
      whose titles have the season's words first, then songs with its feeling.
 
-6. **Other mixes:**
+6. **Stations:** song, album, composer and singer stations, plus **mood** (`radio-mood-chill`), **decade**
+   (`radio-decade-1990`) and **Discovery** (`radio-discovery-new`, songs you haven't heard). **Your stations**:
+   up to 3 songs of the last 7 days (a different few each day, not the ones Because you played has), the
+   composer you've played most in 14 days, Discovery, the mood you play most, then your favourite songs (7 in all).
+   The apps send the songs skipped in a station (`POST /mixes/radio` `skipped`); the next songs lose
+   $0.6 \cdot \max(0, \text{likeness to the skipped})$, and the apps drop all but the next 2 queued songs and ask again.
+   The composer and singer rows (and their stations, the next ones down) rotate daily from the library's 30
+   biggest plus your 5 favourites: $3 \cdot \text{your share} - 0.05 \cdot \text{rank} + \text{Gumbel noise}$.
+
+7. **"New" badge** (`isNew`): a mix that comes (back) to your Home after a week or more away is New for a day
+   (`mix_state.seen_at` / `appeared_at`, schema 31; your first Home has nothing new); weekly mixes are New on
+   their first two days (Discover, Deep Cuts, Hidden Gems from Monday, Fresh for You from Friday).
+
+8. **Admin stats, mixes** (`StatsDto.mixes`): for each sort of mix (`MixMaker.family`), over 30 days and everyone
+   together: opened (`suggestion_lists`; a station once, when it starts), songs played from it and skipped
+   (`plays.source = 'mix:<id>'`).
+
+9. **Other mixes:**
    - **Mood Mixes:** Scores songs against prompt embeddings (z-score normalized dot product) combined with acoustic
      constraints (e.g., Party requires high energy and tempo; Chill restricts energy); songs that suit you come first.
    - **Stations & Radio:** Combines sound similarity with the **"Played Together"** graph from [`Together.kt`](file:///home/devs/code/jukebox/server/src/main/kotlin/io/github/devasenan134/jukebox/server/Together.kt) (tracks frequently played in the same session or co-occurring in user playlists across the server).

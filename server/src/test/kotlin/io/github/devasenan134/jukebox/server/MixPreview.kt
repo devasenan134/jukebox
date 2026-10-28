@@ -59,7 +59,9 @@ fun main(args: Array<String>) = runBlocking {
     )
     println("\n${playlists.size} playlists count towards which songs go together")
     val extra = listOf("deepcuts", "gems", "fresh") + maker.topMixes().map { it.id }.filter { it.startsWith("because-") }.take(1)
-    val sections = maker.home() + MixSection("extra", "Not on Home today", extra.mapNotNull { maker.byId(it) })
+    val stations = maker.yourStations().mapNotNull { maker.radio(it.id, emptySet(), 10, kotlin.random.Random(1)) }
+    val sections = maker.home() + MixSection("extra", "Not on Home today", extra.mapNotNull { maker.byId(it) }) +
+        MixSection("stations", "Your stations, first songs", stations)
     for (section in sections) {
         println("\n##### ${section.title}")
         for (mix in section.mixes) {

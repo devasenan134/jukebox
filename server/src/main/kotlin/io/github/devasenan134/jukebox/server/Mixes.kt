@@ -19,7 +19,8 @@ import org.slf4j.LoggerFactory
 import kotlin.random.Random
 
 @Serializable data class HomeMixes(val sections: List<MixSection>, val analyzedSongs: Int, val totalSongs: Int)
-@Serializable data class RadioRequest(val id: String, val exclude: List<String> = emptyList(), val count: Int = 25)
+/** The next songs of station [id]: none of [exclude] (what it played or has queued), and less like [skipped] (skipped while it played). */
+@Serializable data class RadioRequest(val id: String, val exclude: List<String> = emptyList(), val count: Int = 25, val skipped: List<String> = emptyList())
 @Serializable data class RecommendRequest(val songIds: List<String>, val count: Int = 10, val page: Int = 0)
 
 /** One song the app played: how long, and whether it was skipped. */
@@ -105,7 +106,7 @@ class MixService(
     suspend fun radio(user: UserDto, request: RadioRequest): MixDto {
         val count = request.count.coerceIn(1, 50)
         val exclude = request.exclude.take(1000).toSet()
-        val mix = build(user).maker.radio(request.id, exclude, count, Random(clock()))
+        val mix = build(user).maker.radio(request.id, exclude, count, Random(clock()), request.skipped.take(100))
             ?: throw ApiError(HttpStatusCode.NotFound, "This station isn't available")
         // This batch follows the songs the station already played.
         suggested(user, request.id, "radio", mix.songs, exclude.size)
@@ -282,27 +283,40 @@ class MixService(
         }
     }
 
-    /** Sets each mix's [MixDto.updatedAt] to when its songs last changed (kept in the database). */
+    private class MixState(val hash: Int, val updatedAt: Long, val seenAt: Long, val appearedAt: Long)
+
+    /**
+     * Sets each mix's [MixDto.updatedAt] to when its songs last changed, and [MixDto.isNew] if it came (back) to
+     * Home in the last day after a week or more away (kept in mix_state). Someone's very first Home has nothing new.
+     */
     private suspend fun remember(userId: Long, sections: List<MixSection>): List<MixSection> {
         val t = clock()
-        val times = db.tx {
-            val stored = query("SELECT mix_id, songs_hash, updated_at FROM mix_state WHERE user_id = ?", userId) {
-                it.getString(1) to (it.getInt(2) to it.getLong(3))
+        val states = db.tx {
+            val stored = query("SELECT mix_id, songs_hash, updated_at, seen_at, appeared_at FROM mix_state WHERE user_id = ?", userId) {
+                it.getString(1) to MixState(it.getInt(2), it.getLong(3), it.getLong(4), it.getLong(5))
             }.toMap()
-            sections.flatMap { it.mixes }.associate { mix ->
+            sections.flatMap { it.mixes }.distinctBy { it.id }.associate { mix ->
                 val hash = mix.songs.map { it.id }.hashCode()
                 val previous = stored[mix.id]
-                val time = if (previous != null && previous.first == hash) previous.second else t
-                if (previous == null || previous.first != hash) {
-                    update(
-                        "INSERT OR REPLACE INTO mix_state (user_id, mix_id, songs_hash, updated_at) VALUES (?, ?, ?, ?)",
-                        userId, mix.id, hash, time,
-                    )
+                val updated = if (previous != null && previous.hash == hash) previous.updatedAt else t
+                val appeared = when {
+                    previous == null -> if (stored.isEmpty()) 0L else t
+                    previous.seenAt < t - AWAY_MS -> t
+                    else -> previous.appearedAt
                 }
-                mix.id to time
+                update(
+                    "INSERT OR REPLACE INTO mix_state (user_id, mix_id, songs_hash, updated_at, seen_at, appeared_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    userId, mix.id, hash, updated, t, appeared,
+                )
+                mix.id to MixState(hash, updated, t, appeared)
             }
         }
-        return sections.map { s -> s.copy(mixes = s.mixes.map { m -> if (m.endless) m else m.copy(updatedAt = times[m.id] ?: t) }) }
+        return sections.map { s ->
+            s.copy(mixes = s.mixes.map { m ->
+                val state = states.getValue(m.id)
+                m.copy(updatedAt = if (m.endless) m.updatedAt else state.updatedAt, isNew = m.isNew || t - state.appearedAt < MixMaker.DAY)
+            })
+        }
     }
 
     private suspend fun skips(userId: Long, lib: LibrarySnapshot): Map<Int, SkipStats> = db.tx {
@@ -333,5 +347,7 @@ class MixService(
         const val RECHECK_MS = 30_000L
         /** How often to look for new plays and playlist changes for [Together]. */
         const val TOGETHER_EVERY_MS = 10 * 60_000L
+        /** A mix away from someone's Home this long is "New" when it comes back. */
+        const val AWAY_MS = 7 * MixMaker.DAY
     }
 }

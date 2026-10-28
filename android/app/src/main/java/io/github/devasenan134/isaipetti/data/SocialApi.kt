@@ -169,7 +169,9 @@ class SocialApi(
     suspend fun followMix(id: String) = send<Unit>("PUT", "/mixes/${enc(id)}/follow", "")
     suspend fun unfollowMix(id: String) = send<Unit>("DELETE", "/mixes/${enc(id)}/follow", null)
     /** The next songs of a station, leaving out [exclude] (what it already played). */
-    suspend fun radio(id: String, exclude: List<String>, count: Int = 25): Mix = post("/mixes/radio", RadioBody(id, exclude, count))
+    /** The next songs of a station: none of [exclude] (played or queued), and less like [skipped] (skipped while it played). */
+    suspend fun radio(id: String, exclude: List<String>, count: Int = 25, skipped: List<String> = emptyList()): Mix =
+        post("/mixes/radio", RadioBody(id, exclude, count, skipped))
     /** Songs that would fit a playlist made of [songIds]; [page] 1, 2... for more. */
     suspend fun recommend(songIds: List<String>, count: Int = 10, page: Int = 0): List<MixSong> =
         post("/mixes/recommend", RecommendBody(songIds, count, page))
@@ -369,7 +371,7 @@ class SocialApi(
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)
     @Serializable private data class PlaylistBody(val id: String, val name: String = "", val coverArt: String? = null, val songCount: Int = 0)
-    @Serializable private data class RadioBody(val id: String, val exclude: List<String>, val count: Int)
+    @Serializable private data class RadioBody(val id: String, val exclude: List<String>, val count: Int, val skipped: List<String> = emptyList())
     @Serializable private data class RecommendBody(val songIds: List<String>, val count: Int, val page: Int)
     @Serializable private data class PlaysBody(val events: List<PlayEvent>)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)

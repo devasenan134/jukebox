@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30, SCHEMA_V31)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -501,6 +501,14 @@ class Db(private val path: String) {
         // time; album_key groups songs of one album into an album request.
         // Requests the queue makes are held (held = 1) until it has gone through everything waiting: then admins
         // are told once, and the requests show (and are filled) from then on.
+        // When a mix was last on someone's Home, and when it came (back) to it, for its "New" badge. Mixes on
+        // Home before this count as seen now, and not new.
+        val SCHEMA_V31 = """
+            ALTER TABLE mix_state ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE mix_state ADD COLUMN appeared_at INTEGER NOT NULL DEFAULT 0;
+            UPDATE mix_state SET seen_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+        """.trimIndent()
+
         val SCHEMA_V30 = """
             ALTER TABLE music_requests ADD COLUMN held INTEGER NOT NULL DEFAULT 0
         """.trimIndent()
