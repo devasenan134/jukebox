@@ -272,14 +272,17 @@ fun SongRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (saved) {
-                // Tap to see (and change) where it's saved: Liked songs and which playlists.
-                Icon(
-                    Icons.Filled.CheckCircle,
-                    contentDescription = "Saved. Tap to see where",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(end = 8.dp).clip(CircleShape).clickable { addingToPlaylist = true }.padding(2.dp).size(18.dp),
-                )
+            // Every row keeps room for the tick, so lengths line up whether a song is saved or not.
+            Box(Modifier.padding(end = 6.dp).size(26.dp), contentAlignment = Alignment.Center) {
+                if (saved) {
+                    // Tap to see (and change) where it's saved: Liked songs and which playlists.
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = "Saved. Tap to see where",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clip(CircleShape).clickable { addingToPlaylist = true }.padding(2.dp).size(18.dp),
+                    )
+                }
             }
             if (isDownloaded) {
                 Icon(

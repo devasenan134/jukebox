@@ -8,6 +8,11 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Lined Up (2.5.4)
+
+### Fixed
+- **Song lists line up.** A song saved in your library or a playlist (the tick) no longer pushes its album and length out of line with the songs around it.
+
 ## Now Playing on the Mac (2.5.3)
 
 ### New

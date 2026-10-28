@@ -336,18 +336,21 @@ export function SongRow({ song, onClick, isCurrent, showCover, index, onOpenAlbu
             ) : song.album)}
           </div>
         )}
-        {saved && (
-          <span
-            title="Saved. Tap to see where"
-            onClick={(e) => {
-              e.stopPropagation()
-              setSaving(true)
-            }}
-            style={{ marginRight: 8, cursor: 'pointer', display: 'inline-flex' }}
-          >
-            <Icon name="check_circle" filled size={20} style={{ color: 'var(--primary)' }} />
-          </span>
-        )}
+        {/* Every row keeps room for the tick, so the album and length line up whether a song is saved or not. */}
+        <span className="saved-slot">
+          {saved && (
+            <span
+              title="Saved. Tap to see where"
+              onClick={(e) => {
+                e.stopPropagation()
+                setSaving(true)
+              }}
+              style={{ cursor: 'pointer', display: 'inline-flex' }}
+            >
+              <Icon name="check_circle" filled size={20} style={{ color: 'var(--primary)' }} />
+            </span>
+          )}
+        </span>
         <span className="dur body-small">{formatDuration(song.duration)}</span>
         <IconButton icon="more_horiz" label="More" className="row-more" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())} />
       </div>

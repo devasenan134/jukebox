@@ -1309,6 +1309,14 @@ a.nav-item:hover {
   font-variant-numeric: tabular-nums;
   color: var(--on-surface-variant);
 }
+/* The saved tick's place: the same width on every row (and in the column heads), ticked or not. */
+.song-row .saved-slot,
+.track-head .saved-slot {
+  width: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+}
 /* A song of a playlist that isn't in the library: greyed out, but its Request and Remove aren't. */
 .song-row.missing {
   cursor: default;

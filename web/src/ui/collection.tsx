@@ -50,6 +50,7 @@ export function TrackHead({ album = true }: { album?: boolean }) {
       <span className="num">#</span>
       <span className="t">Title</span>
       {album && <span className="album-col">Album</span>}
+      <span className="saved-slot" />
       <span className="dur" title="Length">
         <span className="icon" style={{ fontSize: 18 }}>schedule</span>
       </span>
