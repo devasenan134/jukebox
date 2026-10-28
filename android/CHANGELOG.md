@@ -8,6 +8,23 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Covers and Stations (2.5.0)
+
+### New
+- **Designed covers for every mix and station.** Each kind of mix has its own look, drawn from what's in it now: Daily Mixes are a record sleeve with the vinyl sliding out and their main artist in two tones; Discover Weekly is a mixtape; the time-of-day mix, seasons and calm moods are a sky with the cover as the sun or moon; Fresh for You pulls covers out of a crate; On Repeat spins; Rewind is a faded polaroid; composer mixes are an LP; Because you played is a 7" single; old decades a reel-to-reel, newer ones a CD; Deep Cuts a record in its paper sleeve; energetic moods a turntable. Stations are an old radio, the artist in the speaker, each on its own frequency.
+- **Stations that follow you.** Your stations come from what you played this week, with your composer of the moment, a Discovery station (songs you haven't heard) and your favourite mood. New mood and decade stations too.
+- **Stations listen to your skips.** Skip a song on a station and it drops what it had queued after the next two and finds songs less like the one you skipped.
+- **"New" on mixes** that just arrived on your Home (or came back after a week away), and on weekly mixes in their first two days.
+- **Admins: how each kind of mix does** in Listening stats: opened, songs played and how many were skipped, over 30 days.
+
+### Improved
+- **Made for you and Your top mixes** are pages of big and wide tiles to swipe through.
+- **The player shows the previous and next covers** peeking in beside the current one.
+- **Composer and artist stations** change every day, and the "This is" rows are gone from Home (composer and singer pages still open them).
+
+### Server
+- `MixArt` on every mix (design, picture, colours, words), `POST /mixes/radio` takes `skipped`, `isNew` on mixes (schema 31: `mix_state.seen_at`, `appeared_at`), `StatsDto.mixes`.
+
 ## Fresh Every Day (0.24.0)
 
 ### New
