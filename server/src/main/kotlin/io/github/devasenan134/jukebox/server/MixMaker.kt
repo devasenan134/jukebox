@@ -697,7 +697,7 @@ class MixMaker(
         val scores = theirs.associateWith { i -> members.getValue(i) + 0.5f * affinity[i] + 0.3f * (weights[i] ?: 0.0).toFloat() - tired(i) }
         val random = Random(personSeed * 41 + today.toEpochDay() + (person.id + mood.key).hashCode())
         val list = pick(scores, 30, random, pool = 80, maxPerAlbum = 3, maxPerPerson = 30, languages = setOfNotNull(mainLanguage(theirs)))
-        if (list.size < 12) return null
+        if (list.size < 20) return null  // after 3 per movie, a few films aren't enough
         return mix(
             "cmood-${person.id}-${mood.key}", "topic", "${person.name} ${titleCase(noun)}", list, refresh = "daily",
             subtitle = namesIn(list, first = person.name), color = mood.color,
@@ -714,7 +714,7 @@ class MixMaker(
         }
         val random = Random(personSeed * 43 + today.toEpochDay() + person.id.hashCode() + start)
         val list = pick(scores, 30, random, pool = 80, maxPerAlbum = 3, maxPerPerson = 30)
-        if (list.size < 12) return null
+        if (list.size < 20) return null  // after 3 per movie, a few films aren't enough
         return mix(
             "cdecade-${person.id}-$start", "topic", "${decadeName(start)} ${person.name}", list, refresh = "daily",
             subtitle = namesIn(list, first = person.name), color = DECADE_COLORS[(start / 10) % DECADE_COLORS.size],
