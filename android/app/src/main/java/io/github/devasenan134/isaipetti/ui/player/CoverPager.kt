@@ -1,5 +1,8 @@
 package io.github.devasenan134.isaipetti.ui.player
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.absoluteValue
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.pager.HorizontalPager
@@ -22,7 +25,8 @@ import coil3.compose.AsyncImage
 /**
  * Album art for every song in the queue, side by side. Swipe to change songs.
  * It works both ways: swiping plays that song, and when the song changes
- * (Next button, song ends) the pager slides to follow.
+ * (Next button, song ends) the pager slides to follow. The previous and next covers peek in at the sides,
+ * smaller and dimmer.
  */
 @Composable
 fun CoverPager(modifier: Modifier = Modifier, swipeable: Boolean = true) {
@@ -53,16 +57,29 @@ fun CoverPager(modifier: Modifier = Modifier, swipeable: Boolean = true) {
     HorizontalPager(
         userScrollEnabled = swipeable,
         state = pagerState,
-        pageSpacing = 24.dp,
+        contentPadding = PaddingValues(horizontal = 36.dp),
+        pageSpacing = 8.dp,
         key = { entries.getOrNull(it)?.index ?: it },
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier,
     ) { page ->
+        // How far this page is from the middle (0 = the current one), as it's swiped.
+        val away = { (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction }
         AsyncImage(
             model = entries.getOrNull(page)?.item?.mediaMetadata?.artworkUri,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)),
+            modifier = Modifier
+                .graphicsLayer {
+                    val d = away().coerceIn(-1f, 1f)
+                    val scale = 1f - 0.18f * d.absoluteValue
+                    scaleX = scale
+                    scaleY = scale
+                    alpha = 1f - 0.5f * d.absoluteValue
+                    // Drawn a little closer, with a small gap (pages can't be stacked behind one another).
+                    translationX = d * size.width * 0.08f
+                }
+                .fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)),
         )
     }
 }

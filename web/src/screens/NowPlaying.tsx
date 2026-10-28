@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { currentItem, usePlayer } from '../player/player'
@@ -62,10 +62,10 @@ export function NowPlaying() {
         </div>
       </div>
       {queue && <QueueSheet onClose={() => setQueue(false)} />}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'clip' }}>
       <div className="now-playing" style={{ display: 'grid', gap: 32, padding: '16px 24px 24px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', alignItems: 'center', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
-          <Cover coverArt={song.coverArt} size={800} corner={8} style={{ width: 'min(460px, 84vw, 52vh)', aspectRatio: '1', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }} />
+          <CoverCarousel width="min(460px, 76vw, 52vh)" />
           {sung && (
             <button key={sung} className="np-line title-medium" onClick={() => document.querySelector('.np-lyrics')?.scrollIntoView({ behavior: 'smooth' })}>
               {sung}
@@ -159,3 +159,48 @@ function Lyrics({ lines, synced, position, loading }: { lines: { start?: number;
     </div>
   )
 }
+
+/**
+ * The cover, with the previous and next songs' covers peeking out behind it (smaller and dimmer). Tap one, or
+ * swipe, to play it; the covers slide across as the song changes (each keeps its element, keyed by queue entry).
+ */
+function CoverCarousel({ width }: { width: string }) {
+  const order = usePlayer((s) => s.order)
+  const items = usePlayer((s) => s.items)
+  const current = usePlayer((s) => s.current)
+  const touchX = useRef<number | null>(null)
+  const pos = order.indexOf(current)
+  // Two each side: the far ones are hidden, ready to slide in.
+  const slots = [-2, -1, 0, 1, 2].flatMap((d) => (order[pos + d] != null && items[order[pos + d]] ? [{ d, item: items[order[pos + d]] }] : []))
+  const swipe = (dx: number) => {
+    if (Math.abs(dx) < 50) return
+    if (dx < 0) player.nextSong()
+    else player.previousSong()
+  }
+  return (
+    <div
+      className="cover-carousel"
+      style={{ width }}
+      onTouchStart={(e) => (touchX.current = e.touches[0].clientX)}
+      onTouchEnd={(e) => {
+        if (touchX.current != null) swipe(e.changedTouches[0].clientX - touchX.current)
+        touchX.current = null
+      }}
+    >
+      {slots.map(({ d, item }) => (
+        <div
+          key={item.uid}
+          className={`cc-slot${d === 0 ? ' current' : ''}`}
+          // The far ones are hidden and behind, and don't take taps.
+          style={{ '--d': d, opacity: d === 0 ? 1 : Math.abs(d) === 1 ? 0.5 : 0, zIndex: d === 0 ? 1 : -Math.abs(d), pointerEvents: Math.abs(d) > 1 ? 'none' : undefined } as CSSProperties}
+          onClick={d === -1 ? player.previousSong : d === 1 ? player.nextSong : undefined}
+          aria-hidden={d !== 0}
+          title={d === -1 ? `Previous: ${item.song.title}` : d === 1 ? `Next: ${item.song.title}` : undefined}
+        >
+          <Cover coverArt={item.song.coverArt} size={800} corner={8} style={{ width: '100%', height: '100%' }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+

@@ -125,6 +125,9 @@ export function madeForName(): string | undefined {
   return s.social?.user.displayName?.trim() || s.credentials?.username
 }
 
+/** The rows drawn as pages of big and wide tiles ([MixBento]); the rest are rows of square tiles. */
+const BENTO_SECTIONS = new Set(['made-for-you', 'top-mixes'])
+
 /** Home's rows of mixes ("Made for you", "Moods and vibes", ...). */
 export function MixSections({ sections, nav }: { sections: MixSection[]; nav: Nav }) {
   const name = madeForName()
@@ -136,14 +139,62 @@ export function MixSections({ sections, nav }: { sections: MixSection[]; nav: Na
           <div key={section.id}>
             {/* "Made for Devs", like Spotify's "Made For <name>". */}
             <SectionTitle>{section.id === 'made-for-you' && name ? `Made for ${name}` : section.title}</SectionTitle>
-            <div className="row-scroll">
-              {section.mixes.map((m) => (
-                <MixCard key={m.id} mix={m} onClick={() => nav.openMix(m.id)} />
-              ))}
-            </div>
+            {BENTO_SECTIONS.has(section.id) ? (
+              <MixBento mixes={section.mixes} nav={nav} />
+            ) : (
+              <div className="row-scroll">
+                {section.mixes.map((m) => (
+                  <MixCard key={m.id} mix={m} onClick={() => nav.openMix(m.id)} />
+                ))}
+              </div>
+            )}
           </div>
         ))}
     </>
+  )
+}
+
+/**
+ * Mixes as pages of 4 to swipe through: a big square, two wide tiles stacked beside it, and one across the
+ * bottom. Every other page has the big square on the other side. A last page with fewer fills what it has.
+ */
+function MixBento({ mixes, nav }: { mixes: Mix[]; nav: Nav }) {
+  const pages: Mix[][] = []
+  for (let i = 0; i < mixes.length; i += 4) pages.push(mixes.slice(i, i + 4))
+  return (
+    <div className="bento-pages">
+      {pages.map((page, p) => (
+        <div key={p} className={`bento-page n${page.length}${p % 2 ? ' flip' : ''}`}>
+          {page.map((m, i) => (
+            <BentoTile key={m.id} mix={m} big={i === 0} onClick={() => nav.openMix(m.id)} />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** A mix's cover filling the tile (four of them on a big tile), its name and line over it, and "New". */
+function BentoTile({ mix, big, onClick }: { mix: Mix; big: boolean; onClick: () => void }) {
+  const tint = mixTint(mix)
+  const collage = big && mix.covers.length >= 4
+  return (
+    <button className="bento-tile" onClick={onClick} style={{ background: tint }}>
+      {collage ? (
+        <div className="bento-collage">
+          {mix.covers.slice(0, 4).map((c, i) => <Cover key={i} coverArt={c} size={300} corner={0} style={{ width: '100%', height: '100%' }} />)}
+        </div>
+      ) : mix.covers.length ? (
+        <Cover coverArt={mix.covers[0]} fallbacks={mix.covers.slice(1)} size={big ? 500 : 400} corner={0} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+      ) : null}
+      {/* Darker towards the bottom, in the mix's colour, so the name reads on any picture. */}
+      <span className="bento-shade" style={{ background: `linear-gradient(180deg, transparent 30%, ${tint}e6 100%)` }} />
+      {mix.isNew && <span className="mix-new left">New</span>}
+      <span className="bento-text">
+        <span className={`bento-title${big ? ' big' : ''}`}>{mix.title}</span>
+        <span className="bento-sub">{mix.subtitle}</span>
+      </span>
+    </button>
   )
 }
 
