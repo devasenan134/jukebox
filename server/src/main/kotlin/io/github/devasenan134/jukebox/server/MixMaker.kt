@@ -307,16 +307,17 @@ class MixMaker(
         }
         val top = topMixes()
         val inTop = top.map { it.id }.toSet()
+        val stations = yourStations()
         val charts = listOfNotNull(popular(), newArrivals())
         // Composers and singers are on Home as stations only (their This Is mixes open from their pages).
         return listOf(
             MixSection("made-for-you", "Made for you", madeForYou.map(::personalized)),
             MixSection("top-mixes", "Your top mixes", top),
-            MixSection("your-stations", "Your stations", yourStations().map { it.copy(personal = true) }),
+            MixSection("your-stations", "Your stations", stations.map { it.copy(personal = true) }),
             // A mix already in Your top mixes isn't shown twice.
             MixSection("moods", "Moods and vibes", MOODS.filter { "mood-${it.key}" !in inTop }.mapNotNull { mood(it) }),
             MixSection("scores", "Themes and background scores", scoreMixes().filter { it.id !in inTop }),
-            MixSection("artist-stations", "Composer and artist stations", artistStations()),
+            MixSection("artist-stations", "Composer and artist stations", artistStations(skip = stations.map { it.id }.toSet())),
             MixSection("charts", "Popular and new", charts),
             MixSection("decades", "Through the decades", decades().filter { it.id !in inTop }),
         ).filter { it.mixes.isNotEmpty() }
@@ -1005,11 +1006,11 @@ class MixMaker(
         return ids.distinct().take(YOUR_STATIONS).map(::stationSummary)
     }
 
-    /** Stations for 4 composers and 4 singers, a different set each day (see [topPeople]). */
-    fun artistStations(): List<MixDto> {
-        val composers = topPeople(composer = true, count = 4)
+    /** Stations for 4 composers and 4 singers, a different set each day (see [topPeople]); none of [skip] (Your stations has them). */
+    fun artistStations(skip: Set<String> = emptySet()): List<MixDto> {
+        val composers = topPeople(composer = true, count = 12).filter { "radio-composer-${it.id}" !in skip }.take(4)
         // Someone who composes and sings (Anirudh) gets one station, not two.
-        val singers = topPeople(composer = false, count = 8).filter { s -> composers.none { it.id == s.id } }.take(4)
+        val singers = topPeople(composer = false, count = 16).filter { s -> composers.none { it.id == s.id } && "radio-singer-${s.id}" !in skip }.take(4)
         return composers.map { stationSummary("radio-composer-${it.id}") } + singers.map { stationSummary("radio-singer-${it.id}") }
     }
 
