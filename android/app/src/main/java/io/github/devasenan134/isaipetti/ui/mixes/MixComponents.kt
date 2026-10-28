@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.layout.fillMaxHeight
+import io.github.devasenan134.isaipetti.data.MixArt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -66,6 +68,11 @@ fun Mix.tint(): Color = runCatching { Color(android.graphics.Color.parseColor(co
  */
 @Composable
 fun MixCover(mix: Mix, modifier: Modifier = Modifier, size: Dp = 150.dp) {
+    // Designed covers (MixArt.kt) for every mix the server describes; the looks below are for older servers.
+    mix.art?.let { art ->
+        MixArtCover(mix, art, modifier.size(size), corner = size / 18)
+        return
+    }
     val big = size > 120.dp
     val tiny = size < 80.dp // a thumbnail: just the artwork
     val tint = mix.tint()
@@ -236,9 +243,37 @@ private fun BentoPage(page: List<Mix>, flip: Boolean, nav: Nav) {
     }
 }
 
+/**
+ * A designed cover on a bento tile: the whole cover on a big square; on a wide tile, the cover on the left and
+ * its name and line beside it, on the cover's own colour.
+ */
+@Composable
+private fun ArtBentoTile(mix: Mix, art: MixArt, big: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val ground = runCatching { Color(android.graphics.Color.parseColor(art.ground)) }.getOrDefault(Color.DarkGray)
+    val ink = runCatching { Color(android.graphics.Color.parseColor(art.ink)) }.getOrDefault(Color.White)
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(ground).clickable(onClick = onClick)) {
+        if (big) {
+            MixArtCover(mix, art, Modifier.fillMaxSize())
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                MixArtCover(mix, art, Modifier.fillMaxHeight())
+                Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.Bottom) {
+                    Text(mix.title, color = ink, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(mix.subtitle, color = ink.copy(alpha = 0.75f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (mix.isNew) NewBadge(Modifier.align(if (big) Alignment.TopEnd else Alignment.TopStart).padding(10.dp))
+    }
+}
+
 /** A mix's cover filling the tile (four of them on a big tile), its name and line over it, and "New". */
 @Composable
 private fun BentoTile(mix: Mix, big: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    mix.art?.let { art ->
+        ArtBentoTile(mix, art, big, modifier, onClick)
+        return
+    }
     val tint = mix.tint()
     Box(modifier.clip(RoundedCornerShape(14.dp)).background(tint).clickable(onClick = onClick)) {
         if (big && mix.covers.size >= 4) {

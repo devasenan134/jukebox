@@ -116,7 +116,19 @@ When a user opens Home (`GET /mixes`) or requests an individual mix (`GET /mixes
    together: opened (`suggestion_lists`; a station once, when it starts), songs played from it and skipped
    (`plays.source = 'mix:<id>'`).
 
-9. **Other mixes:**
+9. **Covers** (`MixArt` on each mix; drawn by `web/src/ui/mixArt.tsx` and `ui/mixes/MixArt.kt`, the same
+   designs on a 280-unit grid): the server picks the design, picture, colour pair (by mix id, from
+   `DARK_COLOURS` / `BRIGHT_COLOURS`) and words, so every app draws the same cover from what the mix holds now.
+   Daily Mix: record sleeve + vinyl, its lead composer two-toned. Discover: mixtape cassette. Time of day,
+   seasons, calm moods: a sky (dawn, day, dusk, night, rain) with the cover as sun or moon. Fresh / New
+   Arrivals: covers pulled from a crate. On Repeat, Top 50, scores: spinning record, words round the rim.
+   Rewind: faded polaroid. Hidden Gems, Friends: scattered polaroids. Composer and singer mixes, pairs: LP with
+   its record out the top. Because you played: a 7" single. Decades: reel-to-reel before 1990, CD after.
+   A composer's mood: die-cut sleeve. Deep Cuts: record in a paper inner sleeve. Energetic moods: turntable.
+   Stations: a radio tuner, the artist in the speaker, each on its own frequency (88.0–107.9 by id).
+   Two-tone photos use one colour matrix in both apps (luminance × 1.2 − 0.1, then dark → light colour).
+
+10. **Other mixes:**
    - **Mood Mixes:** Scores songs against prompt embeddings (z-score normalized dot product) combined with acoustic
      constraints (e.g., Party requires high energy and tempo; Chill restricts energy); songs that suit you come first.
    - **Stations & Radio:** Combines sound similarity with the **"Played Together"** graph from [`Together.kt`](file:///home/devs/code/jukebox/server/src/main/kotlin/io/github/devasenan134/jukebox/server/Together.kt) (tracks frequently played in the same session or co-occurring in user playlists across the server).

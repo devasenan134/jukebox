@@ -52,6 +52,8 @@ data class Mix(
     val personal: Boolean = false,
     /** Shows "New": back on your Home after a week or more away, or a weekly mix in its new week. */
     val isNew: Boolean = false,
+    /** How to draw its cover (ui/mixes/MixArt.kt); null: the old way, from [covers] and [color]. */
+    val art: MixArt? = null,
     val songs: List<MixSong> = emptyList(),
 ) {
     /** What the player remembers a queue was started from. Stations keep growing while this is playing. */
@@ -61,6 +63,23 @@ data class Mix(
         const val SOURCE_PREFIX = "mix:"
     }
 }
+
+/** A mix cover's design, worked out by the server (MixArt in MixMaker.kt). */
+@Serializable
+data class MixArt(
+    /** sleeve, cassette, sky, crate, spin, polaroid, photos, lp, single, reel, cd, diecut, paper, turntable or tuner. */
+    val style: String,
+    val kicker: String = "",
+    val headline: String = "",
+    /** A person's ("ar-…") or a cover ("al-…"); null: the mix's covers. */
+    val picture: String? = null,
+    val ground: String = "#121212",
+    val ink: String = "#ffffff",
+    /** For sky: dawn, day, dusk, night or rain. */
+    val variant: String? = null,
+    /** A sticker or dial reading: "FRI 31 OCT", "96.4 FM". */
+    val stamp: String? = null,
+)
 
 @Serializable data class MixSection(val id: String, val title: String, val mixes: List<Mix> = emptyList())
 

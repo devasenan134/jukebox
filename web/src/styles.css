@@ -369,6 +369,29 @@ a.nav-item:hover {
 .bento-tile:active {
   transform: scale(0.98);
 }
+/* A designed cover on a wide tile: the square cover on the left, its name beside it. */
+.bento-art-row {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.bento-art-square {
+  height: 100%;
+  aspect-ratio: 1;
+  flex-shrink: 0;
+}
+.bento-art-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 10px 12px;
+}
+.bento-tile.art .bento-sub {
+  opacity: 0.75;
+}
 .bento-collage {
   position: absolute;
   inset: 0;

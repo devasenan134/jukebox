@@ -3,6 +3,7 @@ import { session } from '../state/session'
 import { Cover, SectionTitle } from './components'
 import { Icon } from './kit'
 import type { Nav } from './nav'
+import { MixArtCover } from './mixArt'
 
 // Mixes by Jukebox, drawn in the browser (ui/mixes/MixComponents.kt).
 
@@ -50,6 +51,14 @@ const partnerOf = (c: string) => {
  * All carry the "Jukebox" mark and the mix's name.
  */
 export function MixCover({ mix, size = 150, fill }: { mix: Mix; size?: number; fill?: boolean }) {
+  // Designed covers (ui/mixArt.tsx) for every mix the server describes; the looks below are for older servers.
+  if (mix.art) {
+    return (
+      <div style={fill ? { width: '100%', flexShrink: 0 } : { width: size, height: size, flexShrink: 0 }}>
+        <MixArtCover mix={mix} art={mix.art} radius={size / 18} />
+      </div>
+    )
+  }
   const big = size > 120
   const tiny = size < 80
   const tint = mixTint(mix)
@@ -174,8 +183,33 @@ function MixBento({ mixes, nav }: { mixes: Mix[]; nav: Nav }) {
   )
 }
 
+/**
+ * A designed cover on a bento tile: the whole cover on a big square; on a wide tile, the cover on the left and
+ * its name and line beside it, on the cover's own colour.
+ */
+function ArtBentoTile({ mix, big, onClick }: { mix: Mix; big: boolean; onClick: () => void }) {
+  const art = mix.art!
+  return (
+    <button className="bento-tile art" onClick={onClick} style={{ background: art.ground, color: art.ink }}>
+      {big ? (
+        <MixArtCover mix={mix} art={art} />
+      ) : (
+        <span className="bento-art-row">
+          <span className="bento-art-square"><MixArtCover mix={mix} art={art} /></span>
+          <span className="bento-art-text">
+            <span className="bento-title">{mix.title}</span>
+            <span className="bento-sub">{mix.subtitle}</span>
+          </span>
+        </span>
+      )}
+      {mix.isNew && <span className={`mix-new${big ? '' : ' left'}`}>New</span>}
+    </button>
+  )
+}
+
 /** A mix's cover filling the tile (four of them on a big tile), its name and line over it, and "New". */
 function BentoTile({ mix, big, onClick }: { mix: Mix; big: boolean; onClick: () => void }) {
+  if (mix.art) return <ArtBentoTile mix={mix} big={big} onClick={onClick} />
   const tint = mixTint(mix)
   const collage = big && mix.covers.length >= 4
   return (

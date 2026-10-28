@@ -215,7 +215,25 @@ export interface Mix {
   personal: boolean
   /** Shows "New": back on your Home after a week or more away, or a weekly mix in its new week. */
   isNew?: boolean
+  /** How to draw its cover (ui/mixArt.tsx); none: the old way, from covers and color. */
+  art?: MixArt
   songs: MixSong[]
+}
+
+/** A mix cover's design, worked out by the server (MixArt in MixMaker.kt). */
+export interface MixArt {
+  /** sleeve, cassette, sky, crate, spin, polaroid, photos, lp, single, reel, cd, diecut, paper, turntable or tuner. */
+  style: string
+  kicker: string
+  headline: string
+  /** A person's (ar-…) or a cover (al-…); none: the mix's covers. */
+  picture?: string
+  ground: string
+  ink: string
+  /** For sky: dawn, day, dusk, night or rain. */
+  variant?: string
+  /** A sticker or dial reading: "FRI 31 OCT", "96.4 FM". */
+  stamp?: string
 }
 
 export const MIX_SOURCE_PREFIX = 'mix:'

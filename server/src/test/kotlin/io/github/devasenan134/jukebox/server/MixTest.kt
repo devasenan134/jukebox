@@ -436,6 +436,25 @@ class MixMakerTest {
     }
 
     @Test
+    fun `every mix and station on Home has a cover design`() {
+        val lib = Pretend.library()
+        val home = maker(lib).home()
+        val mixes = home.flatMap { it.mixes }
+        val missing = mixes.filter { it.art == null }.map { it.id }
+        assertTrue(missing.isEmpty(), "no cover design: $missing")
+        val daily = mixes.first { it.id == "daily-1" }.art!!
+        assertEquals("sleeve", daily.style)
+        assertEquals("01", daily.headline)
+        assertTrue(daily.picture!!.startsWith("ar-"), "a Daily Mix shows its main artist")
+        // Stations are tuned somewhere on the dial, each to its own place, always the same one.
+        val stations = mixes.filter { it.endless }
+        assertTrue(stations.all { it.art!!.style == "tuner" })
+        val frequencies = stations.map { it.art!!.stamp!!.removeSuffix(" FM").toFloat() }
+        assertTrue(frequencies.all { it in 88f..107.9f }, frequencies.toString())
+        assertEquals(stations.map { it.art }, maker(lib).home().flatMap { it.mixes }.filter { it.endless }.map { it.art })
+    }
+
+    @Test
     fun `songs and score tracks are generated separately in mixes, stations, and recommendations`() {
         val scoreTracks = (0 until 20).map { i ->
             val isRomantic = i % 2 == 0

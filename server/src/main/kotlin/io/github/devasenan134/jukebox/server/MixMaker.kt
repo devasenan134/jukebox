@@ -35,6 +35,29 @@ data class MixSong(
     val artists: List<PersonDto> = emptyList(),
 )
 
+/**
+ * How the apps draw a mix's cover: one design per kind of mix (docs/ANALYZER_MIXES_AND_STORAGE.md, "Covers"),
+ * with its picture, colours and words worked out here so every app draws the same thing.
+ */
+@Serializable
+data class MixArt(
+    /** "sleeve", "cassette", "sky", "crate", "spin", "polaroid", "photos", "lp", "single", "reel", "cd", "diecut", "paper", "turntable" or "tuner". */
+    val style: String,
+    /** The small line in capitals ("DAILY MIX", "WEEK 44 · 30 NEW SONGS"). */
+    val kicker: String = "",
+    /** The big words ("01", "Kasu Panam", "80s"). */
+    val headline: String = "",
+    /** The picture: a person's ("ar-…") or a cover ("al-…"); none: the mix's covers. */
+    val picture: String? = null,
+    /** The background, and the colour drawn on it: text, and the light half of a two-tone photo. */
+    val ground: String,
+    val ink: String,
+    /** For "sky": "dawn", "day", "dusk", "night" or "rain". */
+    val variant: String? = null,
+    /** A sticker or dial reading: "FRI 31 OCT", "96.4 FM". */
+    val stamp: String? = null,
+)
+
 /** A mix, playlist or station made by Jukebox. In lists, [songs] is left out and only [songCount] is set. */
 @Serializable
 data class MixDto(
@@ -67,6 +90,8 @@ data class MixDto(
     val personal: Boolean = false,
     /** Shown with a "New" badge: back on your Home after a week or more away, or a weekly mix on its new week. */
     val isNew: Boolean = false,
+    /** How to draw its cover; none: the old way, from [covers] and [color]. */
+    val art: MixArt? = null,
     val songs: List<MixSong> = emptyList(),
 ) {
     fun summary() = copy(songs = emptyList(), songCount = songs.size.takeIf { it > 0 } ?: songCount)
@@ -1042,9 +1067,17 @@ class MixMaker(
             }
             else -> lib.people.getValue(key).let { title = "${it.name} Radio"; covers = listOf("ar-${it.id}") }
         }
+        val dial = pick(id, DARK_COLOURS)
+        // Every station has its own place on the dial, 88.0 to 107.9.
+        val frequency = 880 + Math.floorMod(id.hashCode(), 200)
+        val art = MixArt(
+            "tuner", "JUKEBOX RADIO", title.removeSuffix(" Radio").removeSuffix(" Station"),
+            picture = if (kind == "composer" || kind == "singer") "ar-$key" else covers.firstOrNull().takeIf { kind == "song" || kind == "album" },
+            ground = dial.first, ink = dial.second, stamp = "${frequency / 10}.${frequency % 10} FM",
+        )
         return MixDto(
             id = id, kind = "radio", title = title, subtitle = "Station", endless = true, refresh = "live", description = description,
-            covers = covers, round = kind == "composer" || kind == "singer", color = color, updatedAt = now,
+            covers = covers, round = kind == "composer" || kind == "singer", color = color, updatedAt = now, art = art,
         )
     }
 
@@ -1345,11 +1378,89 @@ class MixMaker(
     private fun mix(
         id: String, kind: String, title: String, list: List<Int>, refresh: String, subtitle: String, description: String,
         covers: List<String>? = null, round: Boolean = false, color: String = colorFor(id),
-    ) = MixDto(
-        id = id, kind = kind, title = title, subtitle = subtitle, description = description, refresh = refresh,
-        covers = covers ?: list.map { songs[it].albumId }.distinct().take(4).map { "al-$it" },
-        round = round, color = color, songs = list.map(::song), songCount = list.size,
-    )
+    ): MixDto {
+        val pictures = covers ?: list.map { songs[it].albumId }.distinct().take(4).map { "al-$it" }
+        return MixDto(
+            id = id, kind = kind, title = title, subtitle = subtitle, description = description, refresh = refresh,
+            covers = pictures, round = round, color = color, songs = list.map(::song), songCount = list.size,
+            art = artFor(id, kind, title, list, pictures),
+        )
+    }
+
+    // ---------- Covers ----------
+
+    /** The design for a mix's cover (see [MixArt]). */
+    private fun artFor(id: String, kind: String, title: String, list: List<Int>, covers: List<String>): MixArt? {
+        val rest = id.substringAfter('-', "")
+        val first = covers.firstOrNull()
+        val dark = pick(id, DARK_COLOURS)
+        val bright = pick(id, BRIGHT_COLOURS)
+        fun sky(variant: String, kicker: String, headline: String = title) =
+            MixArt("sky", kicker, headline, first, "#1d1650", "#fff4ec", variant = variant)
+        return when (kind) {
+            "daily" -> MixArt("sleeve", "DAILY MIX", rest.padStart(2, '0'), leadPerson(list), dark.first, dark.second)
+            "daylist" -> sky(
+                SKY_FOR_PART.getValue(dayPart.name),
+                "${today.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH).uppercase()} · ${dayPart.name.uppercase()}",
+            )
+            "discover" -> MixArt(
+                "cassette", "WEEK ${monday.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)} · ${list.size} NEW SONGS", title,
+                ground = "#ff5a3c", ink = "#fff4ea",
+            )
+            "fresh", "new" -> MixArt(
+                "crate", if (kind == "fresh") "NEW IN THE LIBRARY" else "JUST ADDED", title, ground = "#f3ede2", ink = "#1e1712",
+                stamp = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.FRIDAY)).let {
+                    "${it.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)} ${it.dayOfMonth} ${it.month.getDisplayName(TextStyle.SHORT, Locale.ENGLISH)}".uppercase()
+                },
+            )
+            "repeat" -> MixArt("spin", "", "ON REPEAT", first, "#b3122e", "#ffe7d6")
+            "popular" -> MixArt("spin", "", "TOP 50 · MOST PLAYED", first, dark.first, dark.second)
+            "score" -> MixArt("spin", "", title.uppercase(), first, dark.first, dark.second)
+            "rewind" -> MixArt("polaroid", "◀◀ REW", title, first, "#2c5d63", "#f5f1e6")
+            "friends" -> MixArt("photos", "WHAT YOUR FRIENDS PLAY", title, ground = "#2a2140", ink = "#f4efe4")
+            "gems" -> MixArt("photos", "NOBODY HERE HAS PLAYED THESE", title, ground = "#24332d", ink = "#f4efe4")
+            "because" -> MixArt("single", "BECAUSE YOU PLAYED", title.removePrefix("Because you played "), first, bright.first, bright.second)
+            "deepcuts" -> MixArt("paper", "NEVER PLAYED", "DEEP CUTS", first, "#1d1a17", "#3a2210")
+            "artistmix", "composer", "singer" -> {
+                val person = rest.substringAfterLast('-')
+                val name = lib.people[person]?.name ?: title
+                MixArt("lp", if (kind == "artistmix") "MIX" else "THIS IS", name.uppercase(), "ar-$person", dark.first, dark.second)
+            }
+            "topic" -> when (id.substringBefore('-')) {
+                "cmood" -> {
+                    val person = lib.people[rest.substringBefore('-')]
+                    MixArt("diecut", person?.name?.uppercase().orEmpty(), title.removePrefix(person?.name.orEmpty()).trim(), person?.let { "ar-${it.id}" }, bright.first, bright.second)
+                }
+                "cdecade" -> {
+                    val person = lib.people[rest.substringBefore('-')]
+                    val start = rest.substringAfter('-').toIntOrNull() ?: 2000
+                    decadeArt(start, person?.name?.uppercase().orEmpty(), first, dark)
+                }
+                else -> {
+                    val (c, s) = rest.split('-').let { lib.people[it[0]] to lib.people.getOrNull(it, 1) }
+                    MixArt("lp", "TOGETHER", title.uppercase(), c?.let { "ar-${it.id}" }, dark.first, dark.second).also { if (s == null) return it }
+                }
+            }
+            "decade" -> decadeArt(rest.toIntOrNull() ?: 2000, "THE MOST PLAYED", first, dark)
+            "season" -> sky(SKY_FOR_SEASON[rest] ?: "dusk", SEASONS.firstOrNull { it.key == rest }?.subtitle?.uppercase().orEmpty())
+            "mood" -> {
+                val mood = MOODS.firstOrNull { it.key == rest }
+                val name = title.removeSuffix(" Mix")
+                if (rest in ENERGETIC_MOODS) MixArt("turntable", mood?.subtitle?.uppercase().orEmpty(), name.uppercase(), first, "#171717", "#ffffff")
+                else sky(SKY_FOR_MOOD[rest] ?: "dusk", mood?.subtitle?.uppercase().orEmpty(), name)
+            }
+            else -> null
+        }
+    }
+
+    private fun decadeArt(start: Int, kicker: String, cover: String?, colours: Pair<String, String>) =
+        MixArt(if (start < 1990) "reel" else "cd", kicker, decadeName(start), cover, colours.first, colours.second)
+
+    /** The person most of [list] is by (its composer), for a mix's photo. */
+    private fun leadPerson(list: List<Int>): String? =
+        list.mapNotNull { songs[it].composer?.id }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key?.let { "ar-$it" }
+
+    private fun <T> Map<String, T>.getOrNull(parts: List<String>, i: Int) = parts.getOrNull(i)?.let { this[it] }
 
     fun song(i: Int): MixSong = songs[i].let { s ->
         MixSong(
@@ -1428,6 +1539,25 @@ class MixMaker(
         val PERSONAL_KINDS = setOf(
             "daily", "daylist", "discover", "fresh", "repeat", "rewind", "friends", "because", "deepcuts", "gems", "artistmix", "topic", "season",
         )
+
+        /** Colour pairs for covers: a dark ground with a bright colour on it, and a bright ground with a dark one. */
+        val DARK_COLOURS = listOf(
+            "#1d1147" to "#ff8a3d", "#06303a" to "#6ee7c8", "#3b0a24" to "#ff5d8f", "#2a0f3d" to "#ffd166", "#0f3b3a" to "#ff9f1c",
+            "#12333a" to "#7be0d0", "#3a1c12" to "#ffb38a", "#2b1840" to "#d7b3ff", "#0f2a1d" to "#9fe870", "#13213f" to "#8fb8ff",
+            "#4b2bd1" to "#e6ddff", "#1b2a4a" to "#ffc857", "#3d1520" to "#ffb4a2", "#102a43" to "#9ae6ff",
+        )
+        val BRIGHT_COLOURS = listOf(
+            "#e9b44c" to "#2a1a02", "#f05d3b" to "#2a0700", "#ff7a45" to "#2b0d00", "#7be0d0" to "#0b2a2e", "#ffd166" to "#2a1a00",
+            "#9fe870" to "#12300a", "#ff8fab" to "#3a0a1c", "#8fb8ff" to "#0c1a3a", "#d7b3ff" to "#2a1240",
+        )
+        private fun <T> pick(id: String, from: List<T>) = from[Math.floorMod(id.hashCode() * 31 + 7, from.size)]
+        private val SKY_FOR_PART = mapOf("morning" to "dawn", "afternoon" to "day", "evening" to "dusk", "night" to "night")
+        private val SKY_FOR_SEASON = mapOf("rain" to "rain", "pongal" to "dawn", "valentine" to "dusk", "deepavali" to "night", "christmas" to "night", "newyear" to "night")
+        private val SKY_FOR_MOOD = mapOf(
+            "chill" to "night", "romance" to "dusk", "happy" to "dawn", "sad" to "rain", "melody" to "dusk", "devotional" to "dawn",
+            "classical" to "day", "focus" to "day", "sleep" to "night", "retro" to "dusk",
+        )
+        private val ENERGETIC_MOODS = setOf("party", "kuthu", "mass", "workout")
 
         /** The Discovery station: endless songs new to you. */
         const val DISCOVERY = "radio-discovery-new"
