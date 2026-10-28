@@ -8,6 +8,21 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Fresh Every Day (0.24.0)
+
+### New
+- **Your top mixes.** A new row of 10 mixes made from your listening, a different handful every day: Because you played…, a composer's or singer's mix (theirs and music like theirs), a composer's melodies or mass songs, "2020s A.R. Rahman", a composer with a singer, Deep Cuts (songs you've never played from albums you love), Hidden Gems (albums nobody here has played), and the moods and decades you play most.
+- **A mix for the time of day.** Made for you starts with one named for the moment, like "Tuesday night melodies": what you play around this time and new songs with the same feeling. It changes through the day, by your phone's clock.
+- **Fresh for You.** Songs added to the library that suit you, every Friday.
+- **Seasons.** Rain Songs, Deepavali, Pongal, Christmas and more turn up while it's their time, songs named for the season first.
+
+### Improved
+- **Home is tidier.** Made for you, then what you played lately, then Your top mixes, then Your stations; the rest follows, and no mix shows twice.
+- **Mixes stop repeating themselves.** Songs you were shown and passed over make way for others (and come back after a few weeks, or as soon as you play them). Discover Weekly never repeats the last 8 weeks, and Daily Mixes follow what you've played in the last two weeks.
+
+### Server
+- `GET /mixes?tz=<time zone>`: the app's time zone, remembered per person (until then `MIX_TIMEZONE`). What each person was shown (`suggestion_lists`) now feeds the mixes.
+
 ## Requested, Quietly (0.23.0)
 
 ### Improved
