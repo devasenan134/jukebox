@@ -8,6 +8,11 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Bigger Labels (2.5.1)
+
+### Improved
+- **The song's cover in the middle of a record is bigger**, so you can tell what's playing at a glance: the spinning record (On Repeat, Top 50, background scores), the turntable (Party, Kuthu, Kollywood Mass, Workout) and Deep Cuts.
+
 ## Covers and Stations (2.5.0)
 
 ### New

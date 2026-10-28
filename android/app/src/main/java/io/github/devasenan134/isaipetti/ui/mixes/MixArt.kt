@@ -254,7 +254,7 @@ private fun BoxScope.Design(g: Grid, mix: Mix, art: MixArt) {
 
         // On Repeat, Top 50, scores: a spinning record, the words round its rim.
         "spin" -> {
-            Record(g, 40, 40, 200f, labelSize = 80f) { Pic(first, Modifier.fillMaxSize(), 200) }
+            Record(g, 40, 40, 200f, labelSize = 132f) { Pic(first, Modifier.fillMaxSize(), 300) }
             val context = LocalContext.current
             val typeface = remember { ResourcesCompat.getFont(context, R.font.cover_space_mono_bold) }
             val text = remember(art.headline) { "${art.headline} • ".repeat(ceil(70.0 / (art.headline.length + 3)).toInt().coerceAtLeast(2)) }
@@ -364,7 +364,7 @@ private fun BoxScope.Design(g: Grid, mix: Mix, art: MixArt) {
 
         // Deep Cuts: a record half out of its paper inner sleeve.
         "paper" -> {
-            Record(g, 96, 40, 200f, labelSize = 76f) { Pic(first, Modifier.fillMaxSize(), 200) }
+            Record(g, 96, 40, 200f, labelSize = 124f) { Pic(first, Modifier.fillMaxSize(), 300) }
             Box(g.at(16, 30, 176, 220).shadow(g.u(10)).background(Color(0xFFC9A274))) {
                 Box(g.at(62, 74, 52, 52).clip(CircleShape).background(ground))
                 Column(Modifier.align(Alignment.BottomStart).padding(start = g.u(14), bottom = g.u(12))) {
@@ -379,7 +379,7 @@ private fun BoxScope.Design(g: Grid, mix: Mix, art: MixArt) {
             Box(g.at(14, 64, 200, 200).shadow(g.u(6), CircleShape).clip(CircleShape).background(Color(0xFF9AA0A6)), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(g.u(188)).clip(CircleShape).background(Color(0xFFD7263D)))
             }
-            Record(g, 26, 76, 176f, labelSize = 64f, hole = 0f) { Pic(first, Modifier.fillMaxSize(), 200) }
+            Record(g, 26, 76, 176f, labelSize = 116f, hole = 0f) { Pic(first, Modifier.fillMaxSize(), 300) }
             Drawing {
                 drawCircle(Color(0xFF3A3A3C), 16f, Offset(244f, 96f))
                 drawCircle(Color(0xFFC9CCD0), 7f, Offset(244f, 96f))

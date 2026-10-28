@@ -168,7 +168,7 @@ function Design({ mix, art }: { mix: Mix; art: MixArt }) {
       const text = `${art.headline} • `.repeat(Math.max(2, Math.ceil(70 / (art.headline.length + 3))))
       return (
         <>
-          <Record left={40} top={40} size={200} labelSize={80} label={<Img id={first} size={200} style={{ width: '100%', height: '100%' }} />}>
+          <Record left={40} top={40} size={200} labelSize={132} label={<Img id={first} size={300} style={{ width: '100%', height: '100%' }} />}>
             <div style={at(20, 20, 160, 160, { borderRadius: '50%', background: 'conic-gradient(from 20deg, transparent 0 60deg, rgba(255,255,255,0.10) 75deg, transparent 90deg 240deg, rgba(255,255,255,0.08) 255deg, transparent 270deg)' })} />
           </Record>
           <svg viewBox="0 0 280 280" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-hidden="true">
@@ -292,7 +292,7 @@ function Design({ mix, art }: { mix: Mix; art: MixArt }) {
     case 'paper':
       return (
         <>
-          <Record left={96} top={40} size={200} labelSize={76} label={<Img id={first} size={200} style={{ width: '100%', height: '100%' }} />} />
+          <Record left={96} top={40} size={200} labelSize={124} label={<Img id={first} size={300} style={{ width: '100%', height: '100%' }} />} />
           <div style={at(16, 30, 176, 220, { background: '#c9a274', boxShadow: `${u(10)} 0 ${u(22)} rgba(0,0,0,0.5)` })}>
             <div style={at(62, 74, 52, 52, { borderRadius: '50%', background: ground })} />
             <div style={{ position: 'absolute', left: u(14), bottom: u(12), display: 'flex', flexDirection: 'column' }}>
@@ -309,7 +309,7 @@ function Design({ mix, art }: { mix: Mix; art: MixArt }) {
         <>
           <div style={at(14, 64, 200, 200, { borderRadius: '50%', background: '#9aa0a6', boxShadow: `0 ${u(6)} ${u(16)} rgba(0,0,0,0.6)` })}>
             <div style={at(6, 6, 188, 188, { borderRadius: '50%', background: '#d7263d' })} />
-            <Record left={12} top={12} size={176} labelSize={64} hole={0} label={<Img id={first} size={200} style={{ width: '100%', height: '100%' }} />} />
+            <Record left={12} top={12} size={176} labelSize={116} hole={0} label={<Img id={first} size={300} style={{ width: '100%', height: '100%' }} />} />
           </div>
           <svg viewBox="0 0 280 280" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} aria-hidden="true">
             <circle cx="244" cy="96" r="16" fill="#3a3a3c" /><circle cx="244" cy="96" r="7" fill="#c9ccd0" />
