@@ -157,6 +157,17 @@ class ScannerTest {
     }
 
     @Test
+    fun `a recording whose only file is missing doesn't count as work left`() = runBlocking {
+        val file = airaa(2, "Megathoodham", 500)
+        scanner.scan(library)
+        file.delete()
+        scanner.scan(library)
+        // Nothing can fingerprint it, so the background loop must be told it's done (not spin on it).
+        assertEquals(0, fingerprints.run().left)
+        assertEquals(1, count("SELECT count(*) FROM recordings WHERE fingerprint IS NULL"))
+    }
+
+    @Test
     fun `a JioSaavn id from the import finds the recording a new file belongs to`() = runBlocking {
         saavnIds["Airaa (2019)/01 - Kaariga.m4a"] = "abc123"
         airaa(1, "Kaariga", 300)
