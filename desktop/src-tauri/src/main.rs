@@ -10,6 +10,11 @@
 // And what the Mac's web view lacks next to a browser: notifications (the page's `Notification` is filled in
 // to call the `notify` command), downloads (saved to Downloads), and links that open a new tab (they open in
 // the default browser). Microphone use, for voice messages, is declared in Info.plist and Entitlements.plist.
+//
+// What's playing goes to macOS Now Playing (Control Center, the media keys, AirPods, apps like Boring Notch):
+// the page calls `media_update` / `media_clear` (web/src/player/player.ts), and Now Playing's buttons come back
+// to it as `window.__jukeboxMedia(action, value)`. And like Music, it pauses when the headphones or speaker it
+// was playing through go away (Bluetooth out of range, unplugged), by watching the Mac's audio outputs.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -20,6 +25,9 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
+use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection};
+use std::sync::Mutex;
+use std::time::Duration;
 
 /// Runs in every page before its own scripts: a `Notification` for pages to use (the web view has none) that
 /// shows a macOS notification through the `notify` command. The website asks for permission and gets it here;
@@ -45,6 +53,103 @@ const NOTIFICATION_SHIM: &str = r#"
 #[tauri::command]
 fn notify(app: AppHandle, title: String, body: String) {
     let _ = app.notification().builder().title(title).body(body).show();
+}
+
+/// macOS Now Playing for this app; None if it couldn't be set up.
+struct NowPlaying(Mutex<Option<MediaControls>>);
+
+// Now Playing is only touched from the main thread (commands that aren't async run there in Tauri), and its
+// buttons call back on the main thread too.
+unsafe impl Send for NowPlaying {}
+unsafe impl Sync for NowPlaying {}
+
+/// What's playing, from the page: the song, its cover (an address), length and place, and whether it plays.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn media_update(
+    now: tauri::State<NowPlaying>, title: String, artist: String, album: String, cover: Option<String>,
+    duration_ms: u64, position_ms: u64, playing: bool,
+) {
+    let Ok(mut guard) = now.0.lock() else { return };
+    let Some(controls) = guard.as_mut() else { return };
+    let _ = controls.set_metadata(MediaMetadata {
+        title: Some(&title),
+        artist: Some(&artist),
+        album: Some(&album),
+        cover_url: cover.as_deref(),
+        duration: Some(Duration::from_millis(duration_ms)),
+    });
+    let progress = Some(MediaPosition(Duration::from_millis(position_ms)));
+    let _ = controls.set_playback(if playing { MediaPlayback::Playing { progress } } else { MediaPlayback::Paused { progress } });
+}
+
+/// Nothing is playing any more.
+#[tauri::command]
+fn media_clear(now: tauri::State<NowPlaying>) {
+    if let Ok(mut guard) = now.0.lock() {
+        if let Some(controls) = guard.as_mut() {
+            let _ = controls.set_playback(MediaPlayback::Stopped);
+        }
+    }
+}
+
+/// Tells the page what Now Playing (or the audio output) asked for: `window.__jukeboxMedia(action, value)`.
+fn tell_page(app: &AppHandle, action: &str, value: Option<f64>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let value = value.map(|v| v.to_string()).unwrap_or_else(|| "undefined".into());
+        let _ = window.eval(&format!("window.__jukeboxMedia && window.__jukeboxMedia('{action}', {value})"));
+    }
+}
+
+/// Sets up Now Playing and passes its buttons (play, pause, next, previous, seeking) to the page.
+fn now_playing(app: &AppHandle) -> Option<MediaControls> {
+    let mut controls = MediaControls::new(PlatformConfig { display_name: "Jukebox", dbus_name: "jukebox", hwnd: None }).ok()?;
+    let handle = app.clone();
+    controls
+        .attach(move |event| match event {
+            MediaControlEvent::Play => tell_page(&handle, "play", None),
+            MediaControlEvent::Pause | MediaControlEvent::Stop => tell_page(&handle, "pause", None),
+            MediaControlEvent::Toggle => tell_page(&handle, "toggle", None),
+            MediaControlEvent::Next => tell_page(&handle, "next", None),
+            MediaControlEvent::Previous => tell_page(&handle, "previous", None),
+            MediaControlEvent::SetPosition(MediaPosition(at)) => tell_page(&handle, "seekto", Some(at.as_secs_f64())),
+            MediaControlEvent::Seek(SeekDirection::Forward) => tell_page(&handle, "seekby", Some(10.0)),
+            MediaControlEvent::Seek(SeekDirection::Backward) => tell_page(&handle, "seekby", Some(-10.0)),
+            MediaControlEvent::SeekBy(SeekDirection::Forward, by) => tell_page(&handle, "seekby", Some(by.as_secs_f64())),
+            MediaControlEvent::SeekBy(SeekDirection::Backward, by) => tell_page(&handle, "seekby", Some(-by.as_secs_f64())),
+            _ => {}
+        })
+        .ok()?;
+    Some(controls)
+}
+
+/// Pauses when the output the music was playing through disappears (Bluetooth headphones out of range,
+/// headphones unplugged): the default output changes and the old one is no longer there. Switching to another
+/// output that's still connected doesn't pause, as in Music.
+fn watch_outputs(app: AppHandle) {
+    std::thread::spawn(move || {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let host = cpal::default_host();
+        let current = |host: &cpal::Host| host.default_output_device().and_then(|d| d.name().ok());
+        let mut last = current(&host);
+        loop {
+            std::thread::sleep(Duration::from_millis(700));
+            let now = current(&host);
+            if now == last {
+                continue;
+            }
+            if let Some(old) = &last {
+                let still_there = host
+                    .output_devices()
+                    .map(|mut devices| devices.any(|d| d.name().ok().as_deref() == Some(old.as_str())))
+                    .unwrap_or(true);
+                if !still_there {
+                    tell_page(&app, "outputgone", None);
+                }
+            }
+            last = now;
+        }
+    });
 }
 
 /// The start page with the server form showing, even when a server is saved.
@@ -106,8 +211,10 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![notify])
+        .invoke_handler(tauri::generate_handler![notify, media_update, media_clear])
         .setup(|app| {
+            app.manage(NowPlaying(Mutex::new(now_playing(app.handle()))));
+            watch_outputs(app.handle().clone());
             // The window from tauri.conf.json, with what the web view needs from the app.
             let config = app.config().app.windows.first().cloned().expect("a window in tauri.conf.json");
             let links = app.handle().clone();

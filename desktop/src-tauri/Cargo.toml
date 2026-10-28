@@ -15,6 +15,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
+# macOS Now Playing (Control Center, media keys, AirPods, apps like Boring Notch) and the audio output in use.
+souvlaki = "0.8"
+cpal = "0.15"
 
 [profile.release]
 codegen-units = 1

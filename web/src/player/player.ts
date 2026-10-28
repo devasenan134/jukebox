@@ -698,6 +698,70 @@ if (ms) {
   }
 }
 
+// ---- The Mac app: macOS Now Playing, and pausing when the headphones go ----
+//
+// The Mac app's web view doesn't tell macOS what's playing (Control Center, media keys, AirPods, Boring Notch
+// read Now Playing), so the app does it (desktop/src-tauri/src/main.rs): the page sends the song and its state,
+// and Now Playing's buttons, and "the output went away", come back as window.__jukeboxMedia(action, value).
+
+type TauriInternals = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> }
+const macApp = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__
+
+function tellMacApp() {
+  if (!macApp) return
+  const s = st()
+  const item = currentItem(s)
+  if (!item) {
+    void macApp.invoke('media_clear').catch(() => {})
+    return
+  }
+  const cover = subsonic.coverUrl(item.song.coverArt, 600)
+  void macApp.invoke('media_update', {
+    title: item.song.title,
+    artist: item.song.artist ?? '',
+    album: item.song.album ?? '',
+    cover: cover ? new URL(cover, location.href).href : null,
+    durationMs: Math.round(s.durationMs || item.song.duration * 1000),
+    positionMs: Math.round(audio.currentTime * 1000),
+    playing: s.isPlaying,
+  }).catch(() => {})
+}
+
+if (macApp) {
+  // A new song, playing or paused, its length known: tell macOS (it moves the time along by itself while playing).
+  usePlayer.subscribe((s, before) => {
+    if (s.current !== before.current || s.isPlaying !== before.isPlaying || s.durationMs !== before.durationMs || s.items !== before.items) tellMacApp()
+  })
+  onSeek(tellMacApp)
+  ;(window as unknown as { __jukeboxMedia?: (action: string, value?: number) => void }).__jukeboxMedia = (action, value) => {
+    switch (action) {
+      case 'play': if (!st().isPlaying) togglePlay(); break
+      case 'pause': if (st().isPlaying) togglePlay(); break
+      case 'toggle': togglePlay(); break
+      case 'next': next(); break
+      case 'previous': previous(); break
+      case 'seekto': if (value != null) seekTo(value * 1000); break
+      case 'seekby': if (value != null) seekTo(Math.max(0, positionMs() + value * 1000)); break
+      // The headphones or speaker it was playing through went away.
+      case 'outputgone': if (st().isPlaying) pause(); break
+    }
+  }
+}
+
+// In a browser: like a phone, pause when the headphones or speaker it was playing through go away (Bluetooth
+// out of range, unplugged): an audio output disappears while playing. Connecting one doesn't pause.
+if (!macApp && navigator.mediaDevices?.enumerateDevices) {
+  const outputs = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput').length
+  let known = -1
+  void outputs().then((n) => (known = n)).catch(() => {})
+  navigator.mediaDevices.addEventListener?.('devicechange', () => {
+    void outputs().then((n) => {
+      if (known >= 0 && n < known && st().isPlaying) pause()
+      known = n
+    }).catch(() => {})
+  })
+}
+
 /** The queue in play order, with each entry's position, and the current position. */
 export function queueInOrder(s: PlayerState = st()) {
   return { entries: s.order.map((i) => s.items[i]), currentPos: s.order.indexOf(s.current) }

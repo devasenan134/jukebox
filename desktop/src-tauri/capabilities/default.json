@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The window shows the Jukebox server the user chose (any address), so its pages may call just one command: notify, to show a notification.",
+  "description": "The window shows the Jukebox server the user chose (any address), so its pages may call only these commands: notify (a notification) and media_update / media_clear (what's playing, for macOS Now Playing).",
   "windows": ["main"],
   "remote": {
     "urls": ["https://*", "http://*"]
   },
-  "permissions": ["allow-notify"]
+  "permissions": ["allow-notify", "allow-media-update", "allow-media-clear"]
 }
