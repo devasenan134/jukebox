@@ -7,6 +7,7 @@ import io.github.devasenan134.jukebox.server.LibrarySong
 import io.github.devasenan134.jukebox.server.MusicSource
 import io.github.devasenan134.jukebox.server.Person
 import io.github.devasenan134.jukebox.server.PlaylistTaste
+import io.github.devasenan134.jukebox.server.SongLabel
 import io.github.devasenan134.jukebox.server.moodScores
 import io.github.devasenan134.jukebox.server.zScores
 import io.github.devasenan134.jukebox.server.playlistTaste
@@ -179,7 +180,16 @@ class JukeboxLibrary(
                 index[rs.getString(1)]?.let { plays[it] = kotlin.math.ln(1.0 + rs.getLong(2)).toFloat() }
             }
         }
-        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm, links, zScores(plays))
+        val labels = arrayOfNulls<SongLabel>(songs.size)
+        db.read {
+            query("SELECT recording_id, moods, energy, valence, themes, instrumental, sure FROM song_labels") { rs ->
+                index[rs.getString(1)]?.let { i ->
+                    fun set(s: String) = s.split(',').filter { it.isNotBlank() }.toSet()
+                    labels[i] = SongLabel(set(rs.getString(2)), rs.getInt(3), rs.getInt(4), set(rs.getString(5)), rs.getInt(6) == 1, rs.getInt(7) == 1)
+                }
+            }
+        }
+        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm, links, zScores(plays), labels)
     }
 
     private fun snapshotIndex(songs: List<LibrarySong>): Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }

@@ -98,6 +98,12 @@ fun main(args: Array<String>) {
         println(report)
         return
     }
+    // Songs' moods and themes from a language model (scripts/labels/label_songs.py): jukebox import-labels <labels.jsonl>
+    if (args.firstOrNull() == "import-labels") {
+        val file = File(args.getOrNull(1) ?: error("import-labels <labels.jsonl> is needed"))
+        println(kotlinx.coroutines.runBlocking { io.github.devasenan134.jukebox.server.library.SongSignals(Db(config.dbPath)).importLabels(file) })
+        return
+    }
     embeddedServer(Netty, port = config.port) { jukeboxServer(config) }.start(wait = true)
 }
 

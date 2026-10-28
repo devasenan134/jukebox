@@ -852,7 +852,8 @@ class MixMaker(
             if (!eligibleSong(i)) continue
             val title = songs[i].title.lowercase()
             val titleWords = title.split(NOT_LETTERS)
-            val named = season.words.count { w -> if (' ' in w) w in title else titleWords.any { it.startsWith(w) } }
+            val named = season.words.count { w -> if (' ' in w) w in title else titleWords.any { it.startsWith(w) } } +
+                (lib.labels[i]?.themes?.count { it in SEASON_THEMES[season.key].orEmpty() } ?: 0)
             val feel = if (feelings.isEmpty() || lib.sound[i] == null) Float.NaN
             else feelings.entries.sumOf { (k, w) -> (lib.moods.getValue(k)[i] * w).toDouble() }.toFloat() / feelings.values.sum()
             if (named == 0 && (feel.isNaN() || feel < 1.2f)) continue
@@ -933,8 +934,41 @@ class MixMaker(
     private val rhythmZ by lazy { zScores(lib.rhythm) }
 
     /** How well each song fits [mood] (NaN if it can't be in it at all), before the cut-off. */
+    /**
+     * How well song [i] fits [mood] (NaN: it can't be in it). A song's labels (a language model's, from what it
+     * knows of the song and its lyrics) decide whether it can: a kuthu at full energy is never Chill, whatever
+     * it sounds like to the analyzer. How it sounds then sorts the ones that fit. Songs without labels go by sound.
+     */
     private fun moodFit(mood: Mood, i: Int): Float {
-        if (!eligibleSong(i) || lib.sound[i] == null) return Float.NaN
+        if (!eligibleSong(i)) return Float.NaN
+        val heard = soundFit(mood, i)
+        val label = lib.labels[i] ?: return heard
+        val fit = labelFit(mood, label) ?: return Float.NaN
+        return fit + 0.5f * (if (heard.isNaN()) 0f else heard)
+    }
+
+    /**
+     * What a song's labels say about [mood]: null if it can't be in it, else how well it fits. Moods that are a
+     * kind of music (Kuthu, Mass, Devotional...) need the label; broad feelings (Chill, Happy, Sad, Melody,
+     * Romance) take songs not named for them only if they sound very much like it.
+     */
+    private fun labelFit(mood: Mood, label: SongLabel): Float? {
+        val calm = mood.energy < 0f || mood.maxEnergy != null
+        if (calm && label.energy >= 4) return null
+        if (mood.energy >= 1f && label.energy <= 2) return null
+        if (mood.key == "focus") return if (label.instrumental) 1.5f else null
+        if (mood.key == "retro") return 0f
+        if (mood.key in label.moods) return if (label.sure) 2f else 1.3f
+        return when {
+            mood.key !in BROAD_MOODS -> null
+            label.sure -> -0.8f
+            else -> -0.3f
+        }
+    }
+
+    /** How well song [i] fits [mood] by how it sounds (the analyzer's descriptions); NaN if it can't be in it. */
+    private fun soundFit(mood: Mood, i: Int): Float {
+        if (lib.sound[i] == null) return Float.NaN
         if (mood.requires.any { (key, min) -> (lib.moods[key]?.get(i) ?: Float.NaN).let { it.isNaN() || it < min } }) return Float.NaN
         if (mood.vetoes.any { (key, max) -> (lib.moods[key]?.get(i) ?: 0f) > max }) return Float.NaN
         if (mood.indianSound) {
@@ -1605,6 +1639,15 @@ class MixMaker(
             "classical" to "day", "focus" to "day", "sleep" to "night", "retro" to "dusk",
         )
         private val ENERGETIC_MOODS = setOf("party", "kuthu", "mass", "workout")
+
+        /** Feelings rather than kinds of music: a song not labelled with one can still be in it if it sounds the part. */
+        private val BROAD_MOODS = setOf("chill", "happy", "sad", "melody", "romance")
+
+        /** Themes (song labels) that belong to a season. */
+        private val SEASON_THEMES = mapOf(
+            "rain" to setOf("rain"), "valentine" to setOf("love"), "deepavali" to setOf("festival", "celebration"),
+            "pongal" to setOf("festival", "village"), "christmas" to setOf("devotion", "festival"), "newyear" to setOf("celebration", "dance"),
+        )
 
         /** The Discovery station: endless songs new to you. */
         const val DISCOVERY = "radio-discovery-new"

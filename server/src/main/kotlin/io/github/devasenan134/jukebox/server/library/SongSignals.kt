@@ -65,4 +65,35 @@ class SongSignals(private val db: Db) {
         db.catalogChanged()
         return "Read $lines songs from ${file.name}: ${links.size} links between library songs, play counts for ${fame.size} songs"
     }
+
+    /**
+     * Adds (or replaces) songs' moods and themes from scripts/labels/label_songs.py's output. Lines: {"id" (a
+     * recording id), "moods", "energy", "valence", "themes", "instrumental", "confidence"}.
+     */
+    suspend fun importLabels(file: File, source: String = "gemini"): String {
+        val json = Json { ignoreUnknownKeys = true }
+        val current = db.read { query("SELECT id, coalesce(merged_into, id) FROM recordings") { it.getString(1) to it.getString(2) }.toMap() }
+        var stored = 0
+        var unknown = 0
+        db.tx {
+            prepareStatement(
+                "INSERT OR REPLACE INTO song_labels (recording_id, moods, energy, valence, themes, instrumental, sure, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ).use { st ->
+                file.forEachLine { line ->
+                    val row = runCatching { json.parseToJsonElement(line).jsonObject }.getOrNull() ?: return@forEachLine
+                    val id = row["id"]?.jsonPrimitive?.contentOrNull?.let(current::get) ?: run { unknown++; return@forEachLine }
+                    fun list(key: String) = row[key]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty().joinToString(",")
+                    fun number(key: String) = row[key]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.coerceIn(1, 5) ?: 3
+                    st.setString(1, id); st.setString(2, list("moods")); st.setInt(3, number("energy")); st.setInt(4, number("valence"))
+                    st.setString(5, list("themes")); st.setInt(6, if (row["instrumental"]?.jsonPrimitive?.booleanOrNull == true) 1 else 0)
+                    st.setInt(7, if (row["confidence"]?.jsonPrimitive?.contentOrNull == "high") 1 else 0); st.setString(8, source)
+                    st.addBatch()
+                    stored++
+                }
+                st.executeBatch()
+            }
+        }
+        db.catalogChanged()
+        return "Stored labels for $stored songs from ${file.name}" + if (unknown > 0) " ($unknown not in the library)" else ""
+    }
 }

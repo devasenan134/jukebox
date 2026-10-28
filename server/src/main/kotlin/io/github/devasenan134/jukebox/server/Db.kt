@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30, SCHEMA_V31, SCHEMA_V32)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30, SCHEMA_V31, SCHEMA_V32, SCHEMA_V33)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -501,6 +501,21 @@ class Db(private val path: String) {
         // time; album_key groups songs of one album into an album request.
         // Requests the queue makes are held (held = 1) until it has gone through everything waiting: then admins
         // are told once, and the requests show (and are filled) from then on.
+        // Moods, energy, positivity and themes a language model gave each song from what it knows of it and its
+        // lyrics (scripts/labels/label_songs.py, imported by SongSignals.importLabels). Lists are comma separated.
+        val SCHEMA_V33 = """
+            CREATE TABLE song_labels (
+                recording_id TEXT PRIMARY KEY,
+                moods TEXT NOT NULL,
+                energy INTEGER NOT NULL,
+                valence INTEGER NOT NULL,
+                themes TEXT NOT NULL,
+                instrumental INTEGER NOT NULL,
+                sure INTEGER NOT NULL,
+                source TEXT NOT NULL
+            )
+        """.trimIndent()
+
         // What other services know about songs (library/SongSignals.kt): songs their listeners play together
         // (song_links, best first) and how often each song is played there (song_fame). Imported, not scanned.
         val SCHEMA_V32 = """
