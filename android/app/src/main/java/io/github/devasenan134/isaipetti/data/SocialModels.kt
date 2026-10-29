@@ -191,6 +191,10 @@ data class Conversation(
 @Serializable
 sealed interface SocialEvent
 
+/** Something you played (here or on another device): fetch Recently played again. */
+@Serializable @SerialName("recentsChanged")
+data object RecentsChangedEvent : SocialEvent
+
 @Serializable @SerialName("presence")
 data class PresenceEvent(val userId: Long, val online: Boolean, val nowPlaying: SongRef? = null) : SocialEvent
 

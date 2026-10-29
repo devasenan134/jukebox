@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.media3.common.Player
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -194,6 +196,14 @@ fun MiniPlayer(onOpen: () -> Unit) {
                     }
                 } else {
                     if (ownsJam) JamSpinner(spinning = now.isPlaying)
+                    // Repeat: off → the queue → this song (lit up while on).
+                    IconButton(onClick = player::cycleRepeat) {
+                        Icon(
+                            painterResource(if (now.repeatMode == Player.REPEAT_MODE_ONE) R.drawable.ic_repeat_one else R.drawable.ic_repeat),
+                            contentDescription = "Repeat",
+                            tint = if (now.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        )
+                    }
                     IconButton(onClick = player::togglePlay) {
                         Icon(
                             painterResource(if (now.isPlaying) R.drawable.ic_pause else R.drawable.ic_play),

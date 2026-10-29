@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 import { keys, playlistChanged, prefetchAlbum, queryClient } from '../state/queries'
 import { useMyPlaylists } from '../state/library'
 import { activity, queueMemory } from '../state/history'
-import { session } from '../state/session'
+import { session, useSession } from '../state/session'
 import * as player from '../player/player'
 import { usePlayer, currentItem } from '../player/player'
 import { useListen } from '../social/listen'
@@ -577,8 +577,17 @@ export function PlayShuffleRow({ onPlay, onShuffle, children, resume }: {
  */
 function ResumeButton({ source, songs, onResume }: { source: string; songs: Song[]; onResume?: () => void }) {
   const playingFrom = usePlayer((s) => currentItem(s)?.source)
+  // Where you left off on any of your devices (the server's), or here, whichever is newer.
+  const signedIn = useSession((s) => !!s.social)
+  const fromServer = useQuery({
+    queryKey: ['resume', source],
+    queryFn: () => social.resumePoint(source).catch(() => null),
+    enabled: signedIn,
+    staleTime: 0,
+  }).data
   if (playingFrom === source) return null
-  const saved = queueMemory.get(source)
+  const local = queueMemory.get(source)
+  const saved = fromServer && (!local || fromServer.savedAt > local.savedAt) ? fromServer : local
   const byId = new Map(songs.map((s) => [s.id, s]))
   const current = saved && byId.get(saved.currentId)
   if (!saved || !current) return null

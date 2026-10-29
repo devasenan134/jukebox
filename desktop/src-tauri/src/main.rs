@@ -63,13 +63,20 @@ struct NowPlaying(Mutex<Option<MediaControls>>);
 unsafe impl Send for NowPlaying {}
 unsafe impl Sync for NowPlaying {}
 
-/// What's playing, from the page: the song, its cover (an address), length and place, and whether it plays.
+/// What's playing, from the page: the song, its cover (an address), length and place, whether it plays, and
+/// repeat ("off", "all" or "one"; pages from before it was sent leave it out).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn media_update(
     now: tauri::State<NowPlaying>, title: String, artist: String, album: String, cover: Option<String>,
-    duration_ms: u64, position_ms: u64, playing: bool,
+    duration_ms: u64, position_ms: u64, playing: bool, repeat: Option<String>,
 ) {
+    #[cfg(target_os = "macos")]
+    if let Some(mode) = &repeat {
+        repeat::show(mode);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = repeat;
     let Ok(mut guard) = now.0.lock() else { return };
     let Some(controls) = guard.as_mut() else { return };
     let _ = controls.set_metadata(MediaMetadata {
@@ -121,6 +128,43 @@ fn now_playing(app: &AppHandle) -> Option<MediaControls> {
         })
         .ok()?;
     Some(controls)
+}
+
+/// Repeat in Now Playing (souvlaki has none): the system's repeat button (Control Center, Boring Notch) sets the
+/// page's repeat as `window.__jukeboxMedia('repeat', 0 | 1 | 2)` (off, one, all), and the page's repeat shows on it.
+#[cfg(target_os = "macos")]
+mod repeat {
+    use super::{tell_page, AppHandle};
+    use block2::RcBlock;
+    use objc2_media_player::{
+        MPChangeRepeatModeCommandEvent, MPRemoteCommandCenter, MPRemoteCommandEvent, MPRemoteCommandHandlerStatus, MPRepeatType,
+    };
+    use std::ptr::NonNull;
+
+    pub fn listen(app: AppHandle) {
+        unsafe {
+            let command = MPRemoteCommandCenter::sharedCommandCenter().changeRepeatModeCommand();
+            command.setEnabled(true);
+            let handler = RcBlock::new(move |event: NonNull<MPRemoteCommandEvent>| -> MPRemoteCommandHandlerStatus {
+                // This command only sends repeat events.
+                let event = &*(event.as_ptr() as *const MPChangeRepeatModeCommandEvent);
+                let mode = event.repeatType();
+                let value = if mode == MPRepeatType::One { 1.0 } else if mode == MPRepeatType::All { 2.0 } else { 0.0 };
+                tell_page(&app, "repeat", Some(value));
+                MPRemoteCommandHandlerStatus::Success
+            });
+            let _ = command.addTargetWithHandler(&handler);
+        }
+    }
+
+    pub fn show(mode: &str) {
+        let kind = match mode {
+            "one" => MPRepeatType::One,
+            "all" => MPRepeatType::All,
+            _ => MPRepeatType::Off,
+        };
+        unsafe { MPRemoteCommandCenter::sharedCommandCenter().changeRepeatModeCommand().setCurrentRepeatType(kind) };
+    }
 }
 
 /// Pauses when the output the music was playing through disappears (Bluetooth headphones out of range,
@@ -214,6 +258,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![notify, media_update, media_clear])
         .setup(|app| {
             app.manage(NowPlaying(Mutex::new(now_playing(app.handle()))));
+            #[cfg(target_os = "macos")]
+            repeat::listen(app.handle().clone());
             watch_outputs(app.handle().clone());
             // The window from tauri.conf.json, with what the web view needs from the app.
             let config = app.config().app.windows.first().cloned().expect("a window in tauri.conf.json");

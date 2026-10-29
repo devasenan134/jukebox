@@ -9,6 +9,7 @@ import { onPlayback } from '../player/player'
 import { toast } from '../ui/kit'
 import { getDeviceId, getDeviceName, getClientType } from '../state/deviceIdentity'
 import { syncCurrentPlayback } from '../state/devices'
+import { syncRecents } from '../state/history'
 
 /**
  * Everything friends-related the UI needs, kept up to date live (port of social/Social.kt).
@@ -176,6 +177,7 @@ function runSocket(): Promise<void> {
     socket = ws
     ws.onopen = () => {
       setS({ status: 'Online' })
+      void syncRecents()
       sendEvent({ type: 'appState', visible: visible() })
       if (nowPlaying) sendEvent({ type: 'nowPlaying', song: nowPlaying })
       syncCurrentPlayback()
@@ -309,6 +311,9 @@ function handle(event: SocialEvent) {
     }
     case 'friendRequest':
       void refreshRequests()
+      break
+    case 'recentsChanged':
+      void syncRecents()
       break
     case 'conversationUpdated':
       void refreshConversations()

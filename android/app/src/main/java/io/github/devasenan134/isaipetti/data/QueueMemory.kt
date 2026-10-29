@@ -9,7 +9,8 @@ import kotlinx.serialization.json.Json
 
 /**
  * Where you left off in a playlist: the queue in the order it was playing (so a shuffled order is
- * kept as it was) and which song you were on. Not the position inside the song. Kept on the phone.
+ * kept as it was) and which song you were on. Not the position inside the song. Kept on the phone, and sent
+ * to the server ([onSaved]) so Resume shows on your other devices too.
  */
 class QueueMemory(context: Context) {
     private val prefs = context.getSharedPreferences("queues", Context.MODE_PRIVATE)
@@ -20,8 +21,13 @@ class QueueMemory(context: Context) {
     fun get(source: String): Saved? =
         prefs.getString(source, null)?.let { runCatching { Json.decodeFromString(Saved.serializer(), it) }.getOrNull() }
 
+    var onSaved: (source: String, songIds: List<String>, currentId: String) -> Unit = { _, _, _ -> }
+
     fun save(source: String, songIds: List<String>, currentId: String) {
         if (songIds.isEmpty()) return
+        // Only a change goes to the server (this runs on every change in the player).
+        get(source)?.let { if (it.currentId == currentId && it.songIds == songIds) return }
+        onSaved(source, songIds, currentId)
         val now = System.currentTimeMillis()
         // A small index of when each one was saved, so old ones can be dropped without reading them all.
         val index = savedTimes() + (source to now)

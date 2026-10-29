@@ -16,6 +16,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.CommandButton
+import android.os.Bundle
 import androidx.media3.session.MediaSessionService
 import io.github.devasenan134.isaipetti.IsaipettiApp
 import io.github.devasenan134.isaipetti.data.OfflineDownloads
@@ -87,6 +91,12 @@ class PlaybackService : MediaSessionService() {
             .setSessionActivity(openApp)
             .setCallback(SessionCallback())
             .build()
+        // The repeat button in the notification and on the lock screen shows the current mode.
+        player.addListener(object : Player.Listener {
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                session?.setMediaButtonPreferences(listOf(repeatButton(repeatMode)))
+            }
+        })
 
         startScrobbling(player)
         rememberQueues(player)
@@ -216,7 +226,47 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
+    /** The notification's and lock screen's repeat button: off → the queue → this song, like the app's. */
+    private val repeatCommand = SessionCommand("io.github.devasenan134.isaipetti.REPEAT", Bundle.EMPTY)
+
+    @OptIn(UnstableApi::class)
+    private fun repeatButton(mode: Int): CommandButton = CommandButton.Builder(
+        when (mode) {
+            Player.REPEAT_MODE_ONE -> CommandButton.ICON_REPEAT_ONE
+            Player.REPEAT_MODE_ALL -> CommandButton.ICON_REPEAT_ALL
+            else -> CommandButton.ICON_REPEAT_OFF
+        },
+    )
+        .setDisplayName(when (mode) { Player.REPEAT_MODE_ONE -> "Repeating this song"; Player.REPEAT_MODE_ALL -> "Repeating all"; else -> "Repeat" })
+        .setSessionCommand(repeatCommand)
+        .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+        .build()
+
+    @OptIn(UnstableApi::class)
     private inner class SessionCallback : MediaSession.Callback {
+        // Every controller (the notification, the lock screen, the app) may use the repeat button too.
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+            MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().add(repeatCommand).build())
+                .setMediaButtonPreferences(listOf(repeatButton(session.player.repeatMode)))
+                .build()
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != repeatCommand.customAction) return super.onCustomCommand(session, controller, customCommand, args)
+            val player = session.player
+            player.repeatMode = when (player.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
         // Items sent from the UI arrive without their address, so rebuild it from the song id.
         override fun onAddMediaItems(
             mediaSession: MediaSession,

@@ -19,6 +19,11 @@ tauri-plugin-updater = "2"
 souvlaki = "0.8"
 cpal = "0.15"
 
+# Repeat in Now Playing, which souvlaki doesn't do: macOS's remote command center, directly.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPRemoteControlTypes"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

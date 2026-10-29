@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import io.github.devasenan134.isaipetti.data.QueueMemory
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import io.github.devasenan134.isaipetti.data.MissingSong
@@ -537,8 +539,11 @@ private fun shortDate(iso: String): String = runCatching {
 internal fun ResumeButton(source: String, songs: List<Song>, onResume: () -> Unit = {}) {
     val app = LocalApp.current
     val now by app.player.nowPlaying.collectAsStateWithLifecycle()
+    // Where you left off on any of your devices (the server's), or here, whichever is newer.
+    val fromServer by produceState<QueueMemory.Saved?>(null, source) { value = runCatching { app.social.api.resumePoint(source) }.getOrNull() }
     if (now.source == source) return // already playing from here
-    val saved = remember(source, songs, now.source) { app.queueMemory.get(source) } ?: return
+    val local = remember(source, songs, now.source) { app.queueMemory.get(source) }
+    val saved = fromServer?.takeIf { server -> local == null || server.savedAt > local.savedAt } ?: local ?: return
     val byId = songs.associateBy { it.id }
     val current = byId[saved.currentId] ?: return
     OutlinedButton(onClick = {

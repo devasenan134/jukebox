@@ -150,6 +150,14 @@ export interface DevicePlaybackState {
 }
 
 /** Live events from the server's WebSocket ("type" tells which). */
+/** Where you left off in a playlist, movie or Liked songs, kept by the server for all your devices. */
+export interface ResumePoint {
+  source: string
+  songIds: string[]
+  currentId: string
+  savedAt: number
+}
+
 export type SocialEvent =
   | { type: 'presence'; userId: number; online: boolean; nowPlaying?: SongRef }
   | { type: 'message'; message: ChatMessage }
@@ -164,6 +172,8 @@ export type SocialEvent =
   | { type: 'messageUpdated'; message: ChatMessage }
   | { type: 'listenState'; conversationId: number; state: ListenState; by: number; serverTime: number }
   | { type: 'devices'; activeDeviceId: string | null; devices: DeviceInfo[] }
+  /** Something you played on another device (or this one): fetch Recently played again. */
+  | { type: 'recentsChanged' }
   | {
       type: 'remoteCommand'
       commandId: string

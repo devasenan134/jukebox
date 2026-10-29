@@ -33,6 +33,7 @@ import io.github.devasenan134.isaipetti.data.TypingUpdate
 import io.github.devasenan134.isaipetti.data.MessageUpdatedEvent
 import io.github.devasenan134.isaipetti.data.NowPlayingUpdate
 import io.github.devasenan134.isaipetti.data.PresenceEvent
+import io.github.devasenan134.isaipetti.data.RecentsChangedEvent
 import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.SocialApi
 import io.github.devasenan134.isaipetti.data.SocialEvent
@@ -368,6 +369,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     scope.launch {
                         _status.value = Status.Online
+                        onRecentsChanged()
                         sendEvent(AppStateUpdate(foreground.value))
                         nowPlaying?.let { sendEvent(NowPlayingUpdate(it)) }
                         listen.onConnected()
@@ -393,6 +395,9 @@ class Social(private val context: Context, private val session: SessionStore, pr
         socket = null
     }
 
+    /** Fetches Recently played again (IsaipettiApp.syncRecents): on connecting, and when another device played something. */
+    var onRecentsChanged: () -> Unit = {}
+
     private suspend fun handle(event: SocialEvent) {
         when (event) {
             is PresenceEvent -> _friends.update { list ->
@@ -406,6 +411,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 refreshConversations()
             }
             is FriendRequestEvent -> refreshRequests()
+            is RecentsChangedEvent -> onRecentsChanged()
             is ConversationUpdatedEvent -> refreshConversations()
             is TypingEvent -> _typing.update { all ->
                 all + (event.conversationId to (all[event.conversationId].orEmpty() + (event.userId to System.currentTimeMillis())))

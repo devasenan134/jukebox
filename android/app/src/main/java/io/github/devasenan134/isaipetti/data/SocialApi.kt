@@ -311,6 +311,20 @@ class SocialApi(
             }
         }
 
+    // Recently played and Resume, the same on all your devices (Recents.kt on the server).
+    suspend fun recents(): List<RecentActivity.Item> = get("/me/recents")
+    suspend fun recentPlayed(item: RecentActivity.Item) =
+        send<Unit>("POST", "/me/recents", json.encodeToString(RecentActivity.Item.serializer(), item))
+    suspend fun forgetRecent(kind: String, id: String) = send<Unit>("DELETE", "/me/recents/${enc(kind)}/${enc(id)}", null)
+    suspend fun clearRecents() = send<Unit>("DELETE", "/me/recents", null)
+    suspend fun resumePoint(source: String): QueueMemory.Saved? = try {
+        get("/me/resume?source=${enc(source)}")
+    } catch (e: SocialException) {
+        if (e.code == 404) null else throw e
+    }
+    suspend fun saveResumePoint(source: String, songIds: List<String>, currentId: String) =
+        send<Unit>("PUT", "/me/resume", json.encodeToString(ResumeBody.serializer(), ResumeBody(source, songIds, currentId)))
+
     /** This server's Firebase settings for push notifications, or null if it has none. */
     suspend fun pushConfig(): PushConfig? = try {
         get("/push/config")
@@ -371,6 +385,7 @@ class SocialApi(
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)
     @Serializable private data class PlaylistBody(val id: String, val name: String = "", val coverArt: String? = null, val songCount: Int = 0)
+    @Serializable private data class ResumeBody(val source: String, val songIds: List<String>, val currentId: String)
     @Serializable private data class RadioBody(val id: String, val exclude: List<String>, val count: Int, val skipped: List<String> = emptyList())
     @Serializable private data class RecommendBody(val songIds: List<String>, val count: Int, val page: Int)
     @Serializable private data class PlaysBody(val events: List<PlayEvent>)

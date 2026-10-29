@@ -40,6 +40,7 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   const item = usePlayer((s) => currentItem(s))
   const isPlaying = usePlayer((s) => s.isPlaying)
   const durationMs = usePlayer((s) => s.durationMs)
+  const repeat = usePlayer((s) => s.repeat)
   const position = usePosition(500)
   const { ownsJam, listening } = useJamRole()
 
@@ -147,6 +148,18 @@ export function MiniPlayer({ onOpen }: { onOpen: () => void }) {
                 size={22}
                 title="You're running a jam"
                 style={{ color: 'var(--primary)', marginRight: 4, animation: 'spin 2.4s linear infinite', animationPlayState: displayPlaying ? 'running' : 'paused' }}
+              />
+            )}
+            {/* Repeat: off → the queue → this song (lit up while on). Not for music playing on another device. */}
+            {!isRemote && (
+              <IconButton
+                icon={repeat === 'one' ? 'repeat_one' : 'repeat'}
+                label="Repeat"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  player.cycleRepeat()
+                }}
+                style={{ color: repeat !== 'off' ? 'var(--primary)' : '#fff' }}
               />
             )}
             <IconButton

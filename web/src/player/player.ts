@@ -381,7 +381,12 @@ export function toggleShuffle() {
 /** off -> repeat all -> repeat one -> off */
 export function cycleRepeat() {
   if (locked()) return
-  const repeat: RepeatMode = st().repeat === 'off' ? 'all' : st().repeat === 'all' ? 'one' : 'off'
+  setRepeat(st().repeat === 'off' ? 'all' : st().repeat === 'all' ? 'one' : 'off')
+}
+
+/** Sets repeat to [repeat] (the Mac's Now Playing repeat button asks for a mode, not the next one). */
+export function setRepeat(repeat: RepeatMode) {
+  if (locked()) return
   setSt({ repeat })
   persist()
 }
@@ -724,13 +729,14 @@ function tellMacApp() {
     durationMs: Math.round(s.durationMs || item.song.duration * 1000),
     positionMs: Math.round(audio.currentTime * 1000),
     playing: s.isPlaying,
+    repeat: s.repeat,
   }).catch(() => {})
 }
 
 if (macApp) {
   // A new song, playing or paused, its length known: tell macOS (it moves the time along by itself while playing).
   usePlayer.subscribe((s, before) => {
-    if (s.current !== before.current || s.isPlaying !== before.isPlaying || s.durationMs !== before.durationMs || s.items !== before.items) tellMacApp()
+    if (s.current !== before.current || s.isPlaying !== before.isPlaying || s.durationMs !== before.durationMs || s.items !== before.items || s.repeat !== before.repeat) tellMacApp()
   })
   onSeek(tellMacApp)
   ;(window as unknown as { __jukeboxMedia?: (action: string, value?: number) => void }).__jukeboxMedia = (action, value) => {
@@ -744,6 +750,8 @@ if (macApp) {
       case 'seekby': if (value != null) seekTo(Math.max(0, positionMs() + value * 1000)); break
       // The headphones or speaker it was playing through went away.
       case 'outputgone': if (st().isPlaying) pause(); break
+      // Now Playing's repeat button: 0 off, 1 this song, 2 the queue.
+      case 'repeat': setRepeat(value === 1 ? 'one' : value === 2 ? 'all' : 'off'); break
     }
   }
 }

@@ -68,6 +68,8 @@ private data class HomeData(
 fun HomeScreen(nav: Nav) {
     val app = LocalApp.current
     val recentlyPlayed by app.activity.items.collectAsStateWithLifecycle()
+    // What your other devices played since (also kept up to date live).
+    LaunchedEffect(Unit) { app.syncRecents() }
     val playedSongs by app.recent.songs.collectAsStateWithLifecycle()
     val recents = remember(playedSongs, recentlyPlayed) { splitRecents(playedSongs, recentlyPlayed) }
     val nowPlaying by app.player.nowPlaying.collectAsStateWithLifecycle()

@@ -121,6 +121,7 @@ fun Application.jukeboxServer(
     val db = Db(config.dbPath)
     val friends = Friends(db)
     val hub = Hub(friends::friendIds)
+    val recents = Recents(db, hub)
     friends.hub = hub
     // Passwords are kept encrypted with a key that lives next to the database (docs/milestone-2.md).
     val signIn = SignIn(db, Passwords(File(File(config.dbPath).absoluteFile.parentFile, "secret.key")))
@@ -336,6 +337,19 @@ fun Application.jukeboxServer(
                 accounts.changePassword(call.me(), body.current, body.new, token)
                 call.respond(HttpStatusCode.NoContent)
             }
+            // Recently played and Resume, the same on every device (Recents.kt).
+            get("/me/recents") { call.respond(recents.list(call.me())) }
+            post("/me/recents") { recents.played(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }
+            delete("/me/recents") { recents.clear(call.me()); call.respond(HttpStatusCode.NoContent) }
+            delete("/me/recents/{kind}/{id}") {
+                recents.forget(call.me(), call.parameters["kind"].orEmpty(), call.parameters["id"].orEmpty())
+                call.respond(HttpStatusCode.NoContent)
+            }
+            get("/me/resume") {
+                val source = call.request.queryParameters["source"] ?: throw ApiError(HttpStatusCode.BadRequest, "?source= is needed")
+                call.respond(recents.resumePoint(call.me(), source) ?: throw ApiError(HttpStatusCode.NotFound, "Nothing to resume"))
+            }
+            put("/me/resume") { recents.saveResumePoint(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }
             // Profile pictures: the body is the image itself.
             put("/me/avatar") { call.respond(pictures.setAvatar(call.me().id, Picture(call.receive<ByteArray>()))) }
             delete("/me/avatar") { call.respond(pictures.removeAvatar(call.me().id)) }

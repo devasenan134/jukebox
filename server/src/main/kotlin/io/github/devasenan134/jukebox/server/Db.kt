@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30, SCHEMA_V31, SCHEMA_V32, SCHEMA_V33)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30, SCHEMA_V31, SCHEMA_V32, SCHEMA_V33, SCHEMA_V34)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -501,6 +501,30 @@ class Db(private val path: String) {
         // time; album_key groups songs of one album into an album request.
         // Requests the queue makes are held (held = 1) until it has gone through everything waiting: then admins
         // are told once, and the requests show (and are filled) from then on.
+        // What each person played recently and where they left off (Recents.kt), the same on all their devices.
+        val SCHEMA_V34 = """
+            CREATE TABLE recent_items (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                cover_art TEXT,
+                song_json TEXT,
+                played_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, kind, item_id)
+            );
+            CREATE INDEX recent_items_by_time ON recent_items(user_id, played_at);
+            CREATE TABLE resume_points (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                song_ids TEXT NOT NULL,
+                current_id TEXT NOT NULL,
+                saved_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, source)
+            )
+        """.trimIndent()
+
         // Moods, energy, positivity and themes a language model gave each song from what it knows of it and its
         // lyrics (scripts/labels/label_songs.py, imported by SongSignals.importLabels). Lists are comma separated.
         val SCHEMA_V33 = """

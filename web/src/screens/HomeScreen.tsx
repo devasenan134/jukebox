@@ -4,7 +4,7 @@ import { refToSong } from '../api/types'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { currentItem, usePlayer } from '../player/player'
-import { activity, useActivity, useRecentPlaylists, useRecentSongs, type ActivityItem, type ActivityKind } from '../state/history'
+import { activity, syncRecents, useActivity, useRecentPlaylists, useRecentSongs, type ActivityItem, type ActivityKind } from '../state/history'
 import { useDevices } from '../state/devices'
 import { useMixes } from '../state/library'
 import { AlbumCard, CardPlay, Cover, playAlbum, SectionTitle, SongRow, SpinningDisc, useLoad } from '../ui/components'
@@ -74,6 +74,8 @@ export function HomeScreen() {
   const [hovered, setHovered] = useState<string | undefined>()
   const [tint, setTint] = useState('hsl(30 55% 28%)')
   useEffect(() => useMixes.getState().refresh(), [])
+  // What your other devices played since (also kept up to date live, see social.ts).
+  useEffect(() => void syncRecents(), [])
   const lists = useLoad(['home', 'lists'], async () => {
     const [recent, frequent, newest] = await Promise.all([
       subsonic.albumList('recent', 20),

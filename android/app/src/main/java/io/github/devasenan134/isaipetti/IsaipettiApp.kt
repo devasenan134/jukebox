@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti
 
+import io.github.devasenan134.isaipetti.data.SocialApi
 import io.github.devasenan134.isaipetti.data.toRef
 import io.github.devasenan134.isaipetti.data.Song
 import android.app.Application
@@ -134,6 +135,15 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         recentPlaylists = RecentPlaylists(this)
         queueMemory = QueueMemory(this)
         activity = RecentActivity(this)
+        // Recently played and Resume, the same on all your devices: changes go to the server, and come back
+        // from it on connecting, on Home and when another device played something (Recents.kt).
+        activity.onPlayed = { item -> toServer { it.recentPlayed(item.copy(playedAt = 0)) } }
+        activity.onForget = { kind, id -> toServer { it.forgetRecent(kind.name, id) } }
+        recent.onPlayed = { song ->
+            toServer { it.recentPlayed(RecentActivity.Item(RecentActivity.Kind.Song, song.id, song.title, song.artist, song.coverArt, song = song)) }
+        }
+        queueMemory.onSaved = { source, ids, current -> toServer { it.saveResumePoint(source, ids, current) } }
+        social.onRecentsChanged = { syncRecents() }
         searches = SearchHistory(this)
         likes = Likes(this, api, session) { social.api }
         myPlaylists = MyPlaylists(api, session)
@@ -144,6 +154,23 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         }
         appScope.launch { updates.checkNowAndThen() }
         Notifications.createChannels(this)
+    }
+
+    /** Sends something to your account on the server, quietly (it's kept on the phone either way). */
+    private fun toServer(call: suspend (SocialApi) -> Unit) {
+        if (session.credentials.value == null) return
+        appScope.launch { runCatching { call(social.api) } }
+    }
+
+    /** Takes in what any of your devices played (the server's Recently played) into Home's lists. */
+    fun syncRecents() {
+        if (session.credentials.value == null) return
+        appScope.launch {
+            runCatching { social.api.recents() }.onSuccess { items ->
+                activity.merge(items)
+                recent.merge(items.filter { it.kind == RecentActivity.Kind.Song }.mapNotNull { it.song })
+            }
+        }
     }
 }
 
