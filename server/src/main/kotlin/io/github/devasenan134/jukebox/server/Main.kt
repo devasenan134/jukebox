@@ -91,6 +91,19 @@ fun main(args: Array<String>) {
         println(eventJson.encodeToString(ImportReport.serializer(), report))
         return
     }
+    // JioSaavn's "similar songs" and play counts for the library (library/SongSignals.kt): jukebox import-saavn <saavn_reco.jsonl>
+    if (args.firstOrNull() == "import-saavn") {
+        val file = File(args.getOrNull(1) ?: error("import-saavn <saavn_reco.jsonl> is needed"))
+        val report = kotlinx.coroutines.runBlocking { io.github.devasenan134.jukebox.server.library.SongSignals(Db(config.dbPath)).importSaavn(file) }
+        println(report)
+        return
+    }
+    // Songs' moods and themes from a language model (scripts/labels/label_songs.py): jukebox import-labels <labels.jsonl>
+    if (args.firstOrNull() == "import-labels") {
+        val file = File(args.getOrNull(1) ?: error("import-labels <labels.jsonl> is needed"))
+        println(kotlinx.coroutines.runBlocking { io.github.devasenan134.jukebox.server.library.SongSignals(Db(config.dbPath)).importLabels(file) })
+        return
+    }
     embeddedServer(Netty, port = config.port) { jukeboxServer(config) }.start(wait = true)
 }
 

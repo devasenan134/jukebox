@@ -27,6 +27,14 @@ data class LibrarySong(
 data class Person(val id: String, val name: String)
 
 /**
+ * What a language model said about a song (song_labels): 1–3 moods (the keys of [MixMaker.MOODS]), energy and
+ * valence from 1 (calm, sad) to 5 (intense, happy), themes, whether it has no singing, and whether it was sure.
+ */
+data class SongLabel(
+    val moods: Set<String>, val energy: Int, val valence: Int, val themes: Set<String>, val instrumental: Boolean, val sure: Boolean,
+)
+
+/**
  * Everything the mixes are made from, as of one moment: the songs, and (if the analyzer has run)
  * what each one sounds like. Song positions in [songs] are used as indexes everywhere.
  */
@@ -44,6 +52,12 @@ class LibrarySnapshot(
     val version: String,
     /** How punchy the beats are (onset strength); NaN if unknown. */
     val rhythm: FloatArray = FloatArray(songs.size) { Float.NaN },
+    /** Per song: the songs a big service's listeners play with it (JioSaavn's recommendations), best first. */
+    val links: Array<IntArray> = Array(songs.size) { IntArray(0) },
+    /** Per song: how much it's played on that service (z-score of log plays); NaN if unknown. */
+    val fame: FloatArray = FloatArray(songs.size) { Float.NaN },
+    /** Per song: its moods and themes from a language model; null if it wasn't labelled. */
+    val labels: Array<SongLabel?> = arrayOfNulls(songs.size),
 ) {
     val index: Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }
 
@@ -57,6 +71,13 @@ class LibrarySnapshot(
         songs.forEachIndexed { i, s -> s.singers.forEach { getOrPut(it.id) { mutableListOf() } += i } }
     }
     val byAlbum: Map<String, List<Int>> = songs.indices.groupBy { songs[it].albumId }
+
+    /** Per song: the songs that list it in [links], with its place in their list. */
+    val linkedBy: Array<List<Pair<Int, Int>>> by lazy {
+        val out = Array(songs.size) { mutableListOf<Pair<Int, Int>>() }
+        links.forEachIndexed { from, list -> list.forEachIndexed { rank, to -> out[to] += from to rank } }
+        out.map { it.toList() }.toTypedArray()
+    }
     val people: Map<String, Person> = buildMap {
         songs.forEach { s -> s.composer?.let { put(it.id, it) }; s.singers.forEach { put(it.id, it) } }
     }

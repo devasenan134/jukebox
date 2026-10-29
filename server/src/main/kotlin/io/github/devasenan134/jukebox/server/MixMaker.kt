@@ -99,6 +99,26 @@ data class MixDto(
 
 @Serializable data class MixSection(val id: String, val title: String, val mixes: List<MixDto>)
 
+/**
+ * How much each sign counts when songs are compared ([MixMaker.similarTo]) and how much a song being well known
+ * counts in suggestions. MixEval (test code) scores other settings against people's own playlists and listening.
+ */
+data class Tuning(
+    /** A big service's listeners play the songs together (JioSaavn's recommendations). */
+    val links: Float = 3f,
+    /** People here play them together, or put them in one playlist. */
+    val together: Float = 3f,
+    /** They sound alike. */
+    val sound: Float = 1f,
+    // Composer and era count more than they used to: songs one person plays in a row share a composer 4 times
+    // in 10, and nearly every song of their playlists shares one with the rest (MixEval, 2026-10-28).
+    val composer: Float = 2f,
+    val singer: Float = 0.8f,
+    val year: Float = 1.2f,
+    /** Songs that are played a lot on that service come a little sooner in suggestions. */
+    val fame: Float = 0.25f,
+)
+
 /** How often someone skipped a song early vs. listened to it (reported by the app). */
 data class SkipStats(val skips: Int, val listens: Int)
 
@@ -130,6 +150,7 @@ class MixMaker(
     private val shown: List<ShownList> = emptyList(),
     /** Their time zone, for the time of day (daylist) and the day a week starts. */
     private val zone: ZoneId = ZoneOffset.UTC,
+    private val tuning: Tuning = Tuning(),
 ) {
     private val n = lib.songs.size
     private val songs = lib.songs
@@ -231,7 +252,7 @@ class MixMaker(
             var a = sound?.get(i)?.takeIf { !it.isNaN() } ?: 0f
             a += 1.5f * (s.composer?.let { composerLove[it.id] } ?: 0.0).toFloat()
             a += 0.8f * (s.singers.maxOfOrNull { singerLove[it.id] ?: 0.0 } ?: 0.0).toFloat()
-            if (!hasTaste) a += 0.3f * ln(1.0 + (popularity[i] ?: 0)).toFloat()
+            if (!hasTaste) a += 0.3f * ln(1.0 + (popularity[i] ?: 0)).toFloat() + 0.4f * known(i)
             a
         }
     }
@@ -448,7 +469,7 @@ class MixMaker(
     private val discoverSongs: List<Int> by lazy {
         if (likedSongs.size < 3) return@lazy emptyList()
         val scores = similarTo(likedSongs.take(60), languages = yourLanguages.keys)
-        for (i in 0 until n) scores[i] += 0.3f * affinity[i] + 0.4f * ln(1.0 + (friendsPlays[i] ?: 0)).toFloat()
+        for (i in 0 until n) scores[i] += 0.3f * affinity[i] + 0.4f * ln(1.0 + (friendsPlays[i] ?: 0)).toFloat() + tuning.fame * known(i)
         scores.lessTired(monday)
         pickBlend(
             scores.indices.associateWith { scores[it] }, 30, weekRandom, pool = 150, blend = yourLanguages,
@@ -795,8 +816,9 @@ class MixMaker(
         val like = similarTo(likedSongs.take(60), languages = yourLanguages.keys)
         val scores = HashMap<Int, Float>()
         for (i in 0 until n) {
-            if (songs[i].albumId in played || i in skip || like[i].isNaN()) continue
-            scores[i] = 0.5f * like[i] + affinity[i] - tired(i, monday)
+            // Less known on the big service too: a real find, not just something nobody here got to.
+            if (songs[i].albumId in played || i in skip || like[i].isNaN() || known(i) > 0.5f) continue
+            scores[i] = 0.5f * like[i] + affinity[i] - 0.4f * known(i) - tired(i, monday)
         }
         val list = pickBlend(
             scores, 30, Random(personSeed * 59 + monday.toEpochDay()), pool = 150, blend = yourLanguages,
@@ -830,7 +852,8 @@ class MixMaker(
             if (!eligibleSong(i)) continue
             val title = songs[i].title.lowercase()
             val titleWords = title.split(NOT_LETTERS)
-            val named = season.words.count { w -> if (' ' in w) w in title else titleWords.any { it.startsWith(w) } }
+            val named = season.words.count { w -> if (' ' in w) w in title else titleWords.any { it.startsWith(w) } } +
+                (lib.labels[i]?.themes?.count { it in SEASON_THEMES[season.key].orEmpty() } ?: 0)
             val feel = if (feelings.isEmpty() || lib.sound[i] == null) Float.NaN
             else feelings.entries.sumOf { (k, w) -> (lib.moods.getValue(k)[i] * w).toDouble() }.toFloat() / feelings.values.sum()
             if (named == 0 && (feel.isNaN() || feel < 1.2f)) continue
@@ -911,8 +934,41 @@ class MixMaker(
     private val rhythmZ by lazy { zScores(lib.rhythm) }
 
     /** How well each song fits [mood] (NaN if it can't be in it at all), before the cut-off. */
+    /**
+     * How well song [i] fits [mood] (NaN: it can't be in it). A song's labels (a language model's, from what it
+     * knows of the song and its lyrics) decide whether it can: a kuthu at full energy is never Chill, whatever
+     * it sounds like to the analyzer. How it sounds then sorts the ones that fit. Songs without labels go by sound.
+     */
     private fun moodFit(mood: Mood, i: Int): Float {
-        if (!eligibleSong(i) || lib.sound[i] == null) return Float.NaN
+        if (!eligibleSong(i)) return Float.NaN
+        val heard = soundFit(mood, i)
+        val label = lib.labels[i] ?: return heard
+        val fit = labelFit(mood, label) ?: return Float.NaN
+        return fit + 0.5f * (if (heard.isNaN()) 0f else heard)
+    }
+
+    /**
+     * What a song's labels say about [mood]: null if it can't be in it, else how well it fits. Moods that are a
+     * kind of music (Kuthu, Mass, Devotional...) need the label; broad feelings (Chill, Happy, Sad, Melody,
+     * Romance) take songs not named for them only if they sound very much like it.
+     */
+    private fun labelFit(mood: Mood, label: SongLabel): Float? {
+        val calm = mood.energy < 0f || mood.maxEnergy != null
+        if (calm && label.energy >= 4) return null
+        if (mood.energy >= 1f && label.energy <= 2) return null
+        if (mood.key == "focus") return if (label.instrumental) 1.5f else null
+        if (mood.key == "retro") return 0f
+        if (mood.key in label.moods) return if (label.sure) 2f else 1.3f
+        return when {
+            mood.key !in BROAD_MOODS -> null
+            label.sure -> -0.8f
+            else -> -0.3f
+        }
+    }
+
+    /** How well song [i] fits [mood] by how it sounds (the analyzer's descriptions); NaN if it can't be in it. */
+    private fun soundFit(mood: Mood, i: Int): Float {
+        if (lib.sound[i] == null) return Float.NaN
         if (mood.requires.any { (key, min) -> (lib.moods[key]?.get(i) ?: Float.NaN).let { it.isNaN() || it < min } }) return Float.NaN
         if (mood.vetoes.any { (key, max) -> (lib.moods[key]?.get(i) ?: 0f) > max }) return Float.NaN
         if (mood.indianSound) {
@@ -958,7 +1014,8 @@ class MixMaker(
     fun decade(start: Int): MixDto? {
         val members = songs.indices.filter { eligibleSong(it) && songs[it].year in start until start + 10 && speaks(it, yourLanguages.keys) }
         if (members.size < 20) return null
-        val scores = members.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() + if (hasTaste) 0.7f * affinity[it] else 0f }
+        // The decade's hits (played most here, and on the big service), the ones that suit you first.
+        val scores = members.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() + 0.8f * known(it) + if (hasTaste) 0.7f * affinity[it] else 0f }
         val list = pickBlend(scores, 50, Random(today.toEpochDay() * 7 + start), pool = 250, blend = yourLanguages, scoreOnly = false)
         return mix(
             "decade-$start", "decade", "${decadeName(start)} Mix", list, refresh = "daily", subtitle = namesIn(list), color = DECADE_COLORS[(start / 10) % DECADE_COLORS.size],
@@ -990,7 +1047,7 @@ class MixMaker(
         val theirs = (if (composer) lib.byComposer[person.id] else lib.bySinger[person.id]).orEmpty().filter(::eligibleSong)
         if (theirs.size < 5) return null
         val random = Random(today.toEpochDay() * 5 + person.id.hashCode())
-        val scores = theirs.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() }
+        val scores = theirs.associateWith { ln(1.0 + (popularity[it] ?: 0)).toFloat() + known(it) }
         // Someone who works in several languages: their main one here.
         val list = pick(scores, 50, random, pool = 120, maxPerAlbum = 3, maxPerPerson = 50, languages = setOfNotNull(mainLanguage(theirs)), scoreOnly = false)
         return mix(
@@ -1127,6 +1184,7 @@ class MixMaker(
         // A station stays in its seed's language (a composer's or singer's: their main one).
         val language = mainLanguage(seeds)
         val scores = similarTo(seeds, language).lessTired(factor = 0.5f)
+        for (i in 0 until n) scores[i] += tuning.fame * known(i)
         if (kind == "song") for (i in 0 until n) scores[i] += 0.25f * affinity[i]
         if (avoid != null) for (i in 0 until n) scores[i] -= avoid[i]
         val first = if (kind == "song" && exclude.isEmpty()) seeds else emptyList()
@@ -1178,7 +1236,7 @@ class MixMaker(
     private fun skippedLike(skipped: List<Int>): FloatArray? {
         if (skipped.isEmpty()) return null
         val like = similarTo(skipped.takeLast(20))
-        return FloatArray(n) { i -> 0.6f * (like[i].takeIf { !it.isNaN() } ?: 0f).coerceAtLeast(0f) }
+        return FloatArray(n) { i -> (like[i].takeIf { !it.isNaN() } ?: 0f).coerceAtLeast(0f) }
     }
 
     /** Songs to add to a playlist made of [songIds], best first. [page] > 0 gives the next ones. */
@@ -1190,7 +1248,7 @@ class MixMaker(
         val known = seeds.mapNotNull { lib.language[it] }
         val languages = known.groupingBy { it }.eachCount().filter { it.value >= 0.25 * known.size }.keys
         val scores = similarTo(seeds, languages = languages).lessTired(factor = 0.5f)
-        for (i in 0 until n) scores[i] += 0.2f * affinity[i]
+        for (i in 0 until n) scores[i] += 0.2f * affinity[i] + tuning.fame * known(i)
         val ranked = pick(
             scores, count * (page + 1), Random(0), pool = count * (page + 1),
             exclude = seeds.toSet(), maxPerAlbum = 2, scoreOnly = isScorePlaylist,
@@ -1208,13 +1266,17 @@ class MixMaker(
     fun similarTo(seeds: Collection<Int>, language: String? = null, languages: Set<String> = setOfNotNull(language)): FloatArray {
         val scores = FloatArray(n)
         if (seeds.isEmpty()) return scores
-        centroid(seeds.toList(), null)?.let { c ->
+        if (tuning.sound > 0f) centroid(seeds.toList(), null)?.let { c ->
             val sound = zScores(FloatArray(n) { i -> lib.sound[i]?.let { dot(it, c) } ?: Float.NaN })
-            for (i in 0 until n) scores[i] += if (sound[i].isNaN()) -1f else sound[i]
+            for (i in 0 until n) scores[i] += tuning.sound * (if (sound[i].isNaN()) -1f else sound[i])
         }
-        if (!together.isEmpty) {
+        if (!together.isEmpty && tuning.together > 0f) {
             val withSeeds = together.with(seeds, n)
-            for (i in 0 until n) scores[i] += 3f * withSeeds[i]
+            for (i in 0 until n) scores[i] += tuning.together * withSeeds[i]
+        }
+        if (tuning.links > 0f) {
+            val linked = linkedWith(seeds)
+            for (i in 0 until n) scores[i] += tuning.links * linked[i]
         }
         val composers = share(seeds) { i -> listOfNotNull(songs[i].composer?.id) }
         val singers = share(seeds) { i -> songs[i].singers.map { it.id } }
@@ -1222,9 +1284,9 @@ class MixMaker(
         val year = years.getOrNull(years.size / 2)
         for (i in 0 until n) {
             val s = songs[i]
-            scores[i] += 1.2f * (s.composer?.let { composers[it.id] } ?: 0.0).toFloat()
-            scores[i] += 0.8f * (s.singers.maxOfOrNull { singers[it.id] ?: 0.0 } ?: 0.0).toFloat()
-            if (year != null && s.year > 1900) scores[i] += 0.6f * exp(-abs(s.year - year) / 6.0).toFloat()
+            scores[i] += tuning.composer * (s.composer?.let { composers[it.id] } ?: 0.0).toFloat()
+            scores[i] += tuning.singer * (s.singers.maxOfOrNull { singers[it.id] ?: 0.0 } ?: 0.0).toFloat()
+            if (year != null && s.year > 1900) scores[i] += tuning.year * exp(-abs(s.year - year) / 6.0).toFloat()
             if (languages.isNotEmpty()) {
                 val l = lib.language[i]
                 if (l == null) scores[i] -= 1f else if (l !in languages) scores[i] = Float.NaN
@@ -1232,6 +1294,25 @@ class MixMaker(
         }
         return scores
     }
+
+    /**
+     * How strongly each song is linked to [seeds] by a big service's listeners: a seed's own recommendations
+     * (the first ones most), and less, songs that recommend the seed. Many seeds pointing at one song add up,
+     * scaled by √seeds so a long playlist doesn't drown everything else.
+     */
+    private fun linkedWith(seeds: Collection<Int>): FloatArray {
+        val out = FloatArray(n)
+        for (s in seeds) {
+            lib.links[s].forEachIndexed { rank, j -> out[j] += 1f / (1f + 0.15f * rank) }
+            lib.linkedBy[s].forEach { (j, rank) -> out[j] += 0.7f / (1f + 0.15f * rank) }
+        }
+        val scale = 1f / sqrt(seeds.size.toFloat())
+        for (i in 0 until n) out[i] *= scale
+        return out
+    }
+
+    /** How well known song [i] is on the big service (a z-score; 0 if unknown). */
+    private fun known(i: Int): Float = lib.fame[i].takeIf { !it.isNaN() } ?: 0f
 
     /** The average sound of [items] (weighted), as length 1; null if none were analyzed. */
     private fun centroid(items: List<Int>, weights: Map<Int, Double>?): FloatArray? {
@@ -1558,6 +1639,15 @@ class MixMaker(
             "classical" to "day", "focus" to "day", "sleep" to "night", "retro" to "dusk",
         )
         private val ENERGETIC_MOODS = setOf("party", "kuthu", "mass", "workout")
+
+        /** Feelings rather than kinds of music: a song not labelled with one can still be in it if it sounds the part. */
+        private val BROAD_MOODS = setOf("chill", "happy", "sad", "melody", "romance")
+
+        /** Themes (song labels) that belong to a season. */
+        private val SEASON_THEMES = mapOf(
+            "rain" to setOf("rain"), "valentine" to setOf("love"), "deepavali" to setOf("festival", "celebration"),
+            "pongal" to setOf("festival", "village"), "christmas" to setOf("devotion", "festival"), "newyear" to setOf("celebration", "dance"),
+        )
 
         /** The Discovery station: endless songs new to you. */
         const val DISCOVERY = "radio-discovery-new"
