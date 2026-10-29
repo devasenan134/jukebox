@@ -27,7 +27,11 @@ rsync -avz --delete \
   --exclude='desktop/src-tauri/target' \
   "$ROOT/" "$REMOTE_HOST:$REMOTE_DIR/"
 
-echo "Rebuilding and restarting container on $REMOTE_HOST (with --no-cache)..."
-ssh "$REMOTE_HOST" "cd $REMOTE_DIR && docker compose build --no-cache && docker compose up -d --force-recreate && docker ps --filter name=jukebox"
+# Reuses Docker's cached layers (the Gradle download alone takes about 9 minutes on the Mac mini and sometimes
+# drops); ./scripts/deploy-server.sh --clean rebuilds everything from scratch.
+BUILD_FLAGS=""
+if [ "${1:-}" = "--clean" ]; then BUILD_FLAGS="--no-cache"; fi
+echo "Rebuilding and restarting container on $REMOTE_HOST ${BUILD_FLAGS:+(with $BUILD_FLAGS)}..."
+ssh "$REMOTE_HOST" "cd $REMOTE_DIR && docker compose build $BUILD_FLAGS && docker compose up -d --force-recreate && docker ps --filter name=jukebox"
 
 echo "Done! Jukebox server redeployed successfully."

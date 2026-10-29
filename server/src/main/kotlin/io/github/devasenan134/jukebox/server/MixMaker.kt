@@ -560,16 +560,18 @@ class MixMaker(
         val seeds = atThisTime.keys.toList().ifEmpty { likedSongs.take(60) }
         val random = Random(personSeed * 37 + today.toEpochDay() * 4 + DAY_PARTS.indexOf(part))
         // The feeling that fits what you play at this time best, with some variety from day to day.
+        // A song whose labels rule a feeling out counts against it (it doesn't fit); one we know nothing about doesn't count.
         val vibe = part.vibes.mapNotNull { key -> MOODS.firstOrNull { it.key == key }?.takeIf { moodMembers(it) != null } }
             .maxByOrNull { m ->
-                val fit = seeds.map { moodFit(m, it) }.filter { !it.isNaN() }.takeIf { it.isNotEmpty() }?.average() ?: 0.0
+                val fit = seeds.mapNotNull { i -> moodFit(m, i).let { if (!it.isNaN()) it else if (lib.labels[i] != null) -1f else null } }
+                    .takeIf { it.isNotEmpty() }?.average() ?: 0.0
                 fit + 0.5 * gumbel(random)
             } ?: return null
         val members = moodMembers(vibe) ?: return null
         val like = similarTo(seeds.take(80), languages = yourLanguages.keys)
         val scores = members.mapValues { (i, fit) -> fit + 0.5f * like[i] + 0.4f * affinity[i] - tired(i) }.filterValues { !it.isNaN() }
         // Your own songs for this time, unless they're the opposite of the feeling.
-        val yours = atThisTime.filterKeys { i -> moodFit(vibe, i).let { it.isNaN() || it >= 0.5f } }
+        val yours = atThisTime.filterKeys { i -> fitsVibe(vibe, i) }
             .mapValues { (i, count) -> (ln(1.0 + count) + 0.3 * (weights[i] ?: 0.0)).toFloat() }
         val familiar = pick(yours, 10, random, pool = 30)
         val fresh = pickBlend(scores, 40 - familiar.size, random, pool = 150, blend = yourLanguages, exclude = familiar.toSet())
@@ -580,6 +582,15 @@ class MixMaker(
             "daylist", "daylist", "$weekday ${part.name} ${vibe.noun}", list, refresh = "live", subtitle = "Changes through the day",
             description = "Your ${weekday.lowercase()} ${part.name}: ${vibe.noun}, and what you usually play around this time. Changes through the day.",
         )
+    }
+
+    /**
+     * Whether one of your songs for this time of day fits its feeling: not ruled out by its labels, and sounding
+     * at least somewhat like it; a song we know nothing about (no labels, not analyzed) gets the benefit of the doubt.
+     */
+    private fun fitsVibe(vibe: Mood, i: Int): Boolean {
+        val fit = moodFit(vibe, i)
+        return if (lib.labels[i] != null || lib.sound[i] != null) !fit.isNaN() && fit >= 0.5f else true
     }
 
     /** Songs added to the library in the two weeks before Friday that suit you. Changes on Fridays. */

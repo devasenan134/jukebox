@@ -472,6 +472,23 @@ class MixMakerTest {
     }
 
     @Test
+    fun `the daylist leaves out your songs whose labels don't fit its feeling`() {
+        val base = Pretend.library()
+        // This person plays melody songs at night, and two kuthu songs labelled full-energy dance numbers.
+        val labels = arrayOfNulls<SongLabel>(base.songs.size).also { l ->
+            for (i in 0 until 40) l[i] = SongLabel(setOf("melody", "chill", "sad"), 2, 2, emptySet(), false, true)
+            for (i in listOf(150, 160)) l[i] = SongLabel(setOf("kuthu", "party"), 5, 5, setOf("dance"), false, true)
+        }
+        val lib = LibrarySnapshot(base.songs, base.sound, base.moods, base.moodVectors, base.tempo, base.energy, "labelled", base.rhythm, labels = labels)
+        val zone = java.time.ZoneId.of("Asia/Kolkata")
+        val night = today.atTime(23, 0).atZone(zone).toInstant().toEpochMilli()
+        val plays = (0 until 40).map { it to night - it * 60_000L } + listOf(150 to night - 5_000L, 160 to night - 6_000L)
+        val history = History((0 until 40).associateWith { 3 } + mapOf(150 to 6, 160 to 6), (0 until 40).associateWith { night }, plays, setOf(1, 2), emptySet(), emptySet(), emptyMap())
+        val daylist = assertNotNull(MixMaker(lib, history, emptyMap(), emptyMap(), emptyMap(), 42, today, night, zone = zone).daylist())
+        assertTrue(daylist.songs.none { it.id == "song150" || it.id == "song160" }, daylist.songs.map { it.id }.toString())
+    }
+
+    @Test
     fun `every mix and station on Home has a cover design`() {
         val lib = Pretend.library()
         val home = maker(lib).home()
