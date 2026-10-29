@@ -8,6 +8,19 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Everywhere You Listen (2.6.0)
+
+### New
+- **Recently played, Jump back in and Resume follow you.** What you play on your phone shows on the website and the Mac app (and the other way round), live; Resume on a playlist, movie or Liked songs picks up where you left off on any of your devices; and the turning record in Jump back in shows whatever is playing on whichever device.
+- **Repeat in more places:** the Android mini player, the notification and lock screen, the website's mini player, and on the Mac in Now Playing (Control Center, Boring Notch).
+
+### Improved
+- **Better mixes and stations** (server): songs JioSaavn's listeners play together, how well known each song is, and moods and themes for every song from what's known of it and its lyrics. Mood mixes hold together (no dance numbers in Chill or Sleep), the time-of-day mix fits the hour, and seasons find their songs by theme.
+- **Mac: Check for Updates** also looks where the last good update is always kept, so it no longer fails while a new release is still being made.
+
+### Server
+- Schema 34: `recent_items` and `resume_points` with `GET/POST/DELETE /me/recents`, `GET/PUT /me/resume`, and a `recentsChanged` live event. Schemas 32–33 (JioSaavn links and play counts, song labels) came with the mixes update.
+
 ## Lined Up (2.5.4)
 
 ### Fixed
