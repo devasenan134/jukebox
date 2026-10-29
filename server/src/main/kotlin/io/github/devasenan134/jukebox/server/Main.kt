@@ -346,7 +346,8 @@ fun Application.jukeboxServer(
                 call.respond(HttpStatusCode.NoContent)
             }
             get("/me/resume") {
-                val source = call.request.queryParameters["source"] ?: throw ApiError(HttpStatusCode.BadRequest, "?source= is needed")
+                // ?source=: that one place; without it, all of them, newest first.
+                val source = call.request.queryParameters["source"] ?: return@get call.respond(recents.resumePoints(call.me()))
                 call.respond(recents.resumePoint(call.me(), source) ?: throw ApiError(HttpStatusCode.NotFound, "Nothing to resume"))
             }
             put("/me/resume") { recents.saveResumePoint(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }

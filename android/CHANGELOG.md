@@ -8,6 +8,17 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Pick Up Where You Left Off (2.6.1)
+
+### Fixed
+- **Resume is back where you play.** Mixes (Made for you, Your top mixes) now have Resume too, on the phone, the website and the Mac app, so a mix you were halfway through can be picked up again. Stations go on endlessly, so they don't.
+
+### Improved
+- **Resume on your last 3.** Resume shows on the last three playlists, mixes, movies or Liked songs you played from, on any of your devices (not the one playing now), instead of on everything you ever started.
+
+### Server
+- `GET /me/resume` without `?source=` lists every resume point, newest first (the apps pick the last three).
+
 ## Everywhere You Listen (2.6.0)
 
 ### New

@@ -571,23 +571,27 @@ export function PlayShuffleRow({ onPlay, onShuffle, children, resume }: {
 }
 
 /**
- * "Resume · Song name" (ResumeButton in DetailScreens.kt): continue a playlist, album or Liked songs from the
+ * "Resume · Song name" (ResumeButton in DetailScreens.kt): continue a playlist, album, mix or Liked songs from the
  * song you were on last time, in the same order as then (a shuffled order stays as it was). Songs added since
- * join at the end. Hidden while you're already playing from this page.
+ * join at the end. Hidden while you're already playing from this page, and on all but the last few places you
+ * played from (queueMemory.resumable), on any of your devices.
  */
 function ResumeButton({ source, songs, onResume }: { source: string; songs: Song[]; onResume?: () => void }) {
   const playingFrom = usePlayer((s) => currentItem(s)?.source)
-  // Where you left off on any of your devices (the server's), or here, whichever is newer.
+  // Where you left off on all your devices (the server's), read again when something else starts playing.
   const signedIn = useSession((s) => !!s.social)
   const fromServer = useQuery({
-    queryKey: ['resume', source],
-    queryFn: () => social.resumePoint(source).catch(() => null),
+    queryKey: ['resume', playingFrom ?? ''],
+    queryFn: () => social.resumePoints().catch(() => []),
     enabled: signedIn,
     staleTime: 0,
-  }).data
+  }).data ?? []
   if (playingFrom === source) return null
+  if (!queueMemory.resumable(fromServer, playingFrom).has(source)) return null
   const local = queueMemory.get(source)
-  const saved = fromServer && (!local || fromServer.savedAt > local.savedAt) ? fromServer : local
+  // The newer of the server's and this browser's.
+  const server = fromServer.find((p) => p.source === source)
+  const saved = server && (!local || server.savedAt > local.savedAt) ? server : local
   const byId = new Map(songs.map((s) => [s.id, s]))
   const current = saved && byId.get(saved.currentId)
   if (!saved || !current) return null

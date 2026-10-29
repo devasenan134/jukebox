@@ -15,8 +15,9 @@ import kotlinx.serialization.json.Json
 class QueueMemory(context: Context) {
     private val prefs = context.getSharedPreferences("queues", Context.MODE_PRIVATE)
 
+    /** [source] is only filled in on the server's list (here each one is kept under its source). */
     @Serializable
-    data class Saved(val songIds: List<String>, val currentId: String, val savedAt: Long)
+    data class Saved(val songIds: List<String>, val currentId: String, val savedAt: Long, val source: String = "")
 
     fun get(source: String): Saved? =
         prefs.getString(source, null)?.let { runCatching { Json.decodeFromString(Saved.serializer(), it) }.getOrNull() }
@@ -39,6 +40,21 @@ class QueueMemory(context: Context) {
         }
     }
 
+    /**
+     * The places that offer Resume: the [SLOTS] you played from most recently, on this phone or any device of yours
+     * ([fromServer]), not counting the one playing now ([playing]). Stations and pages without a Resume button
+     * (artists, composers) don't take a place.
+     */
+    fun resumable(fromServer: List<Saved>, playing: String?): Set<String> =
+        (savedTimes().entries.map { it.key to it.value } + fromServer.map { it.source to it.savedAt })
+            .filter { (source, _) -> source != playing && offersResume(source) }
+            .groupBy({ it.first }, { it.second }).mapValues { it.value.max() }
+            .entries.sortedByDescending { it.value }.take(SLOTS).map { it.key }.toSet()
+
+    private fun offersResume(source: String) =
+        source.startsWith("playlist:") || source.startsWith("album:") || source == "liked" ||
+            (source.startsWith("mix:") && !source.startsWith("mix:radio-"))
+
     private val indexSerializer = MapSerializer(String.serializer(), Long.serializer())
 
     private fun savedTimes(): Map<String, Long> =
@@ -48,6 +64,7 @@ class QueueMemory(context: Context) {
 
     private companion object {
         const val MAX = 30
+        const val SLOTS = 3
         const val INDEX = "_index"
     }
 }

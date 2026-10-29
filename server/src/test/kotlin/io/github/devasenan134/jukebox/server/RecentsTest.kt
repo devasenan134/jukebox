@@ -69,6 +69,10 @@ class RecentsTest {
         assertEquals(listOf("s3", "s1", "s2") to "s1", fromLaptop.songIds to fromLaptop.currentId)
         assertEquals(HttpStatusCode.NotFound, client.get("/me/resume?source=playlist:p1") { bearerAuth(bob) }.status)
         assertEquals(HttpStatusCode.NotFound, client.get("/me/resume?source=playlist:other") { bearerAuth(laptop) }.status)
+        // All of them, newest first (the apps offer Resume on the newest few).
+        client.put("/me/resume") { bearerAuth(laptop); contentType(ContentType.Application.Json); setBody(ResumePointDto("mix:daily-1", listOf("s9"), "s9")) }
+        assertEquals(listOf("mix:daily-1", "playlist:p1"), client.get("/me/resume") { bearerAuth(phone) }.body<List<ResumePointDto>>().map { it.source })
+        assertTrue(client.get("/me/resume") { bearerAuth(bob) }.body<List<ResumePointDto>>().isEmpty())
 
         client.delete("/me/recents") { bearerAuth(phone) }
         assertTrue(recents(laptop).isEmpty())

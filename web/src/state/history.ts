@@ -196,4 +196,23 @@ export const queueMemory = {
     // And for your other devices (only when it changed: this runs on every change in the player).
     if (!same && signedIn()) void social.saveResumePoint({ source, songIds, currentId }).catch(() => {})
   },
+  /**
+   * The places that offer Resume: the RESUME_SLOTS you played from most recently, here or on any device of yours
+   * ([fromServer]), not counting the one playing now ([playing]). Stations and pages without a Resume button
+   * (artists, composers) don't take a place. (QueueMemory.resumable in the app.)
+   */
+  resumable: (fromServer: { source: string; savedAt: number }[], playing: string | undefined): Set<string> => {
+    const newest = new Map<string, number>()
+    const local = Object.entries(load<Record<string, SavedQueue>>('queues', {})).map(([source, q]) => ({ source, savedAt: q.savedAt }))
+    for (const { source, savedAt } of [...local, ...fromServer]) {
+      if (source !== playing && offersResume(source)) newest.set(source, Math.max(savedAt, newest.get(source) ?? 0))
+    }
+    return new Set([...newest].sort((a, b) => b[1] - a[1]).slice(0, RESUME_SLOTS).map(([source]) => source))
+  },
 }
+
+const RESUME_SLOTS = 3
+
+const offersResume = (source: string) =>
+  source.startsWith('playlist:') || source.startsWith('album:') || source === 'liked' ||
+  (source.startsWith('mix:') && !source.startsWith('mix:radio-'))

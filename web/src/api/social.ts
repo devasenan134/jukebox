@@ -86,7 +86,8 @@ export const social = {
   recentPlayed: (item: Omit<ActivityItem, 'playedAt'>) => post<void>('/me/recents', item),
   forgetRecent: (kind: string, id: string) => send<void>('DELETE', `/me/recents/${enc(kind)}/${enc(id)}`),
   clearRecents: () => send<void>('DELETE', '/me/recents'),
-  resumePoint: (source: string) => get<ResumePoint>(`/me/resume?source=${enc(source)}`),
+  /** Every place you can resume from, on any of your devices, newest first. */
+  resumePoints: () => get<ResumePoint[]>('/me/resume'),
   saveResumePoint: (point: Omit<ResumePoint, 'savedAt'>) => send<void>('PUT', '/me/resume', point),
   avatarPath: (u: SocialUser) => (u.avatar != null ? `/users/${u.id}/avatar?v=${u.avatar}` : undefined),
 

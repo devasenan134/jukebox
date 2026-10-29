@@ -317,11 +317,8 @@ class SocialApi(
         send<Unit>("POST", "/me/recents", json.encodeToString(RecentActivity.Item.serializer(), item))
     suspend fun forgetRecent(kind: String, id: String) = send<Unit>("DELETE", "/me/recents/${enc(kind)}/${enc(id)}", null)
     suspend fun clearRecents() = send<Unit>("DELETE", "/me/recents", null)
-    suspend fun resumePoint(source: String): QueueMemory.Saved? = try {
-        get("/me/resume?source=${enc(source)}")
-    } catch (e: SocialException) {
-        if (e.code == 404) null else throw e
-    }
+    /** Every place you can resume from, on any of your devices, newest first. */
+    suspend fun resumePoints(): List<QueueMemory.Saved> = get("/me/resume")
     suspend fun saveResumePoint(source: String, songIds: List<String>, currentId: String) =
         send<Unit>("PUT", "/me/resume", json.encodeToString(ResumeBody.serializer(), ResumeBody(source, songIds, currentId)))
 

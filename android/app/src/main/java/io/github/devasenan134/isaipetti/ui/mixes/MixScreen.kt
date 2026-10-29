@@ -1,5 +1,6 @@
 package io.github.devasenan134.isaipetti.ui.mixes
 
+import io.github.devasenan134.isaipetti.ui.library.ResumeButton
 import io.github.devasenan134.isaipetti.ui.components.UiSize
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -140,6 +141,10 @@ fun MixScreen(id: String, nav: Nav) {
                                         .onFailure { Toast.makeText(context, it.message ?: "Couldn't change it", Toast.LENGTH_SHORT).show() }
                                 }
                             })
+                        }
+                        // Stations go on endlessly, so there's nowhere to resume.
+                        if (!mix.endless) {
+                            Box(Modifier.padding(top = 8.dp)) { ResumeButton(mix.source, songs) { app.activity.mix(mix) } }
                         }
                         if (mix.endless) {
                             Text(

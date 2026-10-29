@@ -532,18 +532,23 @@ private fun shortDate(iso: String): String = runCatching {
 }.getOrDefault(iso.take(10))
 
 /**
- * "Resume · Song name": continue a playlist, movie or Liked songs from the song you were on last
+ * "Resume · Song name": continue a playlist, movie, mix or Liked songs from the song you were on last
  * time, in the same order as then (a shuffled order stays as it was). Songs added since join at the end.
+ * Only on the last few places you played from (QueueMemory.resumable), on any of your devices.
  */
 @Composable
 internal fun ResumeButton(source: String, songs: List<Song>, onResume: () -> Unit = {}) {
     val app = LocalApp.current
     val now by app.player.nowPlaying.collectAsStateWithLifecycle()
-    // Where you left off on any of your devices (the server's), or here, whichever is newer.
-    val fromServer by produceState<QueueMemory.Saved?>(null, source) { value = runCatching { app.social.api.resumePoint(source) }.getOrNull() }
+    // Where you left off on all your devices (the server's), read again when something else starts playing.
+    val fromServer by produceState(emptyList<QueueMemory.Saved>(), source, now.source) {
+        value = runCatching { app.social.api.resumePoints() }.getOrDefault(emptyList())
+    }
     if (now.source == source) return // already playing from here
+    if (source !in remember(fromServer, now.source) { app.queueMemory.resumable(fromServer, now.source) }) return
     val local = remember(source, songs, now.source) { app.queueMemory.get(source) }
-    val saved = fromServer?.takeIf { server -> local == null || server.savedAt > local.savedAt } ?: local ?: return
+    // The newer of the server's and this phone's.
+    val saved = fromServer.find { it.source == source }?.takeIf { server -> local == null || server.savedAt > local.savedAt } ?: local ?: return
     val byId = songs.associateBy { it.id }
     val current = byId[saved.currentId] ?: return
     OutlinedButton(onClick = {

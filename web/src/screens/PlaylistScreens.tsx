@@ -431,7 +431,12 @@ export function MixScreen() {
         </>
       }
     >
-      <PlayShuffleRow onPlay={() => play(0)} onShuffle={mix.endless ? undefined : () => play(0, true)}>
+      <PlayShuffleRow
+        onPlay={() => play(0)}
+        onShuffle={mix.endless ? undefined : () => play(0, true)}
+        // Stations go on endlessly, so there's nowhere to resume.
+        resume={mix.endless ? undefined : { source: mixSource(mix), songs, onResume: () => activity.mix(mix) }}
+      >
         <LikeButton liked={followed} onToggle={() => void toggle()} big />
         {songs.length > 0 && <MoreMenu items={[{ label: 'Save a copy as a playlist', onClick: () => void saveCopy(mix.title, songs.map((s) => s.id), nav) }]} />}
       </PlayShuffleRow>

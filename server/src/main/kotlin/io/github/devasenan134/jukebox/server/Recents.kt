@@ -86,6 +86,13 @@ class Recents(private val db: Db, private val hub: Hub, private val clock: () ->
         }
     }
 
+    /** Every place they can resume from, newest first: the apps offer Resume only on the newest few (RESUME_SLOTS there). */
+    suspend fun resumePoints(user: UserDto): List<ResumePointDto> = db.read {
+        query("SELECT source, song_ids, current_id, saved_at FROM resume_points WHERE user_id = ? ORDER BY saved_at DESC, rowid DESC", user.id) { rs ->
+            ResumePointDto(rs.getString(1), runCatching { json.decodeFromString<List<String>>(rs.getString(2)) }.getOrDefault(emptyList()), rs.getString(3), rs.getLong(4))
+        }
+    }
+
     suspend fun saveResumePoint(user: UserDto, point: ResumePointDto) {
         if (point.source.isBlank() || point.source.length > 200 || point.songIds.isEmpty() || point.songIds.size > 5000) {
             throw ApiError(HttpStatusCode.BadRequest, "That isn't a place to resume from")
