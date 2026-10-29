@@ -12,6 +12,7 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ### Fixed
 - **Song lists line up.** A song saved in your library or a playlist (the tick) no longer pushes its album and length out of line with the songs around it.
+- **Mac: Check for Updates no longer fails** while a new release's Mac build is still being made (or if one fails): the app now also looks where the last good Mac update is always kept.
 
 ## Now Playing on the Mac (2.5.3)
 

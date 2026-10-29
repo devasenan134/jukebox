@@ -6,6 +6,9 @@
 #   TAURI_SIGNING_PRIVATE_KEY secret (kept by the maintainer; the public half is in tauri.conf.json).
 # - Run it by hand with a tag to add the DMG to a release made earlier.
 # - Every change to desktop/ also builds one, kept under the run's Artifacts, to try before releasing.
+# - Installed apps read latest-macos.json from the mac-latest release first (a pre-release that only holds the
+#   newest good build's manifest), then from the latest release. So while a new release's Mac build is still
+#   running, or if it fails, apps still find the last good update instead of an error.
 name: Desktop (macOS)
 
 on:
@@ -25,6 +28,8 @@ permissions:
 
 jobs:
   build:
+    # Releases of the app only (vX.Y.Z), never mac-latest.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: macos-latest
     defaults:
       run:
@@ -84,3 +89,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" "${{ steps.build.outputs.file }}" "${{ steps.build.outputs.update }}" latest-macos.json --clobber
+
+      - name: Point mac-latest at this build
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view mac-latest >/dev/null 2>&1 || gh release create mac-latest --prerelease --latest=false \
+            --title "Mac app updates" --notes "Where installed Mac apps look for updates: the newest Mac build's latest-macos.json. To download Jukebox, see the latest release."
+          # Only forward: rebuilding an older release must not hide a newer one.
+          current=$(gh release download mac-latest -p latest-macos.json -O - 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0)).version' 2>/dev/null || echo 0.0.0)
+          newer=$(CURRENT="$current" NEW="$(node -pe 'require("./latest-macos.json").version')" node -pe '
+            const [a, b] = [process.env.NEW, process.env.CURRENT].map(v => v.split(".").map(Number));
+            a.some((x, i) => x !== (b[i] || 0)) && a.find((x, i) => x !== (b[i] || 0)) > b[a.findIndex((x, i) => x !== (b[i] || 0))] ? "yes" : "no"')
+          if [ "$newer" = "yes" ]; then gh release upload mac-latest latest-macos.json --clobber; else echo "mac-latest has $current already"; fi
