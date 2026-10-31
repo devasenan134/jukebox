@@ -37,6 +37,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <!-- "Play … on Jukebox": Android Auto and Assistant need this; the request itself reaches PlaybackService. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
         <!-- Lyrics over the lock screen: its own task, so the rest of the app never shows over the lock. -->
         <activity
@@ -52,9 +57,19 @@
             android:exported="true"
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
+        <!-- Android Auto: Jukebox is a music app there (playback/CarLibrary.kt), with covers from CoverProvider. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <provider
+            android:name=".playback.CoverProvider"
+            android:authorities="${applicationId}.covers"
+            android:exported="true" />
 
         <service
             android:name=".push.PushService"

@@ -8,6 +8,12 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## On the Road (2.7.0)
+
+### New
+- **Android Auto.** Jukebox shows up in the car with four tabs: **Home** (Made for you and Your top mixes), **Recent** (what you played, carrying on where you left off), **Stations** (yours, then composer and artist stations) and **Library** (Liked songs, your playlists, saved mixes). A playlist opens its songs with Shuffle on top; search finds songs and albums; and "Hey Google, play Daily Mix 1 on Jukebox" plays that mix (or a playlist by that name, or the songs a search finds).
+  Android Auto only lists apps from the Play Store unless you allow others: in Android Auto's settings, tap **Version** ten times to turn on developer mode, then in the ⋮ menu open **Developer settings** and turn on **Unknown sources**.
+
 ## Pick Up Where You Left Off (2.6.1)
 
 ### Fixed

@@ -20,7 +20,12 @@ import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.CommandButton
 import android.os.Bundle
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import androidx.media3.session.SessionError
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.SettableFuture
 import io.github.devasenan134.isaipetti.IsaipettiApp
 import io.github.devasenan134.isaipetti.data.OfflineDownloads
 import io.github.devasenan134.isaipetti.data.SongRef
@@ -38,9 +43,11 @@ import kotlinx.coroutines.launch
  * Plays music in the background. Android keeps this service alive while music plays,
  * and Media3 shows the notification and lock-screen controls for it.
  * The UI never touches the player directly; it sends commands through [PlayerConnection].
+ * Android Auto browses and plays through it too ([CarLibrary]).
  */
-class PlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+class PlaybackService : MediaLibraryService() {
+    private var session: MediaLibrarySession? = null
+    private var car: CarLibrary? = null
     private var listenSync: ListenSync? = null
     private var lockScreenLyrics: LockScreenLyrics? = null
     private val scope = MainScope()
@@ -87,9 +94,9 @@ class PlaybackService : MediaSessionService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, player)
+        car = CarLibrary(app) { session?.player }
+        session = MediaLibrarySession.Builder(this, player, SessionCallback())
             .setSessionActivity(openApp)
-            .setCallback(SessionCallback())
             .build()
         // The repeat button in the notification and on the lock screen shows the current mode.
         player.addListener(object : Player.Listener {
@@ -242,12 +249,21 @@ class PlaybackService : MediaSessionService() {
         .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
         .build()
 
+    /** Runs [block] off the binder thread and hands back its result the way Media3 wants it. */
+    private fun <T> future(block: suspend () -> T): ListenableFuture<T> {
+        val result = SettableFuture.create<T>()
+        scope.launch {
+            try { result.set(block()) } catch (e: Exception) { result.setException(e) }
+        }
+        return result
+    }
+
     @OptIn(UnstableApi::class)
-    private inner class SessionCallback : MediaSession.Callback {
-        // Every controller (the notification, the lock screen, the app) may use the repeat button too.
+    private inner class SessionCallback : MediaLibrarySession.Callback {
+        // Every controller (the notification, the lock screen, the app, Android Auto) may browse and use the repeat button too.
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
             MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon().add(repeatCommand).build())
+                .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(repeatCommand).build())
                 .setMediaButtonPreferences(listOf(repeatButton(session.player.repeatMode)))
                 .build()
 
@@ -275,7 +291,71 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<MutableList<MediaItem>> = Futures.immediateFuture(
             mediaItems.map { it.buildUpon().setUri(songUri(it.mediaId)).build() }.toMutableList()
         )
+
+        // Something picked in Android Auto (or asked for by voice) becomes its whole queue; the app's own songs go as before.
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val car = car ?: return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            val forCar = mediaItems.singleOrNull()?.let { it.mediaId.startsWith("car/") || (it.mediaId.isEmpty() && it.requestMetadata.searchQuery != null) } == true
+            if (!forCar) return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            return future { car.resolve(mediaItems) ?: throw IllegalStateException("Nothing to play") }
+        }
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val car = car ?: return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_UNKNOWN))
+            return Futures.immediateFuture(LibraryResult.ofItem(car.root(), MediaLibraryService.LibraryParams.Builder().setExtras(car.rootExtras).build()))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = future {
+            val all = car?.children(parentId).orEmpty()
+            LibraryResult.ofItemList(all.page(page, pageSize), params)
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = future {
+            searched = query to car?.search(query).orEmpty()
+            session.notifySearchResultChanged(browser, query, searched.second.size, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = future {
+            val items = if (searched.first == query) searched.second else car?.search(query).orEmpty()
+            LibraryResult.ofItemList(items.page(page, pageSize), params)
+        }
     }
+
+    private fun <T> List<T>.page(page: Int, size: Int): List<T> =
+        drop((page.toLong() * size).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(size)
+
+    /** The last search from Android Auto and what it found. */
+    private var searched: Pair<String, List<MediaItem>> = "" to emptyList()
 
     /**
      * A shuffled queue starts with the song that's playing and then plays every other song once, in a random
