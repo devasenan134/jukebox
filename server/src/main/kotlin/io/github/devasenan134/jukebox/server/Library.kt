@@ -58,6 +58,11 @@ class LibrarySnapshot(
     val fame: FloatArray = FloatArray(songs.size) { Float.NaN },
     /** Per song: its moods and themes from a language model; null if it wasn't labelled. */
     val labels: Array<SongLabel?> = arrayOfNulls(songs.size),
+    /**
+     * Per key, per song: what the analyzer learned from those labels, predicted from the sound (NaN if unknown).
+     * Moods and "instrumental" are chances (0–1); "energy" and "valence" are on the labels' 1–5 scale.
+     */
+    val learned: Map<String, FloatArray> = emptyMap(),
 ) {
     val index: Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }
 
@@ -151,6 +156,22 @@ fun moodScores(sound: Array<FloatArray?>, prompts: Map<String, FloatArray>): Map
         val raw = FloatArray(sound.size) { i -> sound[i]?.let { dot(it, prompt) } ?: Float.NaN }
         zScores(raw)
     }
+
+/** The moods the analyzer learns (the labeller's, scripts/labels/label_songs.py). */
+val LEARNED_MOODS = listOf("chill", "romance", "happy", "party", "kuthu", "mass", "sad", "melody", "devotional", "classical", "sleep", "workout")
+
+/**
+ * A label for song [i] from what the analyzer learned, for songs the language model didn't label (new ones):
+ * the moods it more likely has than not (at most 3), its energy and valence, never [SongLabel.sure]. Null if
+ * nothing was learned for it.
+ */
+fun learnedLabel(learned: Map<String, FloatArray>, i: Int): SongLabel? {
+    val energy = learned["energy"]?.get(i)?.takeIf { !it.isNaN() } ?: return null
+    val moods = LEARNED_MOODS.mapNotNull { m -> learned[m]?.get(i)?.takeIf { it >= 0.5f }?.let { m to it } }
+        .sortedByDescending { it.second }.take(3).map { it.first }.toSet()
+    fun scale(v: Float?) = if (v == null || v.isNaN()) 3 else kotlin.math.round(v).toInt().coerceIn(1, 5)
+    return SongLabel(moods, scale(energy), scale(learned["valence"]?.get(i)), emptySet(), (learned["instrumental"]?.get(i) ?: 0f) >= 0.5f, sure = false)
+}
 
 fun zScores(values: FloatArray): FloatArray {
     val known = values.filter { !it.isNaN() }

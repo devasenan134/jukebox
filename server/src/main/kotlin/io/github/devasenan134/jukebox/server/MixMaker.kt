@@ -941,7 +941,29 @@ class MixMaker(
         )
     }
 
-    private val energyZ by lazy { zScores(lib.energy) }
+    /**
+     * How loud and intense each song is (z-score): what the analyzer learned from the labels' energy where it has
+     * it (much closer to them), else the measured loudness.
+     */
+    private val energyZ by lazy {
+        val loud = zScores(lib.energy)
+        val learned = lib.learned["energy"]?.let { zScores(it) } ?: return@lazy loud
+        FloatArray(n) { i -> learned[i].takeIf { !it.isNaN() } ?: loud[i] }
+    }
+
+    /**
+     * The analyzer's learned moods as z-scores of their log-odds, under the names of the descriptions they stand
+     * for, so the moods below use them in place of the descriptions wherever a song has them.
+     */
+    private val learnedZ: Map<String, FloatArray> by lazy {
+        LEARNED_FOR.mapNotNull { (description, key) ->
+            lib.learned[key]?.let { p -> description to zScores(FloatArray(p.size) { i -> logit(p[i]) }) }
+        }.toMap()
+    }
+
+    /** How well description [key] fits song [i] (z-score): the learned mood if there is one, else the analyzer's description. */
+    private fun described(key: String, i: Int): Float =
+        learnedZ[key]?.get(i)?.takeIf { !it.isNaN() } ?: lib.moods[key]?.get(i) ?: Float.NaN
     private val rhythmZ by lazy { zScores(lib.rhythm) }
 
     /** How well each song fits [mood] (NaN if it can't be in it at all), before the cut-off. */
@@ -980,8 +1002,8 @@ class MixMaker(
     /** How well song [i] fits [mood] by how it sounds (the analyzer's descriptions); NaN if it can't be in it. */
     private fun soundFit(mood: Mood, i: Int): Float {
         if (lib.sound[i] == null) return Float.NaN
-        if (mood.requires.any { (key, min) -> (lib.moods[key]?.get(i) ?: Float.NaN).let { it.isNaN() || it < min } }) return Float.NaN
-        if (mood.vetoes.any { (key, max) -> (lib.moods[key]?.get(i) ?: 0f) > max }) return Float.NaN
+        if (mood.requires.any { (key, min) -> described(key, i).let { it.isNaN() || it < min } }) return Float.NaN
+        if (mood.vetoes.any { (key, max) -> described(key, i).let { !it.isNaN() && it > max } }) return Float.NaN
         if (mood.indianSound) {
             val indian = lib.moods["indianfilm"]?.get(i) ?: Float.NaN
             val western = lib.moods["western"]?.get(i) ?: Float.NaN
@@ -991,7 +1013,7 @@ class MixMaker(
         if (mood.maxEnergy != null && (energy.isNaN() || energy > mood.maxEnergy)) return Float.NaN
         if (mood.maxRhythm != null && (rhythmZ[i].isNaN() || rhythmZ[i] > mood.maxRhythm)) return Float.NaN
         val total = mood.parts.values.sum()
-        var s = mood.parts.entries.sumOf { (key, w) -> (lib.moods.getValue(key)[i] * w).toDouble() }.toFloat() / total
+        var s = mood.parts.entries.sumOf { (key, w) -> (described(key, i) * w).toDouble() }.toFloat() / total
         if (mood.energy != 0f && !energy.isNaN()) s += 0.5f * mood.energy * energy
         return s
     }
@@ -1834,6 +1856,20 @@ class MixMaker(
             ),
             Mood("retro", "Retro Mix", "Old-school sound", mapOf("retro" to 1f), color = "#8A6A3B", oneLanguage = true),
         )
+
+        /**
+         * The analyzer's descriptions and the learned moods that stand in for them. Each one's 200 best songs agree
+         * far more often with the labels it didn't learn from than the description's (Happy 26% → 69%, Mass 42% →
+         * 78%, Devotional 15% → 66%, 2026-11-03). Not "sad": its learned mood picked no better and a few more wrong ones.
+         */
+        private val LEARNED_FOR = mapOf(
+            "chill" to "chill", "romantic" to "romance", "happy" to "happy", "party" to "party", "kuthu" to "kuthu", "heroic" to "mass",
+            "melody" to "melody", "devotional" to "devotional", "classical" to "classical", "lullaby" to "sleep",
+            "instrumental" to "instrumental",
+        )
+
+        private fun logit(p: Float): Float =
+            if (p.isNaN()) Float.NaN else p.coerceIn(1e-4f, 1 - 1e-4f).let { kotlin.math.ln(it / (1 - it)) }
 
         private val PALETTE = listOf("#7A3E9D", "#1E7F74", "#B8452E", "#2E5E9E", "#9C6B1C", "#4E7F2E", "#A33A6B", "#4F4F9E", "#2F7F9E", "#8F4A2F")
         private val DECADE_COLORS = listOf("#6B4F3A", "#7A5C2E", "#3A6B5C", "#5C3A6B", "#2E5E7A", "#7A2E4E", "#3E7A2E", "#7A6A2E")

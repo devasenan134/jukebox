@@ -8,7 +8,10 @@ and saves, for each recording:
   "sounds like this" use them;
 - how well descriptions like "a sad melancholic song" or "a fast folk dance song with thappu drums" fit it,
   which is where the **mood mixes** come from (nobody tags moods by hand);
-- tempo, energy, brightness and rhythm.
+- tempo, energy, brightness and rhythm;
+- once Jukebox has song labels from a language model (docs/song-labels.md), each mood, energy, valence and
+  "instrumental" learned from them and predicted for every song, which is much closer to the labels than the
+  descriptions are. It learns again when the labels change.
 
 It only **reads** the music and Jukebox's database, and writes just its own `features.db`, which Jukebox reads
 (`FEATURES_FOLDER` in Jukebox's `.env`). Songs are keyed by Jukebox's recording ids.

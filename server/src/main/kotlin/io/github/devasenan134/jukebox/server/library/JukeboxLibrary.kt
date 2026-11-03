@@ -8,6 +8,7 @@ import io.github.devasenan134.jukebox.server.MusicSource
 import io.github.devasenan134.jukebox.server.Person
 import io.github.devasenan134.jukebox.server.PlaylistTaste
 import io.github.devasenan134.jukebox.server.SongLabel
+import io.github.devasenan134.jukebox.server.learnedLabel
 import io.github.devasenan134.jukebox.server.moodScores
 import io.github.devasenan134.jukebox.server.zScores
 import io.github.devasenan134.jukebox.server.playlistTaste
@@ -145,6 +146,7 @@ class JukeboxLibrary(
         val energy = FloatArray(songs.size) { Float.NaN }
         val rhythm = FloatArray(songs.size) { Float.NaN }
         val prompts = HashMap<String, FloatArray>()
+        val learned = HashMap<String, FloatArray>()
         withContext(Dispatchers.IO) {
             val features = featuresDb?.takeIf { File(it).isFile }
             // The analyzer this server came from keyed songs by Navidrome's ids; those can't be matched any more.
@@ -165,6 +167,15 @@ class JukeboxLibrary(
                         sound[i] = floats(rs.getBytes(4))
                     }
                     c.query("SELECT key, embedding FROM prompts") { rs -> prompts[rs.getString(1)] = floats(rs.getBytes(2)) }
+                    // Labels the analyzer learned from the language model's (an older analyzer has none).
+                    val keys = runCatching { c.queryOne("SELECT value FROM meta WHERE key = 'learned_keys'") { it.getString(1) } }.getOrNull()?.split(',')
+                    if (keys != null) {
+                        keys.forEach { learned[it] = FloatArray(songs.size) { Float.NaN } }
+                        c.query("SELECT id, scores FROM learned") { rs ->
+                            val i = position[rs.getString(1)] ?: return@query
+                            floats(rs.getBytes(2)).forEachIndexed { k, v -> if (k < keys.size) learned.getValue(keys[k])[i] = v }
+                        }
+                    }
                 }
             }
         }
@@ -189,13 +200,20 @@ class JukeboxLibrary(
                 }
             }
         }
-        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm, links, zScores(plays), labels)
+        // Songs the language model didn't label (new ones) go by what the analyzer learned from its labels.
+        for (i in labels.indices) if (labels[i] == null) labels[i] = learnedLabel(learned, i)
+        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm, links, zScores(plays), labels, learned)
     }
 
     private fun snapshotIndex(songs: List<LibrarySong>): Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }
 
     private fun featuresVersion(): String = featuresDb?.takeIf { File(it).isFile }?.let { path ->
-        readOnly(path) { c -> c.queryOne("SELECT count(*), max(analyzed_at) FROM songs") { "${it.getInt(1)}-${it.getLong(2)}" } }
+        readOnly(path) { c ->
+            // updated_at changes when songs are analyzed and when labels are learned again.
+            c.queryOne("SELECT count(*), max(analyzed_at), (SELECT value FROM meta WHERE key = 'updated_at') FROM songs") {
+                "${it.getInt(1)}-${it.getLong(2)}-${it.getString(3)}"
+            }
+        }
     } ?: "none"
 
     private fun <T> readOnly(path: String, block: (Connection) -> T): T =

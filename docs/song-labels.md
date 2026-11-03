@@ -25,6 +25,30 @@ its lyrics, 50 songs a request, and writes one JSON line per song:
   loud ones never energy 1–2. Then how it sounds sorts the songs that fit. Songs without labels go by sound.
 - Seasons count matching themes like words in the title (rain → Rain Songs, festival → Deepavali...).
 
+## Learned from the sound
+
+The analyzer (analyzer/) learns from the confidently labelled songs how each mood, energy, valence and
+"instrumental" sound, from its CLAP embedding (a logistic regression per mood, a ridge regression for energy and
+valence), and predicts them for every song. It learns again whenever the labels change; new songs just get a
+prediction. The server uses the predictions:
+
+- in place of the analyzer's descriptions ("a sad melancholic song"…) when a mood looks at how songs sound
+  (`MixMaker.described`), except Sad, whose description did as well;
+- for energy, in place of loudness;
+- as the label of a song the language model didn't label (a new one): the moods it more likely has than not
+  (at most 3), never "sure".
+
+How well they match labels they didn't learn from (5-fold, 23,391 songs, 2026-11-03):
+
+| | descriptions | learned |
+|---|---|---|
+| moods (mean AUC) | 0.65 | 0.82 |
+| energy (rank correlation) | 0.17 (loudness) | 0.60 |
+| a mood's 200 best songs that have it: Happy, Party, Mass, Devotional | 26%, 30%, 42%, 15% | 69%, 78%, 78%, 66% |
+
+Essentia's ready-made mood models were tried too and did worse than the descriptions on Tamil film music
+(mean AUC 0.67: trained on Western music, they miss kuthu, melody, devotional and classical).
+
 ## Running it
 
 ```bash

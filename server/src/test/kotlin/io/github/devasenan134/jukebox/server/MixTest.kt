@@ -30,10 +30,10 @@ import kotlin.test.assertTrue
 private object Pretend {
     const val DIM = 16
     val styles = listOf("melody", "kuthu", "classical")
-    private val random = Random(1)
     private val styleSound = styles.indices.map { s -> FloatArray(DIM) { d -> if (d == s * 3) 1f else 0f } }
 
-    fun sound(style: Int) = unitOf(FloatArray(DIM) { styleSound[style][it] + 0.25f * random.nextFloat() })
+    /** Song [i]'s sound: its style's, with a little noise of its own (the same every time, whichever test asks first). */
+    fun sound(style: Int, i: Int) = Random(i).let { r -> unitOf(FloatArray(DIM) { styleSound[style][it] + 0.25f * r.nextFloat() }) }
 
     fun song(i: Int, style: Int, added: Long = 0, karaoke: Boolean = false) = LibrarySong(
         id = "song$i", title = "Song $i", album = "Movie ${i / 4}", albumId = "movie${i / 4}",
@@ -44,7 +44,7 @@ private object Pretend {
 
     /** 300 songs (+ [extra]); mood "sad" fits the melody style, "party" the kuthu style. */
     fun library(extra: List<Pair<LibrarySong, FloatArray>> = emptyList(), version: String = "v1"): LibrarySnapshot {
-        val base = (0 until 300).map { i -> song(i, i / 100, added = 1_000) to sound(i / 100) }
+        val base = (0 until 300).map { i -> song(i, i / 100, added = 1_000) to sound(i / 100, i) }
         val all = base + extra
         val sound = all.map { it.second }.toTypedArray<FloatArray?>()
         val prompts = mapOf("sad" to styleSound[0], "party" to styleSound[1], "kuthu" to styleSound[1], "chill" to styleSound[0], "melody" to styleSound[0])
@@ -146,7 +146,7 @@ class MixMakerTest {
 
     @Test
     fun `karaoke and songs you keep skipping stay out`() {
-        val karaoke = Pretend.song(900, 0, karaoke = true) to Pretend.sound(0)
+        val karaoke = Pretend.song(900, 0, karaoke = true) to Pretend.sound(0, 900)
         val lib = Pretend.library(listOf(karaoke))
         val skipped = lib.index.getValue("song50")
         val maker = maker(lib, skips = mapOf(skipped to SkipStats(skips = 3, listens = 0)))
@@ -158,7 +158,7 @@ class MixMakerTest {
     @Test
     fun `a new song that fits appears in the mixes on its own`() {
         val before = Pretend.library()
-        val newSongs = (1000 until 1005).map { Pretend.song(it, 0, added = now - MixMaker.DAY) to Pretend.sound(0) }
+        val newSongs = (1000 until 1005).map { Pretend.song(it, 0, added = now - MixMaker.DAY) to Pretend.sound(0, it) }
         val after = Pretend.library(newSongs, version = "v2")
         assertTrue(maker(before).home().flatMap { it.mixes }.none { m -> m.songs.any { it.id == "song1000" } })
         val maker = maker(after)
@@ -174,8 +174,8 @@ class MixMakerTest {
     fun `the same song in two movies, or its remix, is picked once`() {
         val original = Pretend.song(5, 0)
         val copies = listOf(
-            original.copy(id = "song2000", album = "Old folder", albumId = "old") to Pretend.sound(0),
-            original.copy(id = "song2001", title = "${original.title} (Remix)", albumId = "remix") to Pretend.sound(0),
+            original.copy(id = "song2000", album = "Old folder", albumId = "old") to Pretend.sound(0, 2000),
+            original.copy(id = "song2001", title = "${original.title} (Remix)", albumId = "remix") to Pretend.sound(0, 2001),
         )
         val lib = Pretend.library(copies)
         val maker = maker(lib)
@@ -351,7 +351,7 @@ class MixMakerTest {
     @Test
     fun `seasonal mixes come in their season, songs named for it first`() {
         val rain = (0 until 5).map { i ->
-            Pretend.song(1000 + i, 0).copy(id = "rain$i", title = "Mazhaiyil Nanaigiren $i", albumId = "rain$i", album = "Rain $i") to Pretend.sound(0)
+            Pretend.song(1000 + i, 0).copy(id = "rain$i", title = "Mazhaiyil Nanaigiren $i", albumId = "rain$i", album = "Rain $i") to Pretend.sound(0, 1000 + i)
         }
         val lib = Pretend.library(rain)
         val season = MixMaker.SEASONS.first { it.key == "rain" }
@@ -472,6 +472,30 @@ class MixMakerTest {
     }
 
     @Test
+    fun `learned moods stand in for the analyzer's descriptions`() {
+        val base = Pretend.library()
+        // The description says party songs sound like the kuthu style; what was learned from the labels says melody.
+        val party = FloatArray(base.songs.size) { i -> if (i / 100 == 0) 0.99f else 0.01f }
+        val learned = mapOf("party" to party, "kuthu" to party, "energy" to FloatArray(base.songs.size) { 3f })
+        val lib = LibrarySnapshot(base.songs, base.sound, base.moods, base.moodVectors, base.tempo, base.energy, "learned", base.rhythm, learned = learned)
+        val mix = assertNotNull(maker(lib).mood(MixMaker.MOODS.first { it.key == "party" }))
+        assertTrue(mix.songs.all { style(it.id) == 0 }, "the learned mood decides")
+    }
+
+    @Test
+    fun `a song nobody labelled gets a label from what was learned`() {
+        val learned = mapOf(
+            "melody" to floatArrayOf(0.8f, Float.NaN), "romance" to floatArrayOf(0.6f, Float.NaN), "sad" to floatArrayOf(0.3f, Float.NaN),
+            "instrumental" to floatArrayOf(0.1f, Float.NaN), "energy" to floatArrayOf(2.4f, Float.NaN), "valence" to floatArrayOf(4.6f, Float.NaN),
+        )
+        val label = assertNotNull(learnedLabel(learned, 0))
+        assertEquals(setOf("melody", "romance"), label.moods, "only the moods it more likely has than not")
+        assertEquals(2 to 5, label.energy to label.valence)
+        assertTrue(!label.sure && !label.instrumental)
+        assertEquals(null, learnedLabel(learned, 1), "nothing learned for it")
+    }
+
+    @Test
     fun `the daylist leaves out your songs whose labels don't fit its feeling`() {
         val base = Pretend.library()
         // This person plays melody songs at night, and two kuthu songs labelled full-energy dance numbers.
@@ -524,7 +548,7 @@ class MixMakerTest {
                 duration = 90,
                 genre = "Tamil",
                 score = true,
-            ) to Pretend.sound(0)
+            ) to Pretend.sound(0, 3000 + i)
         }
         val lib = Pretend.library(extra = scoreTracks)
         val maker = maker(lib)
