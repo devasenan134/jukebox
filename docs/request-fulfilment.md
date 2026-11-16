@@ -37,6 +37,13 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 - **An album already in the library:** only the songs (or score pieces) it doesn't have are downloaded; if it has them
   all, the request is closed with that album.
 - **Named after the request** (the catalog's name, which the library uses), not the matched page's title.
+- **Two or more songs of one album asked for: the whole album comes.** The server already turns 2+ queued songs of an
+  album into one album request, but not when the album is partly in the library or the catalog doesn't list it; then
+  they arrive as song requests. So the script groups a batch's song requests by album too: the first downloads every
+  song of the album (minus other versions and songs the library has), the rest come with it.
+- **Every album gets a cover:** the page's poster, else the catalog's (iTunes) album art. `fulfil.py covers` on the
+  Mac mini gives downloaded albums that still have none iTunes' art (`--dry-run` lists them first) and rescans; the
+  scanner now picks up a cover.jpg put beside songs it has already read.
 - **Other versions left out:** karaoke, remix, EDM, lo-fi, slowed/reverb, 8D, sped-up, mash-up and DJ-mix tracks
   aren't downloaded with an album unless the request is for one; a song request matched to a version is flagged.
 - **Lyrics:** LRCLIB (synced first, then plain), else JioSaavn's plain lyrics; only lyrics in the song's language's

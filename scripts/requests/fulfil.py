@@ -17,6 +17,7 @@ Fills music requests from the matcher's JSON (docs/request-fulfilment.md). Two h
     fulfil.py resume                       act on decisions left over (after a reboot), same waiting
     fulfil.py resend                       send downloads left on the laptop after a failed rsync, hand them in
     fulfil.py status                       what's waiting for a check, approved or rejected
+    fulfil.py covers [--dry-run]           on the server: downloaded albums without a cover get iTunes' album art
     fulfil.py undo <log.jsonl>             take music filed by a run back out of the library
 
 The admin listens on the Requests page and approves or rejects. Approved music is moved into the
@@ -341,6 +342,12 @@ def millis(duration):
     return total * 1000 if total else None
 
 
+def catalog_art(request):
+    """The request's album art from the catalog (iTunes, at 1000 px), the cover when the page's poster can't be had."""
+    url = (request.get("item") or {}).get("artworkUrl") or ""
+    return re.sub(r"/\d+x\d+bb\.", "/1000x1000bb.", url) or None
+
+
 def year_of(match):
     meta = match.get("metadata") or {}
     if meta.get("year"):
@@ -565,7 +572,9 @@ def tags_of(t):
     }
 
 
-def prepare(cfg, server, client, match, request, covered_by, notes, dry):
+def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=None):
+    """Downloads one request's music. [whole]: a song request standing for two or more songs asked for from the same
+    album (their request ids): the whole album is downloaded with it, and the others come with it."""
     rid = match["request_id"]
     meta = match.get("metadata") or {}
     best = match.get("best_match") or {}
@@ -601,7 +610,16 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
         return review, None, None
 
     # Which files, and their track numbers.
-    if is_song:
+    if is_song and whole:
+        # Two or more songs of this album were asked for: the whole album, but the other versions only if one was asked for.
+        song = match.get("matched_song") or {}
+        asked = {key(song.get("name"))}
+        picked = [(n, t) for n, t in enumerate(tracks, 1) if key(t.get("name")) in asked or not VERSION.search(t.get("name") or "")]
+        notes.append(f"{len(whole)} songs of this album were asked for (#{', #'.join(str(x) for x in whole)}): the whole album is downloaded")
+        if len(picked) < len(tracks):
+            notes.append(f"Left out {len(tracks) - len(picked)} other version(s): "
+                         + ", ".join(clean_title(t.get("name"), album) for n, t in enumerate(tracks, 1) if (n, t) not in picked))
+    elif is_song:
         song = match.get("matched_song") or {}
         if not song:
             raise RuntimeError("a song request without matched_song")
@@ -622,10 +640,10 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
 
     say(f"      matched   {album}{f' ({year})' if year else ''}" + (f" · music {composer}" if composer else "")
         + (f" · score {round(match['match_score'])}" if match.get("match_score") is not None else "")
-        + (f" · {len(picked)} of {len(tracks)} songs" if is_song else f" · {len(picked)} songs") + f" · {language.title()}")
+        + (f" · {len(picked)} of {len(tracks)} songs" if is_song and not whole else f" · {len(picked)} songs") + f" · {language.title()}")
 
     # Where it goes: the album's own folder if it's in the library (same title, and its year or composer).
-    title_for_place = clean_title(picked[0][1].get("name"), album) if is_song else None
+    title_for_place = clean_title((match.get("matched_song") or {}).get("name"), album) if is_song else None
     place = server.place(rid, year, composer, title_for_place, movie=album if score_album else None, score=score_album)
     existing = None
     suggested = in_library(cfg, into, safe_name(f"{album} ({year})" if year else album))
@@ -639,7 +657,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
         review.update(destination="existing", destinationAlbumId=place["albumId"], destinationFolder=folder,
                       suggestedFolder=suggested, scoreFolder=folder + SCORE)
         # Already there: a song that's in the album, or every song of the album, needs no download.
-        if is_song and place.get("songId"):
+        if is_song and place.get("songId") and not whole:
             return review, existing, "already"
         if not score_album or place.get("score"):
             # Songs (or, for a score, background pieces) the album already has aren't downloaded again.
@@ -666,17 +684,24 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     raw = work / ".raw"
     raw.mkdir(parents=True)
 
+    # The page's poster, else the catalog's (iTunes) album art: an album never goes in without a cover.
     cover = None
-    if cover_url:
+    failed = []
+    for url in dict.fromkeys(u for u in (cover_url, catalog_art(request)) if u):
         say("      cover     downloading…", end="")
         try:
+            fetch(client, url, raw / "cover.jpg")
             cover = raw / "cover.jpg"
-            fetch(client, cover_url, cover)
-            say(" ✓")
+            review["coverUrl"] = url
+            say(" ✓" + (" (the catalog's, the page's poster failed)" if failed else ""))
+            break
         except RuntimeError as e:
-            cover = None
-            notes.append(f"No cover: {e}")
+            failed.append(f"{urlparse(url).netloc}: {e}")
             say(f" ✗ {e}")
+    if not cover:
+        notes.append("No cover: " + ("; ".join(failed) if failed else "neither the page nor the catalog has one"))
+    elif failed:
+        notes.append(f"Cover from the catalog (the page's poster failed: {failed[0]})")
 
     base_tags = {"album": album, "date": str(year) if year else None, "album_artist": composer, "composer": composer,
                  "genre": language.title()}
@@ -758,6 +783,26 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry):
     return review, existing, None
 
 
+def album_key_of(match):
+    """Which album a match is from: its page's title and the year (songs of one film share it)."""
+    return key(clean_album((match.get("best_match") or {}).get("title") or "")), year_of(match)
+
+
+def song_groups(matches, requests):
+    """Albums two or more open song requests in the batch are from, each with those requests' ids: the whole album is
+    downloaded for them (only when the matches list every song of the album with a link to download it)."""
+    groups = {}
+    for m in matches:
+        r = requests.get(m.get("request_id"))
+        if not r or r["status"] != "open" or r.get("stage") or not m.get("match_found") or r["item"]["kind"] != "song":
+            continue
+        tracks = m.get("tracks") or []
+        if not tracks or not all(t.get("download320") or t.get("download128") for t in tracks):
+            continue
+        groups.setdefault(album_key_of(m), []).append(m["request_id"])
+    return {k: sorted(set(ids)) for k, ids in groups.items() if len(set(ids)) >= 2}
+
+
 def run(cfg, batch, dry):
     server = Server(cfg)
     matches = json.loads(Path(batch).read_text())
@@ -797,6 +842,7 @@ def run(cfg, batch, dry):
     say(f"Step {steps}/{steps}  Filling the requests")
 
     albums = {}
+    songs_of = song_groups(matches, requests)
     handed, report = [], []
     with httpx.Client(timeout=httpx.Timeout(60, connect=15), headers={"User-Agent": AGENT}) as client:
         for i, match in enumerate(matches, 1):
@@ -818,13 +864,16 @@ def run(cfg, batch, dry):
                 report.append(f"skipped  {label}: the matcher found nothing")
                 say("      skipped   the matcher found nothing")
                 continue
-            album_key = (key(clean_album((match.get("best_match") or {}).get("title") or "")), year_of(match))
+            album_key = album_key_of(match)
             covered_by = albums.get(album_key) if kind == "song" else None
+            whole = songs_of.get(album_key) if kind == "song" and not covered_by else None
             if covered_by:
                 say(f"      comes with #{covered_by} (its album is in this batch): nothing to download")
+            elif whole:
+                say(f"      {len(whole)} songs of this album were asked for: downloading the whole album")
             notes = []
             try:
-                review, existing, outcome = prepare(cfg, server, client, match, request, covered_by, notes, dry)
+                review, existing, outcome = prepare(cfg, server, client, match, request, covered_by, notes, dry, whole)
                 if outcome == "already":
                     # Everything asked for is already in the library: close it with that album, nothing to download.
                     if dry:
@@ -842,8 +891,8 @@ def run(cfg, batch, dry):
                 report.append(f"failed   {label}: {e}")
                 say(f"      ✗ failed  {e}")
                 continue
-            if kind == "movie":
-                albums[album_key] = rid
+            if kind == "movie" or whole:
+                albums[album_key] = rid  # the album's other songs in this batch come with this one
             where = (f"comes with #{covered_by}" if covered_by else
                      f"joins {review['destinationFolder']}" if existing else f"new folder {review['destinationFolder']}")
             lyr = sum(1 for t in review["tracks"] if t.get("lyrics") not in (None, "none"))
@@ -957,6 +1006,12 @@ def matched_title(cfg, rid):
     return clean_title(song.get("name"), saved.get("review", {}).get("album", "")) or None
 
 
+def asked_title(cfg, rid, review):
+    """The song a song request is for: the matched song (a request that brought its whole album has every song of it
+    in its tracks), else its one track."""
+    return matched_title(cfg, rid) or (review["tracks"][0]["title"] if review.get("tracks") else None)
+
+
 def act(cfg, server, waiting_for):
     """One look at the decisions for the requests in [waiting_for]."""
     requests = server.requests()
@@ -993,7 +1048,7 @@ def act(cfg, server, waiting_for):
             review = r.get("review") or {}
             if review.get("coveredBy") or (work / ".moved").exists():
                 continue  # comes with its album, or already in the library and waiting to be closed
-            first_title = review["tracks"][0]["title"] if review.get("tracks") and r["item"]["kind"] == "song" else None
+            first_title = asked_title(cfg, rid, review) if r["item"]["kind"] == "song" else None
             if review.get("destination") == "existing" and review.get("destinationAlbumId"):
                 place = server.place(rid, album_id=review["destinationAlbumId"])  # the album it was checked against
             elif review.get("destinationChosen"):
@@ -1031,7 +1086,7 @@ def act(cfg, server, waiting_for):
         song = r["item"]["kind"] == "song"
         title = None
         if song:
-            title = (review["tracks"][0]["title"] if review.get("tracks") else matched_title(cfg, rid)) or r["item"]["title"]
+            title = asked_title(cfg, rid, review) or r["item"]["title"]
         if review.get("destination") == "existing" and review.get("destinationAlbumId"):
             place = server.place(rid, title=title, album_id=review["destinationAlbumId"])
         else:
@@ -1150,6 +1205,67 @@ def status(cfg):
     print(f"{len(rows)} in progress" if rows else "Nothing waiting.")
 
 
+AUDIO = {".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wav"}
+COVER_NAMES = {"cover", "folder", "front", "album"}  # the scanner's (Scanner.kt coverNames)
+
+
+def itunes_cover(client, album, year):
+    """The album art iTunes has for [album] from [year] (±1), at 1000 px; None if it has none."""
+    try:
+        r = client.get("https://itunes.apple.com/search", params={"term": album, "entity": "album", "country": "IN", "limit": 25}, timeout=20)
+        r.raise_for_status()
+        results = r.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    for hit in results:
+        found = int((hit.get("releaseDate") or "0")[:4] or 0)
+        if key(clean_album(hit.get("collectionName"))) == key(album) and (not year or abs(found - year) <= 1) and hit.get("artworkUrl100"):
+            return hit["artworkUrl100"].replace("100x100bb", "1000x1000bb")
+    return None
+
+
+def covers(cfg, dry):
+    """Album folders in the libraries this script files into that have no cover (no cover.jpg beside the songs, none
+    inside them) get iTunes' album art as cover.jpg; then the library is rescanned so Jukebox shows them."""
+    music = Path(cfg["ROOT"])
+    added, missing = [], []
+    with httpx.Client(timeout=httpx.Timeout(30, connect=15), headers={"User-Agent": AGENT}) as client:
+        for library, folder in sorted(cfg["FOLDERS"].items()):
+            if library == cfg["LIBRARY_NAME"] or not (music / folder).is_dir():
+                continue  # the main library's albums came with their covers; only downloads are looked at
+            for album_dir in sorted(p for p in (music / folder).iterdir() if p.is_dir() and not p.name.startswith(".")):
+                songs = sorted(f for f in album_dir.iterdir() if f.suffix.lower() in AUDIO)
+                if not songs or any(f.stem.lower() in COVER_NAMES and f.suffix.lower() in (".jpg", ".jpeg", ".png") for f in album_dir.iterdir()):
+                    continue
+                if subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0",
+                                   str(songs[0])], capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout.strip():
+                    continue  # the picture is inside the songs
+                m = re.match(r"^(.*?)\s*\(((?:19|20)\d\d)\)", album_dir.name)
+                name, year = (m.group(1), int(m.group(2))) if m else (album_dir.name, None)
+                where = album_dir.relative_to(music)
+                url = itunes_cover(client, clean_album(name), year)
+                if not url:
+                    missing.append(str(where))
+                    say(f"  ✗ {where}: iTunes has no cover for it")
+                    continue
+                if dry:
+                    say(f"  would add {where}/cover.jpg ({url})")
+                    added.append(str(where))
+                    continue
+                try:
+                    fetch(client, url, album_dir / "cover.jpg")
+                    added.append(str(where))
+                    say(f"  ✓ {where}/cover.jpg")
+                except RuntimeError as e:
+                    missing.append(str(where))
+                    say(f"  ✗ {where}: {e}")
+    say(f"{len(added)} cover(s) {'to add' if dry else 'added'}, {len(missing)} album(s) still without one"
+        + (": give those a cover.jpg by hand" if missing else ""))
+    if added and not dry:
+        say("Rescanning the library…", end="")
+        say(" ✓" if Server(cfg).scan() else " still running after 30 minutes")
+
+
 def undo(cfg, path):
     music = Path(cfg["ROOT"])
     removed = 0
@@ -1174,6 +1290,8 @@ def main():
     sub.add_parser("resend", help="send downloads left on the laptop (after a failed rsync) and hand them in")
     sub.add_parser("wait")
     sub.add_parser("status")
+    c = sub.add_parser("covers", help="give downloaded albums that have no cover iTunes' album art (on the server)")
+    c.add_argument("--dry-run", action="store_true")
     u = sub.add_parser("undo")
     u.add_argument("log")
     args = p.parse_args()
@@ -1214,6 +1332,10 @@ def main():
         wait(cfg)
     elif args.command == "status":
         status(cfg)
+    elif args.command == "covers":
+        if remote:
+            sys.exit(f"Run covers on the server: ssh {remote} {cfg['REMOTE_FULFIL']} covers")
+        covers(cfg, args.dry_run)
     elif args.command == "undo":
         if remote:
             sys.exit(f"Run undo on the server: ssh {remote} {cfg['REMOTE_FULFIL']} undo <log>")

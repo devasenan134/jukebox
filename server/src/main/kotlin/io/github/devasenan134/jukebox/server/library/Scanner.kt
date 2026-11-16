@@ -38,6 +38,8 @@ data class ScanReport(
     val unreadable: Int,
     val lyricsUpdated: Int,
     val ms: Long,
+    /** Albums without a cover that took one from an image put in their folder since. */
+    val coversAdded: Int = 0,
 )
 
 private val log = LoggerFactory.getLogger("jukebox.scanner")
@@ -134,11 +136,12 @@ class Scanner(
         }
         val now = clock()
         db.tx { for (g in gone) if (g.missingSince == null) update("UPDATE files SET missing_since = ? WHERE id = ?", now, g.id) }
+        val coversAdded = db.tx { fillMissingCovers(libId, root, folderCovers) }
 
         val report = ScanReport(library.name, found.size, unchanged, added, updated, moved, gone.count { it.missingSince == null },
-            unreadable, lyricsUpdated, clock() - started)
+            unreadable, lyricsUpdated, clock() - started, coversAdded)
         db.tx { update("UPDATE scans SET finished_at = ?, info = ? WHERE id = ?", clock(), Json.encodeToString(ScanReport.serializer(), report), scanId) }
-        if (report.added + report.updated + report.moved + report.missing > 0) db.catalogChanged()
+        if (report.added + report.updated + report.moved + report.missing + report.coversAdded > 0) db.catalogChanged()
         log.info("Scanned {}: {}", library.name, report)
         report
     }
@@ -303,6 +306,30 @@ class Scanner(
             ?.sortedBy { f -> coverNames.indexOf(f.nameWithoutExtension.lowercase()).let { if (it < 0) 99 else it } }
             ?.firstOrNull { it.nameWithoutExtension.lowercase() in coverNames } ?: return null
         return storeArtwork(image.readBytes(), "folder")
+    }
+
+    /**
+     * Albums (and their releases and files) in library [libId] that have no cover take their folder's image, if one
+     * has been put there since: files that didn't change aren't read again, so a cover.jpg added beside them would
+     * otherwise never be seen. (A picture inside a file can't arrive without the file changing.) Returns how many
+     * albums got one.
+     */
+    private fun Connection.fillMissingCovers(libId: Long, root: File, folderCovers: HashMap<String, String?>): Int {
+        class Row(val fileId: Long, val path: String, val releaseId: String, val albumId: String)
+        val rows = query("""SELECT f.id, f.path, r.id, a.id FROM files f JOIN tracks t ON t.id = f.track_id
+                            JOIN releases r ON r.id = t.release_id JOIN albums a ON a.id = r.album_id
+                            WHERE f.library_id = ? AND f.missing_since IS NULL AND (r.cover_id IS NULL OR a.cover_id IS NULL)""", libId) {
+            Row(it.getLong(1), it.getString(2), it.getString(3), it.getString(4))
+        }
+        val albums = HashSet<String>()
+        for (row in rows) {
+            val folder = File(root, row.path).parentFile ?: continue
+            val coverId = folderCovers.getOrPut(folder.path) { folderCover(folder) } ?: continue
+            update("UPDATE files SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, row.fileId)
+            update("UPDATE releases SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, row.releaseId)
+            if (update("UPDATE albums SET cover_id = ? WHERE id = ? AND cover_id IS NULL", coverId, row.albumId) > 0) albums += row.albumId
+        }
+        return albums.size
     }
 
     private fun Connection.embeddedCover(file: File): String? = tools.embeddedPicture(file)?.let { storeArtwork(it, "embedded") }

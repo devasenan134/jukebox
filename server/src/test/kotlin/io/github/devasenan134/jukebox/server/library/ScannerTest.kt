@@ -106,6 +106,24 @@ class ScannerTest {
     }
 
     @Test
+    fun `a cover put beside songs already scanned is picked up`(): Unit = runBlocking {
+        airaa(1, "Kaariga", 300)
+        airaa(2, "Megathoodham", 500)
+        scanner.scan(library)
+        assertEquals(1, count("SELECT count(*) FROM albums WHERE cover_id IS NULL"))
+
+        File(root, "Airaa (2019)/cover.jpg").writeBytes(jpeg())
+        val report = scanner.scan(library)
+        assertEquals(2, report.unchanged)
+        assertEquals(1, report.coversAdded)
+        assertEquals(0, count("SELECT count(*) FROM albums WHERE cover_id IS NULL"))
+        assertEquals(0, count("SELECT count(*) FROM releases WHERE cover_id IS NULL"))
+        assertEquals(0, count("SELECT count(*) FROM files WHERE cover_id IS NULL"))
+        // Once it has one, later scans leave it be.
+        assertEquals(0, scanner.scan(library).coversAdded)
+    }
+
+    @Test
     fun `moving, renaming and retagging keep the recording id`() = runBlocking {
         val file = airaa(1, "Kaariga", 300)
         scanner.scan(library)
