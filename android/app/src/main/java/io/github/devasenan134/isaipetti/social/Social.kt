@@ -34,6 +34,7 @@ import io.github.devasenan134.isaipetti.data.MessageUpdatedEvent
 import io.github.devasenan134.isaipetti.data.NowPlayingUpdate
 import io.github.devasenan134.isaipetti.data.PresenceEvent
 import io.github.devasenan134.isaipetti.data.RecentsChangedEvent
+import io.github.devasenan134.isaipetti.data.FeedsChangedEvent
 import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.SocialApi
 import io.github.devasenan134.isaipetti.data.SocialEvent
@@ -398,6 +399,9 @@ class Social(private val context: Context, private val session: SessionStore, pr
     /** Fetches Recently played again (IsaipettiApp.syncRecents): on connecting, and when another device played something. */
     var onRecentsChanged: () -> Unit = {}
 
+    /** Fetches Home's Trending and Latest again (Mixes.refreshFeeds): when the server says one changed. */
+    var onFeedsChanged: () -> Unit = {}
+
     private suspend fun handle(event: SocialEvent) {
         when (event) {
             is PresenceEvent -> _friends.update { list ->
@@ -412,6 +416,7 @@ class Social(private val context: Context, private val session: SessionStore, pr
             }
             is FriendRequestEvent -> refreshRequests()
             is RecentsChangedEvent -> onRecentsChanged()
+            is FeedsChangedEvent -> onFeedsChanged()
             is ConversationUpdatedEvent -> refreshConversations()
             is TypingEvent -> _typing.update { all ->
                 all + (event.conversationId to (all[event.conversationId].orEmpty() + (event.userId to System.currentTimeMillis())))

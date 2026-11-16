@@ -95,6 +95,8 @@ fun HomeScreen(nav: Nav) {
     val mixes by app.mixes.home.collectAsStateWithLifecycle()
     // Every mix we know, so "Jump back in" can draw a mix with its own art (not just one song's cover).
     val followedMixes by app.mixes.followed.collectAsStateWithLifecycle()
+    // Trending and Latest on the music site, as far as the library has them (kept up to date live).
+    val feeds by app.mixes.feeds.collectAsStateWithLifecycle()
     val knownMixes = remember(mixes, followedMixes) { (mixes?.sections.orEmpty().flatMap { it.mixes } + followedMixes).associateBy { it.id } }
     // What the music is playing from (a playlist, movie, mix…), for the "Now playing" tile.
     val playingFrom = remember(effectiveNowPlaying.songId, effectiveNowPlaying.source, recentlyPlayed) { playingFrom(effectiveNowPlaying, recentlyPlayed) }
@@ -139,6 +141,8 @@ fun HomeScreen(nav: Nav) {
                     recentRow(recents.collections, playingFrom, effectiveNowPlaying.isPlaying, knownMixes, nav) { app.player.play(listOf(it)) }
                 }
                 else if (recents.songs.isEmpty()) albumRow("Jump back in", data.recent, nav)
+                // 4. Trending and Latest on the music site.
+                feeds.forEach { albumRow(it.title, it.albums, nav) }
                 mixSections(sections.filter { it.id != "made-for-you" }, nav)
                 albumRow("Most played", data.frequent, nav)
                 albumRow("Recently added", data.newest, nav)

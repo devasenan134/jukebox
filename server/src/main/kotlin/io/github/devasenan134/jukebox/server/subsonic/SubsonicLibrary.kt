@@ -145,7 +145,7 @@ class SubsonicLibrary(
     }
 
     /** Album list entries for album views by id, in that order. */
-    private suspend fun albumsById(ids: List<String>, me: Personal = Personal.NOBODY): List<JsonObject> {
+    suspend fun albumsById(ids: List<String>, me: Personal = Personal.NOBODY): List<JsonObject> {
         val byId = views().byId
         return ids.mapNotNull { byId[it] }.map { albumJson(it, null, me) }
     }

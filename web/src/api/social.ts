@@ -7,6 +7,15 @@ import type {
   ListeningStats, PushConfig, ResumePoint,
 } from './socialTypes'
 import type { ActivityItem } from '../state/history'
+import type { Album } from './types'
+
+/** A list of albums from the music site (Feeds.kt), in the site's order. */
+export interface Feed {
+  id: string
+  title: string
+  changedAt: number
+  albums: Album[]
+}
 import { session, type Credentials } from '../state/session'
 
 // HTTP calls to the server's friends API: accounts, invites, friends, chat, mixes and search, at the
@@ -81,6 +90,8 @@ export const social = {
   /** Sets your profile picture (a JPEG already cropped and shrunk). Returns you, with its new version. */
   setAvatar: (jpeg: Blob) => send<SocialUser>('PUT', '/me/avatar', undefined, { bytes: jpeg }),
   removeAvatar: () => send<SocialUser>('DELETE', '/me/avatar'),
+  /** Home's lists from the music site the library is kept up to date from (Trending, Latest): the albums of them the library has. */
+  feeds: () => get<Feed[]>('/feeds'),
   // Recently played and Resume, the same on all your devices (Recents.kt).
   recents: () => get<ActivityItem[]>('/me/recents'),
   recentPlayed: (item: Omit<ActivityItem, 'playedAt'>) => post<void>('/me/recents', item),

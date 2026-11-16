@@ -51,6 +51,64 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 - **Admins correct things** on the Requests page: "Change" on a download picks the album it joins; "Match album"
   closes an open request with an album from the library; "Change album" / "Reopen" fix a closed one.
 
+## Trending and Latest (feeds)
+
+Built 2026-11-16. `fulfil.py feeds` keeps the library up to date with masstamilan's two home-page lists,
+"Trending at MassTamilan.com" and "Latest Tamil songs download", and Home shows each as a row of albums
+(website, Mac app, Android), in the site's order:
+
+1. It reads both lists with api-anything (the `masstamilan` site's `trending` and `latest` operations), and for a
+   Trending album (only a name there) its composer, poster and year from the site's search.
+2. Every album on them is downloaded **whole**: the songs the library doesn't have (other versions left out, a song
+   JioSaavn names differently, "Hukum" for "Hukum - Thalaivar Alappara", counts as had), tagged, with lyrics and a
+   cover, like a request. Latest albums grow as singles come out, so each run looks again.
+3. **No check:** these aren't requests. On the laptop the albums go to `requests/feeds/<page>/` on the Mac mini and
+   `fulfil.py file-feeds` there files them (into the album's own folder if it's there, else
+   `tamil/masstamilan/<Album> (<Year>)/`), rescans and wakes the analyzer. Undo logs: `requests/undo/feeds-*.jsonl`.
+4. The lists go to `PUT /admin/feeds/{trending|latest}`. The server keeps them (schema 35), and when one changed it
+   sends `feedsChanged` so open apps fetch `GET /feeds` again. Home shows the albums of each list the library has.
+
+**Where it runs:** the home network's DNS sends masstamilan to a block page (156.154.112.141), on the Mac mini and the
+HP alike, so it runs on the MacBook, every 6 hours while it's awake. api-anything is a local tool and uses the network
+of the machine it runs on.
+
+**Setup on the MacBook (once):**
+
+```sh
+# the two lists, as api-anything operations of the masstamilan site (the sidebar is on every page)
+api-anything add masstamilan trending --trigger 'https://www.masstamilan.dev/' --match path=/ \
+  --html '{"items":"div.sb section.wid:first-of-type li","fields":{"title":"a","url":"a@href"}}' \
+  --description "The Trending at MassTamilan.com list (sidebar), in order"
+api-anything add masstamilan latest --trigger 'https://www.masstamilan.dev/' --match path=/ \
+  --html '{"items":"div.a-i","fields":{"title":"h2","url":"a@href","poster":"img@src","info":"p"}}' \
+  --description "The home page's Latest Tamil songs download list, in order"
+api-anything call masstamilan trending      # should list about 10 albums
+```
+
+Add `API_ANYTHING=<output of: which api-anything>` to `~/.config/jukebox-fulfil.env`, try
+`fulfil.py feeds --dry-run`, then schedule it with `~/Library/LaunchAgents/cc.craftingtable.jukebox-feeds.plist`
+(`launchctl load` it):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>cc.craftingtable.jukebox-feeds</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/uv</string><string>run</string><string>--script</string>
+    <string>/Users/YOU/code/jukebox/scripts/requests/fulfil.py</string><string>feeds</string>
+  </array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StartInterval</key><integer>21600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/tmp/jukebox-feeds.log</string>
+  <key>StandardErrorPath</key><string>/tmp/jukebox-feeds.log</string>
+</dict></plist>
+```
+
+The ssh to the Mac mini has to work without a prompt (`ssh-copy-id craftingtable`; if Cloudflare Access asks for a
+login, `cloudflared access login https://tp.craftingtable.cc` once).
+
 ## Setup (once)
 
 MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`); `ssh craftingtable`

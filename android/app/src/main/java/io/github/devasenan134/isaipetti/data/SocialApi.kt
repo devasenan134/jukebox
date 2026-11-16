@@ -72,6 +72,9 @@ class SocialApi(
 
     // Mixes, playlists and stations by Isai Pettai.
     /** Sends the phone's time zone, for the daylist and the days mixes change on. */
+    /** Home's lists from the music site (Trending, Latest): the albums of them the library has. */
+    suspend fun feeds(): List<Feed> = get("/feeds")
+
     suspend fun mixes(): HomeMixes = get("/mixes?tz=${enc(java.time.ZoneId.systemDefault().id)}")
     suspend fun mix(id: String): Mix = get("/mixes/${enc(id)}")
 

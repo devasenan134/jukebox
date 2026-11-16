@@ -178,14 +178,20 @@ fun Application.jukeboxServer(
     // Playlists from Spotify, Apple Music, YouTube or a file, matched to the library.
     val imports = music?.let { PlaylistImports(db, it, listening, requests, playlistReader) }
     val pictures = Pictures(db, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
-    val subsonic = musicLibrary?.let { lib ->
+    val subsonicLibrary = musicLibrary?.let { lib -> SubsonicLibrary(db, lib.covers, lib::roots, transcoder = transcoder) }
+    val subsonic = subsonicLibrary?.let { library ->
         SubsonicApi(
-            SubsonicLibrary(db, lib.covers, lib::roots, transcoder = transcoder),
+            library,
             signIn::checkToken,
             signIn::userId,
             listening
         )
     }
+    // Home's lists of albums from the music site the library is kept up to date from (Feeds.kt).
+    val feeds = if (requests != null && subsonicLibrary != null) {
+        Feeds(db, hub, stats::isAdmin, requests::findAlbumId, requests::hasAlbum, { subsonicLibrary.albumsById(it) })
+    } else null
+    fun feedsOn() = feeds ?: throw ApiError(HttpStatusCode.NotFound, "Home's lists are off on this server")
     val limiter = RateLimiter(maxPerMinute = 10)
     // Missing songs of playlists queued to be requested, made into requests at the pace the catalog allows.
     imports?.queue?.let { launch { it.run() } }
@@ -337,6 +343,8 @@ fun Application.jukeboxServer(
                 accounts.changePassword(call.me(), body.current, body.new, token)
                 call.respond(HttpStatusCode.NoContent)
             }
+            // Lists of albums from the music site, as rows on Home (Feeds.kt).
+            get("/feeds") { call.respond(feeds?.list(call.me()).orEmpty()) }
             // Recently played and Resume, the same on every device (Recents.kt).
             get("/me/recents") { call.respond(recents.list(call.me())) }
             post("/me/recents") { recents.played(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }
@@ -507,6 +515,14 @@ fun Application.jukeboxServer(
                 get("/access") { call.respond(AdminAccessDto(stats.isAdmin(call.me()))) }
                 get("/stats") { call.respond(stats.report(call.me(), call.request.queryParameters["tz"])) }
                 get("/requests") { call.respond(requestsOn().all(call.me())) }
+                // The masstamilan sync: is this album in the library, and where (like a request's place).
+                get("/library/place") {
+                    val q = call.request.queryParameters
+                    call.respond(requestsOn().placeAlbum(call.me(), q["movie"].orEmpty().take(200).ifBlank { throw ApiError(HttpStatusCode.BadRequest, "Which album?") },
+                        q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["score"] == "true"))
+                }
+                put("/feeds/{id}") { feedsOn().update(call.me(), call.parameters["id"].orEmpty(), call.receive()); call.respond(HttpStatusCode.NoContent) }
+                delete("/feeds/{id}") { feedsOn().remove(call.me(), call.parameters["id"].orEmpty()); call.respond(HttpStatusCode.NoContent) }
                 get("/requests/{id}/place") {
                     val q = call.request.queryParameters
                     call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200), q["albumId"]?.take(64), q["movie"]?.take(200), q["score"] == "true"))

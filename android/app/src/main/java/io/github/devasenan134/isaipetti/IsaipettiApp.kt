@@ -148,6 +148,7 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         likes = Likes(this, api, session) { social.api }
         myPlaylists = MyPlaylists(api, session)
         mixes = Mixes({ social.api }, appScope)
+        social.onFeedsChanged = { mixes.refreshFeeds() }
         if (session.credentials.value != null) {
             likes.refresh()
             myPlaylists.refresh()

@@ -534,6 +534,27 @@ class MusicRequests(
             ?: throw ApiError(HttpStatusCode.NotFound, "That album isn't in the library")
         val songTitle = title?.takeIf { it.isNotBlank() } ?: request.item.title.takeIf { request.item.kind == "song" }
         val songId = songTitle?.let { t -> Fuzzy.words(t).let { words -> movie.songs.firstOrNull { same(words, it.second) }?.first } }
+        return placeOf(movie, songId)
+    }
+
+    /**
+     * Where the album called [movie] from [year] (±1) or by [composer] is in the library, for the masstamilan sync
+     * (Feeds.kt), which fills albums no one asked for: the same answer as a request's [place].
+     */
+    suspend fun placeAlbum(me: UserDto, movie: String, year: Int?, composer: String?, score: Boolean = false): RequestPlace {
+        requireAdmin(me)
+        val library = shelf() ?: throw ApiError(HttpStatusCode.ServiceUnavailable, "The library isn't loaded yet")
+        val found = library.findAlbum(movie, year, composer, score) ?: throw ApiError(HttpStatusCode.NotFound, "That album isn't in the library")
+        return placeOf(found, null)
+    }
+
+    /** The album called [title] from [year] (±1) or by [composer], if the library has it (its songs, not its score). */
+    suspend fun findAlbumId(title: String, year: Int?, composer: String?): String? = shelf()?.findAlbum(title, year, composer)?.id
+
+    /** Whether [albumId] is still an album in the library. */
+    suspend fun hasAlbum(albumId: String): Boolean = shelf()?.album(albumId) != null
+
+    private suspend fun placeOf(movie: Shelf.Movie, songId: String?): RequestPlace {
         // The folder most of its files are in (a disc or two can sit in subfolders).
         val files = db.read {
             query(

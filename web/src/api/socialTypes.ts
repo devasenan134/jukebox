@@ -174,6 +174,7 @@ export type SocialEvent =
   | { type: 'devices'; activeDeviceId: string | null; devices: DeviceInfo[] }
   /** Something you played on another device (or this one): fetch Recently played again. */
   | { type: 'recentsChanged' }
+  | { type: 'feedsChanged' }
   | {
       type: 'remoteCommand'
       commandId: string

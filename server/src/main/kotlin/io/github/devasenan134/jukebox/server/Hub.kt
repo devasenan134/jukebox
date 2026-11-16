@@ -380,6 +380,11 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
         sessions.forEach { runCatching { it.session.close(CloseReason(CloseReason.Codes.NORMAL, "Account removed")) } }
     }
 
+    /** Sends [event] to every connected device of everyone. */
+    suspend fun sendToAll(event: Event) {
+        send(lock.withLock { userDevices.keys.toList() }, event)
+    }
+
     /** Sends [event] to every connected device of [userIds]. Returns the users who were offline. */
     suspend fun send(userIds: Collection<Long>, event: Event): List<Long> {
         val text = eventJson.encodeToString(Event.serializer(), event)

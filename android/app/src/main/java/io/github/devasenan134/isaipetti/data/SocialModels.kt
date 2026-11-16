@@ -195,6 +195,10 @@ sealed interface SocialEvent
 @Serializable @SerialName("recentsChanged")
 data object RecentsChangedEvent : SocialEvent
 
+/** Trending or Latest changed on the music site: Home's rows are fetched again. */
+@Serializable @SerialName("feedsChanged")
+data object FeedsChangedEvent : SocialEvent
+
 @Serializable @SerialName("presence")
 data class PresenceEvent(val userId: Long, val online: Boolean, val nowPlaying: SongRef? = null) : SocialEvent
 

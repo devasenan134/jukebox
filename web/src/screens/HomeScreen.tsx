@@ -15,9 +15,10 @@ import { ErrorBox, IconButton } from '../ui/kit'
 import { LikedTile, MixCover, MixSections } from '../ui/mixes'
 import { useNav, type Nav } from '../ui/nav'
 import { keys, queryClient } from '../state/queries'
+import { social } from '../api/social'
 
 // Home (ui/home/HomeScreen.kt): Made for you, the songs you played lately, "Jump back in", the other
-// mixes, then rows of albums: most played, recently added and random picks.
+// mixes, then rows of albums: Trending and Latest on the music site, most played, recently added and random picks.
 
 const RECENT_SONGS = 6
 
@@ -84,6 +85,8 @@ export function HomeScreen() {
     ])
     return { recent, frequent, newest }
   })
+  // Trending and Latest on the music site, as far as the library has them (kept up to date live, see social.ts).
+  const feeds = useLoad(['home', 'feeds'], () => social.feeds())
   // Random picks stay the same until you ask for new ones (Refresh), not every time you come back.
   const random = useLoad(['home', 'random'], () => subsonic.albumList('random', 20), Infinity)
   const refresh = () => {
@@ -166,6 +169,7 @@ export function HomeScreen() {
       ) : (
         <AlbumRow title="Jump back in" albums={d.recent} nav={nav} />
       )}
+      {(feeds.data ?? []).map((f) => <AlbumRow key={f.id} title={f.title} albums={f.albums} nav={nav} />)}
       <MixSections sections={sections.filter((s) => s.id !== 'made-for-you')} nav={nav} />
       <AlbumRow title="Most played" albums={d.frequent} nav={nav} />
       <AlbumRow title="Recently added" albums={d.newest} nav={nav} action={{ label: 'Show all', onClick: nav.openAlbums }} />

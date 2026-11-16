@@ -100,6 +100,10 @@ data class PlayEvent(
  * The mixes on Home and the ones you saved to Your Library. They're worked out on the friends server,
  * which keeps them up to date; the app just asks again when a screen opens.
  */
+/** A list of albums from the music site the library is kept up to date from (Trending, Latest), in the site's order. */
+@Serializable
+data class Feed(val id: String, val title: String, val changedAt: Long = 0, val albums: List<Album> = emptyList())
+
 class Mixes(private val api: () -> SocialApi, private val scope: CoroutineScope) {
     private val _home = MutableStateFlow<HomeMixes?>(null)
     /** Null until loaded, or if the friends server has no mixes. */
@@ -108,12 +112,22 @@ class Mixes(private val api: () -> SocialApi, private val scope: CoroutineScope)
     private val _followed = MutableStateFlow<List<Mix>>(emptyList())
     val followed: StateFlow<List<Mix>> = _followed
 
+    private val _feeds = MutableStateFlow<List<Feed>>(emptyList())
+    /** Trending and Latest on the music site, as far as the library has them (Home's rows). */
+    val feeds: StateFlow<List<Feed>> = _feeds
+
     fun refresh() {
         scope.launch {
             // No friends server, or mixes are off there: Home just doesn't show them.
             _home.value = runCatching { api().mixes() }.getOrNull() ?: _home.value
             _followed.value = runCatching { api().followedMixes() }.getOrNull() ?: _followed.value
         }
+        refreshFeeds()
+    }
+
+    /** Fetches Trending and Latest again: when Home opens, and when the server says one changed. */
+    fun refreshFeeds() {
+        scope.launch { _feeds.value = runCatching { api().feeds() }.getOrNull() ?: _feeds.value }
     }
 
     fun isFollowed(id: String) = _followed.value.any { it.id == id }

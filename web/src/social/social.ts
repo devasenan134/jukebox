@@ -10,6 +10,7 @@ import { toast } from '../ui/kit'
 import { getDeviceId, getDeviceName, getClientType } from '../state/deviceIdentity'
 import { syncCurrentPlayback } from '../state/devices'
 import { syncRecents } from '../state/history'
+import { queryClient } from '../state/queries'
 
 /**
  * Everything friends-related the UI needs, kept up to date live (port of social/Social.kt).
@@ -314,6 +315,10 @@ function handle(event: SocialEvent) {
       break
     case 'recentsChanged':
       void syncRecents()
+      break
+    case 'feedsChanged':
+      // Trending or Latest changed on the music site: Home's rows follow.
+      void queryClient.invalidateQueries({ queryKey: ['home', 'feeds'] })
       break
     case 'conversationUpdated':
       void refreshConversations()
