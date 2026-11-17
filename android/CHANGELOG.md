@@ -8,6 +8,18 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Sharper Covers (2.8.1)
+
+### Improved
+- **Sharper covers.** Albums brought in from MassTamilan get iTunes' 1000 px album art (or JioSaavn's 500 px) instead of the site's small poster with its name stamped on it, and the 35 albums already in the library with one were upgraded, inside their songs too.
+- **Trending Now.** Home's "Trending on MassTamilan" row is called **Trending Now**.
+
+### Fixed
+- **No more doubles from Trending and Latest.** Themes, instrumentals and reprises the library had (as background score) were downloaded again on every sync; they aren't, and the doubles are gone.
+
+### Server
+- A new cover.jpg in an album's folder replaces the old cover on the album's releases too, not only on the album.
+
 ## Trending Now (2.8.0)
 
 ### New
