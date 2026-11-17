@@ -23,9 +23,9 @@ object TestAudio {
     )
 
     /** A small JPEG. */
-    fun jpeg(file: File): File {
+    fun jpeg(file: File, color: String = "red"): File {
         file.parentFile.mkdirs()
-        run(listOf("ffmpeg", "-v", "error", "-nostdin", "-y", "-f", "lavfi", "-i", "color=c=red:s=256x256", "-frames:v", "1", file.path))
+        run(listOf("ffmpeg", "-v", "error", "-nostdin", "-y", "-f", "lavfi", "-i", "color=c=$color:s=256x256", "-frames:v", "1", file.path))
         return file
     }
 

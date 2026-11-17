@@ -239,9 +239,12 @@ class Scanner(
 
         // Cover: the folder's image, else the one in the file.
         val folder = f.file.parentFile?.path.orEmpty()
-        val coverId = folderCovers.getOrPut(folder) { folderCover(f.file.parentFile) } ?: if (p.hasPicture) embeddedCover(f.file) else null
+        val folderCoverId = folderCovers.getOrPut(folder) { folderCover(f.file.parentFile) }
+        val coverId = folderCoverId ?: if (p.hasPicture) embeddedCover(f.file) else null
         if (coverId != null) {
-            update("UPDATE releases SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, releaseId)
+            // A folder's image is the cover someone chose: a new one (a bigger one put there later) replaces the old.
+            if (folderCoverId != null) update("UPDATE releases SET cover_id = ? WHERE id = ? AND (cover_id IS NULL OR cover_id != ?)", coverId, releaseId, coverId)
+            else update("UPDATE releases SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, releaseId)
             // The album shows the soundtrack's cover rather than the score's or a single's.
             if (releaseKind == "soundtrack" || releaseKind == "album") update("UPDATE albums SET cover_id = ? WHERE id = ? AND (cover_id IS NULL OR cover_id != ?)", coverId, albumId, coverId)
             else update("UPDATE albums SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, albumId)

@@ -17,7 +17,11 @@ Fills music requests from the matcher's JSON (docs/request-fulfilment.md). Two h
     fulfil.py resume                       act on decisions left over (after a reboot), same waiting
     fulfil.py resend                       send downloads left on the laptop after a failed rsync, hand them in
     fulfil.py status                       what's waiting for a check, approved or rejected
-    fulfil.py covers [--dry-run]           on the server: downloaded albums without a cover get iTunes' album art
+    fulfil.py covers [--dry-run] [--upgrade]
+                                           on the server: downloaded albums without a cover get iTunes' (1000 px) or
+                                           JioSaavn's (500 px) album art; --upgrade also replaces small ones (masstamilan's
+                                           150 px posters) in every library, and the picture inside their mp3s
+    fulfil.py undo-covers <log.jsonl>      put back the covers a covers run replaced
     fulfil.py feeds [--dry-run] [--only trending,latest]
                                            every album on the site's Trending and Latest lists into the library
                                            (whole, no check), and the lists to Home
@@ -211,6 +215,17 @@ def music_names(cfg, folder):
     else:
         names = sorted(p.name for p in path.iterdir()) if path.is_dir() else []
     return [n for n in names if not n.startswith(".") and Path(n).suffix.lower() in AUDIO]
+
+
+def folder_titles(cfg, *folders):
+    """The song titles the files in [folders] (inside MUSIC_ROOT) are named after: "05 - Roddy Theme (jailer-2-2026-songs)
+    .mp3" is "Roddy Theme" (a number before, and the request or page a clashing file was named after, go)."""
+    titles = []
+    for folder in folders:
+        for n in music_names(cfg, folder):
+            stem = re.sub(r"^(?:\d+-)?\d+\s*-\s*", "", Path(n).stem)
+            titles.append(re.sub(r"\s*\((?:request \d+|[a-z0-9-]+-songs(?:-\d+)?)\)$", "", stem))
+    return titles
 
 
 def music_sample(cfg, folder):
@@ -770,7 +785,9 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             return review, existing, "already"
         if not score_album or place.get("score"):
             # Songs (or, for a score, background pieces) the album already has aren't downloaded again.
-            have = place.get("songs") or []
+            # The server's list leaves out what it took for background score ("Roddy Theme", "Das and Parvathy
+            # (Instrumental)"): the files in the album's folders count too, or those come again on every run.
+            have = (place.get("songs") or []) + folder_titles(cfg, folder, folder + SCORE)
             kept = [(n, t) for n, t in picked if not has_song(have, clean_title(t.get("name"), album))]
             review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
             picked = kept
@@ -785,7 +802,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             sample = music_sample(cfg, suggested) if rid is None else None
             if sample:
                 existing = {"folder": suggested, "sampleFile": sample, "library": into}
-                have = [re.sub(r"^\d+\s*-\s*", "", Path(n).stem) for n in music_names(cfg, suggested)]
+                have = folder_titles(cfg, suggested, suggested + SCORE)
                 kept = [(n, t) for n, t in picked if not has_song(have, clean_title(t.get("name"), album))]
                 review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
                 picked = kept
@@ -817,11 +834,12 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
     raw = work / ".raw"
     raw.mkdir(parents=True)
 
-    # The page's poster, else the catalog's (iTunes) album art: an album never goes in without a cover.
+    # The catalog's art the request was made from, else iTunes' or JioSaavn's for the album (by its composer), else the
+    # page's poster (masstamilan's are 150 px): an album never goes in without a cover.
     cover = None
     failed = []
-    # Last, iTunes' art found by the album's name: only looked up if the others fail.
-    candidates = list(dict.fromkeys(u for u in (cover_url, catalog_art(request)) if u)) + [lambda: itunes_cover(client, album, year)]
+    candidates = ([catalog_art(request)] if catalog_art(request) else []) + cover_choices(
+        client, album, year, composer, language, cover_url)
     for url in candidates:
         if callable(url) and not (url := url()):
             continue
@@ -832,15 +850,14 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
                 raise RuntimeError("not an image (a page?)")
             cover = raw / "cover.jpg"
             review["coverUrl"] = url
-            say(" ✓" + (" (the catalog's, the page's poster failed)" if failed else ""))
+            size = image_size(cover)
+            say(f" ✓ {urlparse(url).netloc}" + (f" · {size[0]} px" if size else ""))
             break
         except RuntimeError as e:
             failed.append(f"{urlparse(url).netloc}: {e}")
             say(f" ✗ {e}")
     if not cover:
         notes.append("No cover: " + ("; ".join(failed) if failed else "neither the page nor the catalog has one"))
-    elif failed:
-        notes.append(f"Cover from the catalog (the page's poster failed: {failed[0]})")
 
     base_tags = {"album": album, "date": str(year) if year else None, "album_artist": composer, "composer": composer,
                  "genre": language.title(), "source": "masstamilan"}
@@ -1351,61 +1368,198 @@ AUDIO = {".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wav"}
 COVER_NAMES = {"cover", "folder", "front", "album"}  # the scanner's (Scanner.kt coverNames)
 
 
-def itunes_cover(client, album, year):
-    """The album art iTunes has for [album] from [year] (±1), at 1000 px; None if it has none."""
+def same_people(a, b):
+    """Whether [a] and [b] ("Anirudh Ravichander, Heisenberg & Vedan") name a person in common."""
+    keys = lambda t: {key(x) for x in people(t).split(", ")} - {""}
+    return bool(keys(a) & keys(b))
+
+
+FROM_FILM = re.compile(r"\(from\s+[\"“']?(.+?)[\"”']?\)", re.I)
+
+
+def art_rank(name, album):
+    """0: [name] is the album itself ("DC (Original Motion Picture Soundtrack)"); 1: a song of it ("Magale (From
+    \"Baththa\") - Single", the film's poster with the song's name); None: another album."""
+    name = html.unescape(name or "")
+    if key(clean_album(re.sub(r"\s+-\s+(single|ep)$", "", name, flags=re.I))) == key(album):
+        return 1 if re.search(r"\s-\s(single|ep)$", name, re.I) else 0
+    film = FROM_FILM.search(name)
+    return 1 if film and key(clean_album(film.group(1))) == key(album) else None
+
+
+def itunes_cover(client, album, year, composer=None):
+    """The album art iTunes has for [album] from [year] (±1), at 1000 px; None if it has none. With [composer], only an
+    album by them: a title alone finds other people's singles ("Delivery Boy - Single" by Anju Bhatt)."""
     try:
-        r = client.get("https://itunes.apple.com/search", params={"term": album, "entity": "album", "country": "IN", "limit": 25}, timeout=20)
+        r = client.get("https://itunes.apple.com/search", params={"term": album, "entity": "album", "country": "IN", "limit": 50}, timeout=20)
         r.raise_for_status()
         results = r.json().get("results") or []
     except (httpx.HTTPError, ValueError):
         return None
+    hits = []
     for hit in results:
         found = int((hit.get("releaseDate") or "0")[:4] or 0)
-        if key(clean_album(hit.get("collectionName"))) == key(album) and (not year or abs(found - year) <= 1) and hit.get("artworkUrl100"):
-            return hit["artworkUrl100"].replace("100x100bb", "1000x1000bb")
+        rank = art_rank(hit.get("collectionName"), album)
+        if (rank is not None and (not year or abs(found - year) <= 1) and hit.get("artworkUrl100")
+                and (same_people(composer, hit.get("artistName")) if composer else rank == 0)):
+            hits.append((rank, hit["artworkUrl100"].replace("100x100bb", "1000x1000bb")))
+    return min(hits)[1] if hits else None
+
+
+def saavn_cover(client, album, year, composer, language="tamil"):
+    """JioSaavn's album art for [album] (by [composer], from [year] ±1), at 500 px: the album, else a song of it (most
+    films are there as singles first); one in [language] before the others. None if it has none."""
+    if not composer:
+        return None
+    try:
+        r = client.get(SAAVN, params={"__call": "search.getAlbumResults", "q": album, "n": 20, "p": 1, "_format": "json",
+                                      "_marker": "0", "api_version": "4", "ctx": "web6dot0"},
+                       headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        r.raise_for_status()
+        results = r.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    hits = []
+    for hit in results:
+        rank = art_rank(hit.get("title"), album)
+        image = hit.get("image") or ""
+        found = int(hit.get("year") or 0)
+        if (rank is not None and "150x150" in image and (not year or not found or abs(found - year) <= 1)
+                and same_people(composer, (hit.get("more_info") or {}).get("music"))):
+            other_language = f"-{language.title()}-" not in image
+            hits.append((rank, other_language, image.replace("150x150", "500x500")))
+    return min(hits)[2] if hits else None
+
+
+def cover_choices(client, album, year, composer, language, *more):
+    """Where an album's cover is looked for, best first: iTunes (1000 px), JioSaavn (500 px), then [more] (the site's
+    poster is 150 px). Callables are only called when the ones before fail."""
+    return [lambda: itunes_cover(client, album, year, composer), lambda: saavn_cover(client, album, year, composer, language),
+            *[u for u in more if u]]
+
+
+def image_size(path):
+    """(width, height) of a JPEG or PNG, read from its header; None if it isn't one."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read(64 * 1024)
+    except OSError:
+        return None
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    i = 2
+    while data[:2] == b"\xff\xd8" and i + 9 < len(data):
+        if data[i] != 0xFF:
+            return None
+        marker, length = data[i + 1], int.from_bytes(data[i + 2:i + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            return int.from_bytes(data[i + 7:i + 9], "big"), int.from_bytes(data[i + 5:i + 7], "big")
+        i += 2 + length
     return None
 
 
-def covers(cfg, dry):
-    """Album folders in the libraries this script files into that have no cover (no cover.jpg beside the songs, none
-    inside them) get iTunes' album art as cover.jpg; then the library is rescanned so Jukebox shows them."""
+def embed_cover(path, cover):
+    """Puts [cover] inside mp3 [path] in place of its picture, keeping everything else."""
+    tmp = path.with_name(f".cover-{path.name}")
+    subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-i", str(cover), "-map", "0:a", "-map", "1:v",
+                    "-c", "copy", "-map_metadata", "0", "-disposition:v", "attached_pic", "-metadata:s:v", "title=Album cover",
+                    "-metadata:s:v", "comment=Cover (front)", "-id3v2_version", "3", "-write_id3v1", "0", str(tmp)],
+                   check=True, capture_output=True, stdin=subprocess.DEVNULL)
+    tmp.replace(path)
+
+
+SMALL_COVER = 400  # px: masstamilan's posters are 150, JioSaavn's 500, iTunes' 1000
+
+
+def covers(cfg, dry, upgrade=False):
+    """Album folders without a cover (no cover.jpg beside the songs, none inside them) get iTunes' or JioSaavn's album
+    art as cover.jpg. With [upgrade], so do albums whose cover is under SMALL_COVER px (masstamilan's posters), in every
+    library: the old one is kept for undo, and the album's mp3s get the new picture inside too (what the apps and
+    downloads show). Then the library is rescanned so Jukebox shows them."""
     music = Path(cfg["ROOT"])
     added, missing = [], []
+    logs = Path(cfg["REQUESTS_FOLDER"]) / "undo"
+    stamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+    undo_path, kept = logs / f"covers-{stamp}.jsonl", logs / f"covers-{stamp}"
     with httpx.Client(timeout=httpx.Timeout(30, connect=15), headers={"User-Agent": AGENT}) as client:
         for library, folder in sorted(cfg["FOLDERS"].items()):
-            if library == cfg["LIBRARY_NAME"] or not (music / folder).is_dir():
+            if (library == cfg["LIBRARY_NAME"] and not upgrade) or not (music / folder).is_dir():
                 continue  # the main library's albums came with their covers; only downloads are looked at
+            language = language_of(library)
             for album_dir in sorted(p for p in (music / folder).iterdir() if p.is_dir() and not p.name.startswith(".")):
-                songs = sorted(f for f in album_dir.iterdir() if f.suffix.lower() in AUDIO)
-                if not songs or any(f.stem.lower() in COVER_NAMES and f.suffix.lower() in (".jpg", ".jpeg", ".png") for f in album_dir.iterdir()):
+                files = list(album_dir.iterdir())
+                songs = sorted(f for f in files if f.suffix.lower() in AUDIO and not f.name.startswith("."))
+                image = next((f for f in files if f.stem.lower() in COVER_NAMES and f.suffix.lower() in (".jpg", ".jpeg", ".png")), None)
+                if not songs:
                     continue
-                if subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0",
-                                   str(songs[0])], capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout.strip():
+                if image:
+                    size = image_size(image)
+                    if not upgrade or not size or min(size) >= SMALL_COVER:
+                        continue
+                elif subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0",
+                                     str(songs[0])], capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout.strip() and not upgrade:
                     continue  # the picture is inside the songs
                 m = re.match(r"^(.*?)\s*\(((?:19|20)\d\d)\)", album_dir.name)
                 name, year = (m.group(1), int(m.group(2))) if m else (album_dir.name, None)
+                tags = album_tags_from(str(songs[0]))
+                composer = tags.get("album_artist") or tags.get("composer")
                 where = album_dir.relative_to(music)
-                url = itunes_cover(client, clean_album(name), year)
+                url = next((u for u in (c() for c in cover_choices(client, clean_album(name.replace(SCORE, "")), year, composer, language)) if u), None)
                 if not url:
                     missing.append(str(where))
-                    say(f"  ✗ {where}: iTunes has no cover for it")
+                    say(f"  ✗ {where}: neither iTunes nor JioSaavn has a cover for it" + ("" if composer else " (no composer to check it by)"))
                     continue
                 if dry:
-                    say(f"  would add {where}/cover.jpg ({url})")
+                    say(f"  would {'replace' if image else 'add'} {where}/cover.jpg ({url})")
                     added.append(str(where))
                     continue
+                fresh = album_dir / ".cover-new.jpg"
                 try:
-                    fetch(client, url, album_dir / "cover.jpg")
-                    added.append(str(where))
-                    say(f"  ✓ {where}/cover.jpg")
+                    fetch(client, url, fresh)
+                    if not looks_like_image(fresh):
+                        raise RuntimeError("not an image")
+                    if image and min(image_size(fresh) or (0, 0)) <= min(image_size(image) or (0, 0)):
+                        raise RuntimeError("no bigger than the one there")
                 except RuntimeError as e:
+                    fresh.unlink(missing_ok=True)
                     missing.append(str(where))
                     say(f"  ✗ {where}: {e}")
-    say(f"{len(added)} cover(s) {'to add' if dry else 'added'}, {len(missing)} album(s) still without one"
-        + (": give those a cover.jpg by hand" if missing else ""))
+                    continue
+                logs.mkdir(exist_ok=True)
+                with open(undo_path, "a") as undo:
+                    if image:
+                        backup = kept / where / image.name
+                        backup.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(image, backup)
+                        image.unlink()
+                        undo.write(json.dumps({"cover": str(where / image.name), "old": str(backup)}) + "\n")
+                    else:
+                        undo.write(json.dumps({"cover": str(where / "cover.jpg"), "old": None}) + "\n")
+                    fresh.rename(album_dir / "cover.jpg")
+                inside = [f for f in songs if f.suffix.lower() == ".mp3"] if upgrade else []
+                for f in inside:
+                    embed_cover(f, album_dir / "cover.jpg")
+                added.append(str(where))
+                say(f"  ✓ {where}/cover.jpg ({urlparse(url).netloc}, {'x'.join(map(str, image_size(album_dir / 'cover.jpg') or ()))})"
+                    + (f", inside {len(inside)} song(s)" if inside else ""))
+    say(f"{len(added)} cover(s) {'to change' if dry else 'changed'}, {len(missing)} album(s) without a better one")
     if added and not dry:
+        say(f"Undo: fulfil.py undo-covers {undo_path}")
         say("Rescanning the library…", end="")
         say(" ✓" if Server(cfg).scan() else " still running after 30 minutes")
+        if cfg.get("ANALYZER"):
+            subprocess.run(["docker", "kill", "-s", "USR1", cfg["ANALYZER"]], capture_output=True)
+
+
+def undo_covers(cfg, path):
+    """Puts back the covers a covers run replaced (and takes away the ones it added); the songs keep the new picture."""
+    music = Path(cfg["ROOT"])
+    for line in reversed(Path(path).read_text().splitlines()):
+        e = json.loads(line)
+        (music / e["cover"]).unlink(missing_ok=True)
+        if e["old"] and Path(e["old"]).exists():
+            shutil.copy2(e["old"], music / e["cover"])
+    print("Covers put back. Run a library scan to update Jukebox.")
 
 
 # ---------------------------------------------------------------- the site's lists (feeds)
@@ -1413,7 +1567,7 @@ def covers(cfg, dry):
 
 # The site's lists, as api-anything operations of the "masstamilan" site (docs/request-fulfilment.md has the commands
 # that teach them), and their names on Home.
-FEEDS = {"trending": "Trending on MassTamilan", "latest": "Latest Tamil songs"}
+FEEDS = {"trending": "Trending Now", "latest": "Latest Tamil songs"}
 SITE = "https://www.masstamilan.dev"
 
 
@@ -1661,8 +1815,11 @@ def main():
     f.add_argument("--dry-run", action="store_true")
     f.add_argument("--only", help="trending, latest or both (comma separated)")
     sub.add_parser("file-feeds", help="on the server: file the albums feeds left there")
-    c = sub.add_parser("covers", help="give downloaded albums that have no cover iTunes' album art (on the server)")
+    c = sub.add_parser("covers", help="give downloaded albums without a cover iTunes' or JioSaavn's album art (on the server)")
     c.add_argument("--dry-run", action="store_true")
+    c.add_argument("--upgrade", action="store_true", help=f"also replace covers under {SMALL_COVER} px, in every library")
+    uc = sub.add_parser("undo-covers")
+    uc.add_argument("log")
     u = sub.add_parser("undo")
     u.add_argument("log")
     args = p.parse_args()
@@ -1712,7 +1869,9 @@ def main():
     elif args.command == "covers":
         if remote:
             sys.exit(f"Run covers on the server: ssh {remote} {cfg['REMOTE_FULFIL']} covers")
-        covers(cfg, args.dry_run)
+        covers(cfg, args.dry_run, args.upgrade)
+    elif args.command == "undo-covers":
+        undo_covers(cfg, args.log)
     elif args.command == "undo":
         if remote:
             sys.exit(f"Run undo on the server: ssh {remote} {cfg['REMOTE_FULFIL']} undo <log>")

@@ -124,6 +124,24 @@ class ScannerTest {
     }
 
     @Test
+    fun `a better cover put in the folder replaces the old one`(): Unit = runBlocking {
+        airaa(1, "Kaariga", 300)
+        File(root, "Airaa (2019)/cover.jpg").writeBytes(jpeg())
+        scanner.scan(library)
+        val old = count("SELECT count(DISTINCT cover_id) FROM releases")
+        assertEquals(1, old)
+
+        // A bigger cover goes in, and the songs get it inside too (fulfil.py covers --upgrade).
+        TestAudio.jpeg(File(root, "Airaa (2019)/cover.jpg"), color = "blue")
+        airaa(1, "Kaariga", 300, singers = "Haricharan")
+        assertEquals(1, scanner.scan(library).updated)
+        assertEquals(1, count("""SELECT count(*) FROM releases r JOIN albums a ON a.id = r.album_id
+                                 JOIN artwork w ON w.id = r.cover_id WHERE r.cover_id = a.cover_id AND w.source = 'folder'"""))
+        assertEquals(2, count("SELECT count(*) FROM artwork"))
+        assertEquals(0, count("SELECT count(*) FROM releases WHERE cover_id = (SELECT min(id) FROM artwork WHERE id NOT IN (SELECT cover_id FROM albums))"))
+    }
+
+    @Test
     fun `moving, renaming and retagging keep the recording id`() = runBlocking {
         val file = airaa(1, "Kaariga", 300)
         scanner.scan(library)

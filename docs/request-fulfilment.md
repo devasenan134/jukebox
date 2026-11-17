@@ -47,15 +47,23 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 - **A request for the songs isn't filled by the score:** search keeps offering "Vishwaroopam II" while the library has
   only its score, and the review card warns when a songs request was matched to a score page (or the other way).
 - **An album already in the library:** only the songs (or score pieces) it doesn't have are downloaded; if it has them
-  all, the request is closed with that album.
+  all, the request is closed with that album. "Has" is the server's list of the album's songs plus the files in its
+  folder and its score folder: the server leaves out what it took for background score ("Roddy Theme", "Das and
+  Parvathy (Instrumental)"), and before 2026-11-17 those were downloaded again on every feeds run.
 - **Named after the request** (the catalog's name, which the library uses), not the matched page's title.
 - **Two or more songs of one album asked for: the whole album comes.** The server already turns 2+ queued songs of an
   album into one album request, but not when the album is partly in the library or the catalog doesn't list it; then
   they arrive as song requests. So the script groups a batch's song requests by album too: the first downloads every
   song of the album (minus other versions and songs the library has), the rest come with it.
-- **Every album gets a cover:** the page's poster, else the catalog's (iTunes) album art. `fulfil.py covers` on the
-  Mac mini gives downloaded albums that still have none iTunes' art (`--dry-run` lists them first) and rescans; the
-  scanner now picks up a cover.jpg put beside songs it has already read.
+- **Every album gets a cover, the best there is:** the catalog's art the request was made from, else iTunes' (1000 px),
+  else JioSaavn's (500 px), else the page's poster (masstamilan's are 150 px and stamped with the site's name). iTunes
+  and JioSaavn are only taken for an album by its composer: a title alone finds other people's albums ("Delivery Boy -
+  Single" by someone else); a single of the film ("Magale (From "Baththa")") counts, as most new films are only there
+  as singles. `fulfil.py covers` on the Mac mini gives downloaded albums that still have none a cover (`--dry-run`
+  lists them first); `covers --upgrade` also replaces covers under 400 px in every library, puts the new one inside
+  the album's mp3s, keeps the old ones for `fulfil.py undo-covers <log>`, and rescans. The scanner picks up a
+  cover.jpg put beside songs it has already read, and a new folder cover replaces the old one on the album and its
+  releases when the songs change.
 - **Other versions left out:** karaoke, remix, EDM, lo-fi, slowed/reverb, 8D, sped-up, mash-up and DJ-mix tracks
   aren't downloaded with an album unless the request is for one; a song request matched to a version is flagged.
 - **Lyrics:** LRCLIB (synced first, then plain), else JioSaavn's plain lyrics; only lyrics in the song's language's
@@ -67,7 +75,8 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 
 Built 2026-11-16. `fulfil.py feeds` keeps the library up to date with masstamilan's two home-page lists,
 "Trending at MassTamilan.com" and "Latest Tamil songs download", and Home shows each as a row of albums
-(website, Mac app, Android), in the site's order:
+(website, Mac app, Android), in the site's order, as "Trending Now" and "Latest Tamil songs" (the names are the
+script's `FEEDS`, sent with each list):
 
 1. It reads both lists with api-anything (the `masstamilan` site's `trending` and `latest` operations), and for a
    Trending album (only a name there) its composer, poster and year from the site's search.
