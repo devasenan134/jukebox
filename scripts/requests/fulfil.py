@@ -821,7 +821,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             continue
         say("      cover     downloading…", end="")
         try:
-            fetch(client, url, raw / "cover.jpg")
+            fetch(client, url, raw / "cover.jpg", referer=base or None)
             cover = raw / "cover.jpg"
             review["coverUrl"] = url
             say(" ✓" + (" (the catalog's, the page's poster failed)" if failed else ""))
