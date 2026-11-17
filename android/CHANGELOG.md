@@ -8,6 +8,17 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Trending Now (2.8.0)
+
+### New
+- **Trending and Latest on Home.** Two new rows on Home, after Jump back in: **Trending on MassTamilan** and **Latest Tamil songs**, in the site's own order. Every album on them is brought into the library whole (cover, lyrics and all) every six hours, so the rows are always playable. They change on your phone, the website and the Mac app as soon as the lists do.
+
+### Server
+- `GET /feeds` lists Home's rows with the albums the library has; `PUT /admin/feeds/{id}` replaces one (the sync sends it), and a `feedsChanged` event tells the apps.
+- Requests: two or more songs asked for from one film bring the whole album, and every album gets a cover.
+- The library is one folder per album; a newer download's year or album artist corrects the whole album.
+- Moods for the mixes are learned from the labels; credits come from JioSaavn and Wikidata. Jukebox runs without Navidrome.
+
 ## On the Road (2.7.0)
 
 ### New
