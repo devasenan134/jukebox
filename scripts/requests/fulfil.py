@@ -503,6 +503,11 @@ def looks_like_mp3(path):
     return head == b"ID3" or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)
 
 
+def looks_like_image(path):
+    head = path.read_bytes()[:12]
+    return head[:3] == b"\xff\xd8\xff" or head[:8] == b"\x89PNG\r\n\x1a\n" or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+
+
 def tag(src, dest, tags, cover=None):
     """Rewrites [src] into [dest] with only our tags (the site's own name and cover go) and the cover."""
     cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(src)]
@@ -688,7 +693,8 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
     year = year_of(match)
     composer = people(meta.get("music") or "")
     lyricists = people(meta.get("lyricists") or "")
-    cover_url = urljoin(base, meta.get("poster") or best.get("poster") or "") or None
+    poster = meta.get("poster") or best.get("poster")
+    cover_url = urljoin(base, poster) if poster else None  # urljoin(base, "") is the page itself
     is_song = request["item"]["kind"] == "song"
     language = (meta.get("language") or "").strip().lower() or language_of(cfg["LIBRARY_NAME"])
     if not target(cfg, language):
@@ -822,6 +828,8 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
         say("      cover     downloading…", end="")
         try:
             fetch(client, url, raw / "cover.jpg", referer=base or None)
+            if not looks_like_image(raw / "cover.jpg"):
+                raise RuntimeError("not an image (a page?)")
             cover = raw / "cover.jpg"
             review["coverUrl"] = url
             say(" ✓" + (" (the catalog's, the page's poster failed)" if failed else ""))
