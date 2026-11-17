@@ -22,11 +22,23 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 
 ## How music is filed
 
-- **Its own folder per source and language:** downloads go to `MusicLibrary/<language>/masstamilan/`
-  (`tamil/masstamilan`, `malayalam/masstamilan`, …), never into `tamil/jiosaavn_m4a`. The language is the matcher's
-  `metadata.language` (not always right: it said Tamil for Premam). `tamil-masstamilan` is a library that adds to
-  the Tamil albums (LIBRARIES' fourth part, `:tamil`), so a song for an album JioSaavn already has goes to
-  `tamil/masstamilan/<that album's folder name>/` with that album's tags and shows up in the same album.
+- **One folder per album** (since 2026-11-17): every album is `MusicLibrary/<language>/<Album> (<Year>)/`, whichever
+  source its songs came from. A song for an album the library has goes into that album's folder with its tags. Where a
+  file came from is a tag: `source=masstamilan` on everything downloaded from masstamilan; a file without one is from
+  JioSaavn (those 28,500 files weren't rewritten for a tag: a changed file is analysed again). The language is the
+  matcher's `metadata.language` (not always right: it said Tamil for Premam).
+- **The newest download wins:** when a download joins an album and brings another year or album artist (JioSaavn
+  dated Jailer 2 2025 from its first single, masstamilan 2026), every file of the album, songs and background score,
+  gets the new one and its folders are renamed (`Jailer 2 (2025)` → `Jailer 2 (2026)`). The run says so
+  (`updates   year 2025 → 2026`, and in a request's review notes) and the undo log keeps the old tags and names, so
+  `fulfil.py undo` puts them back. Per-song composers are left alone (an album can have several).
+- **How the library got here:** `scripts/library/flatten.py` moved `tamil/jiosaavn_m4a/*` and `<language>/masstamilan/*`
+  up into the language folders (renames; the 5 albums in both were merged, JioSaavn's `cover.jpg` kept, masstamilan's
+  in `MusicLibrary/_flatten/leftovers/`), the never-scanned repeats to `MusicLibrary/_duplicate_singles/tamil/`, and
+  tagged masstamilan's files. The masstamilan library's rows in the database became the Tamil library's
+  (`UPDATE files SET library_id = <tamil> WHERE library_id = <tamil-masstamilan>`, after deleting the Tamil library's
+  missing rows of the same paths), so every song kept its id. Undo: `flatten.py undo MusicLibrary/_flatten/undo-….jsonl`,
+  the database and settings from `backups/before-flatten-20261117/`.
 - **Background score vs songs:** a score album ("X BGM", "X Special BGM Additional", "X OST", "… (Original Background
   Score)") is filed as X's score: `<Album> (<Year>) (Original Background Score)/`, album tag `<Album> (Original
   Background Score)`. Inside a songs album, only tracks that say so ("Theme Music", "BGM", "Instrumental",
@@ -62,65 +74,108 @@ Built 2026-11-16. `fulfil.py feeds` keeps the library up to date with masstamila
 2. Every album on them is downloaded **whole**: the songs the library doesn't have (other versions left out, a song
    JioSaavn names differently, "Hukum" for "Hukum - Thalaivar Alappara", counts as had), tagged, with lyrics and a
    cover, like a request. Latest albums grow as singles come out, so each run looks again.
-3. **No check:** these aren't requests. On the laptop the albums go to `requests/feeds/<page>/` on the Mac mini and
-   `fulfil.py file-feeds` there files them (into the album's own folder if it's there, else
-   `tamil/masstamilan/<Album> (<Year>)/`), rescans and wakes the analyzer. Undo logs: `requests/undo/feeds-*.jsonl`.
+3. **No check:** these aren't requests. The albums are put together in `requests/feeds/<page>/` and
+   `fulfil.py file-feeds` files them (into the album's own folder if it's there, else
+   `tamil/<Album> (<Year>)/`), rescans and wakes the analyzer. Undo logs: `requests/undo/feeds-*.jsonl`.
+   Run on the server itself (no `REMOTE`), `feeds` does this directly; run on a laptop, it sends them over and
+   starts `file-feeds` there over ssh.
 4. The lists go to `PUT /admin/feeds/{trending|latest}`. The server keeps them (schema 35), and when one changed it
    sends `feedsChanged` so open apps fetch `GET /feeds` again. Home shows the albums of each list the library has.
 
-**Where it runs:** the home network's DNS sends masstamilan to a block page (156.154.112.141), on the Mac mini and the
-HP alike, so it runs on the MacBook, every 6 hours while it's awake. api-anything is a local tool and uses the network
-of the machine it runs on.
+**Where it runs:** on craftingtable, every 6 hours (moved from the MacBook 2026-11-17). The home network answers every
+plain DNS lookup of `masstamilan.dev` with a block page (156.154.112.141/113.141), even one sent to 1.1.1.1, but
+DNS over TLS gets through. So systemd-resolved sends only that domain to Cloudflare over TLS; every other name still
+goes to the router. The downloads themselves come from `masstamilan.download`, which isn't blocked.
 
-**Setup on the MacBook (once):**
+**Setup on craftingtable (once):**
 
 ```sh
-# the two lists, as api-anything operations of the masstamilan site (the sidebar is on every page)
-api-anything add masstamilan trending --trigger 'https://www.masstamilan.dev/' --match path=/ \
+# 1. masstamilan.dev over DNS over TLS. The Wi-Fi's own DNS (the router) has to say "no" first: on "default" it
+#    takes the global DNSOverTLS=yes and the router, which has no TLS, stops answering.
+sudo nmcli connection modify "GL-MT3000-1a2-5G" connection.dns-over-tls no
+sudo nmcli device reapply wlp1s0f0
+sudo mkdir -p /etc/systemd/resolved.conf.d
+sudo tee /etc/systemd/resolved.conf.d/masstamilan.conf >/dev/null <<'EOF'
+[Resolve]
+DNS=1.1.1.1#cloudflare-dns.com 1.0.0.1#cloudflare-dns.com
+Domains=~masstamilan.dev
+DNSOverTLS=yes
+EOF
+sudo systemctl restart systemd-resolved
+getent hosts www.masstamilan.dev            # Cloudflare (104.26.x, 172.67.x), not 156.154.x
+# undo: sudo rm /etc/systemd/resolved.conf.d/masstamilan.conf && sudo systemctl restart systemd-resolved
+
+# 2. the two lists, as api-anything operations of the masstamilan site (the sidebar is on every page).
+#    Pin trending to the GET: the page also makes a POST with a one-time form token.
+api-anything add masstamilan trending --trigger 'https://www.masstamilan.dev/' --match '{"path":"/","method":"GET"}' \
   --html '{"items":"div.sb section.wid:first-of-type li","fields":{"title":"a","url":"a@href"}}' \
   --description "The Trending at MassTamilan.com list (sidebar), in order"
-api-anything add masstamilan latest --trigger 'https://www.masstamilan.dev/' --match path=/ \
+api-anything add masstamilan latest --trigger 'https://www.masstamilan.dev/' --match '{"path":"/","method":"GET"}' \
   --html '{"items":"div.a-i","fields":{"title":"h2","url":"a@href","poster":"img@src","info":"p"}}' \
   --description "The home page's Latest Tamil songs download list, in order"
 api-anything call masstamilan trending      # should list about 10 albums
+
+# 3. API_ANYTHING in the server's ~/.config/jukebox-fulfil.env, then a dry run
+echo "API_ANYTHING=$(which api-anything)" >> ~/.config/jukebox-fulfil.env
+uv run --script /mnt/ugreen/jukebox/scripts/requests/fulfil.py feeds --dry-run
 ```
 
-Add `API_ANYTHING=<output of: which api-anything>` to `~/.config/jukebox-fulfil.env`, try
-`fulfil.py feeds --dry-run`, then schedule it with `~/Library/LaunchAgents/cc.craftingtable.jukebox-feeds.plist`
-(`launchctl load` it):
+4. The timer, a user unit (lingering is on, so it runs with no one logged in). It runs the deployed copy of the
+   script, so a deploy updates it. `~/.config/systemd/user/jukebox-feeds.service`:
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>cc.craftingtable.jukebox-feeds</string>
-  <key>ProgramArguments</key><array>
-    <string>/opt/homebrew/bin/uv</string><string>run</string><string>--script</string>
-    <string>/Users/YOU/code/jukebox/scripts/requests/fulfil.py</string><string>feeds</string>
-  </array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
-  <key>StartInterval</key><integer>21600</integer>
-  <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>/tmp/jukebox-feeds.log</string>
-  <key>StandardErrorPath</key><string>/tmp/jukebox-feeds.log</string>
-</dict></plist>
+```ini
+[Unit]
+Description=Jukebox feeds: masstamilan Trending and Latest into the library
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/uv run --script /mnt/ugreen/jukebox/scripts/requests/fulfil.py feeds
+TimeoutStartSec=3h
 ```
 
-The ssh to the Mac mini has to work without a prompt (`ssh-copy-id craftingtable`; if Cloudflare Access asks for a
-login, `cloudflared access login https://tp.craftingtable.cc` once).
+`~/.config/systemd/user/jukebox-feeds.timer`:
+
+```ini
+[Unit]
+Description=Jukebox feeds every 6 hours
+
+[Timer]
+OnCalendar=00/6:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```sh
+systemctl --user daemon-reload
+systemctl --user start jukebox-feeds.service      # the first run (the catchup); follow it with the next line
+journalctl --user -u jukebox-feeds -f
+systemctl --user enable --now jukebox-feeds.timer
+systemctl --user list-timers jukebox-feeds.timer
+```
+
+**From a laptop instead** (if the DNS route ever stops working): the same api-anything operations, `API_ANYTHING`
+and the `REMOTE*` settings in the laptop's `~/.config/jukebox-fulfil.env`, and `fulfil.py feeds` run there by hand.
+The ssh to craftingtable has to work without a prompt (`ssh-copy-id craftingtable`; if Cloudflare Access asks for a
+login, `cloudflared access login https://tp.craftingtable.cc` once). Don't schedule it on both.
 
 ## Setup (once)
 
 MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`); `ssh craftingtable`
 working (`ssh-copy-id craftingtable` to stop password prompts); `~/.config/jukebox-fulfil.env` (chmod 600):
-`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil/jiosaavn_m4a`,
+`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil`,
 `MUSIC_ROOT=/mnt/ugreen/NAS/MusicLibrary`, `LIBRARY_NAME=tamil`,
-`LIBRARY_FOLDERS=tamil-masstamilan=tamil/masstamilan,malayalam=malayalam/masstamilan,telugu=telugu/masstamilan,hindi=hindi/masstamilan`,
+`LIBRARY_FOLDERS=malayalam=malayalam,telugu=telugu,hindi=hindi`,
 `REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
 
 Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys); in `.env` `REQUESTS_FOLDER`, `REQUESTS_DIR=/requests`,
 `LIBRARY_ROOT=/mnt/ugreen/NAS/MusicLibrary` and the language libraries in `LIBRARIES`
-(`tamil-masstamilan=/library/tamil/masstamilan:film:tamil:tamil;malayalam=/library/malayalam/masstamilan:film:malayalam;…`); the live `docker-compose.yml` mounts `/requests` and `/library`
+(`tamil=/music:film:tamil;malayalam=/library/malayalam:film:malayalam;telugu=/library/telugu:film:telugu;hindi=/library/hindi:film:hindi`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil`, also in the analyzer's `.env`); the live `docker-compose.yml` mounts `/requests` and `/library`
 read-only; the analyzer's `.env` has `LIBRARY_ROOT` too. `~/.config/jukebox-fulfil.env` as on the MacBook but
 `JUKEBOX_URL=http://127.0.0.1:8098`, no `REMOTE*`, and `ANALYZER=jukebox-analyzer`.
 Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).

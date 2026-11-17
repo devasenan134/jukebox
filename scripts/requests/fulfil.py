@@ -35,10 +35,10 @@ Settings: ~/.config/jukebox-fulfil.env (KEY=value lines, chmod 600):
     MUSIC_FOLDER     the main library's folder on the server (the one mounted at /music)
     LIBRARY_NAME     its name in LIBRARIES (tamil)
     MUSIC_ROOT       the folder holding every library (/mnt/ugreen/NAS/MusicLibrary); default MUSIC_FOLDER
-    LIBRARY_FOLDERS  every library's folder inside MUSIC_ROOT, as in LIBRARIES:
-                     tamil=tamil/jiosaavn_m4a,tamil-masstamilan=tamil/masstamilan,malayalam-masstamilan=malayalam/masstamilan
-    SOURCE           where downloads come from (masstamilan): music in <language> goes to the library
-                     "<language>-<SOURCE>" (its own folder), by the matcher's language
+    LIBRARY_FOLDERS  the other libraries' folders inside MUSIC_ROOT, as in LIBRARIES: one folder per album, whatever
+                     its source, so a language's library is its folder (malayalam=malayalam,telugu=telugu,hindi=hindi)
+    SOURCE           only for an older layout with a library per source: music in <language> goes to the library
+                     "<language>-<SOURCE>" if there is one, else to the language's own
     REQUESTS_FOLDER  where downloads wait on the server (mounted read-only in the container as REQUESTS_DIR)
     ANALYZER         server: the analyzer's container (jukebox-analyzer), woken after a scan; blank: don't
   laptop only:
@@ -200,6 +200,23 @@ def music_exists(cfg, relative):
     if cfg.get("REMOTE"):
         return ssh(cfg, ["test", "-e", path], capture_output=True).returncode == 0
     return Path(path).exists()
+
+
+def music_names(cfg, folder):
+    """The song files' names in [folder] (inside MUSIC_ROOT)."""
+    path = Path(cfg["ROOT"]) / folder
+    if cfg.get("REMOTE"):
+        out = ssh(cfg, ["ls", "-1", str(path)], capture_output=True, text=True)
+        names = out.stdout.splitlines() if out.returncode == 0 else []
+    else:
+        names = sorted(p.name for p in path.iterdir()) if path.is_dir() else []
+    return [n for n in names if not n.startswith(".") and Path(n).suffix.lower() in AUDIO]
+
+
+def music_sample(cfg, folder):
+    """A song file in [folder] (inside MUSIC_ROOT), as a path inside MUSIC_ROOT, or None."""
+    names = music_names(cfg, folder)
+    return f"{folder}/{names[0]}" if names else None
 
 
 def music_tags(cfg, relative):
@@ -414,15 +431,17 @@ def reachable(url):
             f"The network's DNS may be blocking the site")
 
 
-def fetch(client, url, dest, tries=3, progress=None):
-    """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written."""
+def fetch(client, url, dest, tries=3, progress=None, referer=None):
+    """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written. [referer]: the
+    page the link is on (masstamilan answers a song's link without one with 403)."""
     last = None
     for attempt in range(tries):
         try:
             current = url
             for _ in range(6):
                 public_url(current)
-                with client.stream("GET", current, follow_redirects=False) as r:
+                with client.stream("GET", current, follow_redirects=False,
+                                   headers={"Referer": referer} if referer else None) as r:
                     if r.status_code in (301, 302, 303, 307, 308):
                         current = urljoin(current, r.headers["location"])
                         continue
@@ -482,6 +501,11 @@ def probe(path):
 def looks_like_mp3(path):
     head = path.read_bytes()[:3]
     return head == b"ID3" or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)
+
+
+def looks_like_image(path):
+    head = path.read_bytes()[:12]
+    return head[:3] == b"\xff\xd8\xff" or head[:8] == b"\x89PNG\r\n\x1a\n" or (head[:4] == b"RIFF" and head[8:12] == b"WEBP")
 
 
 def tag(src, dest, tags, cover=None):
@@ -595,6 +619,66 @@ def tags_of(t):
     }
 
 
+# The album-wide tags a newer download may correct, and their names in reports.
+ALBUM_FIELDS = {"date": "year", "album_artist": "album artist"}
+
+
+def album_changes(current, year, composer):
+    """{tag: {"from", "to"}}: the year and album artist (its composer) the download brings that differ from the
+    album's [current] tags. Names compare as a set ("A, B" is "B, A"); a value the download doesn't have changes nothing."""
+    names = lambda text: sorted(key(p) for p in people(text or "").split(", ") if p)
+    fresh = {"date": str(year) if year else None, "album_artist": composer or None}
+    return {k: {"from": current.get(k), "to": v} for k, v in fresh.items()
+            if v and (names(current.get(k)) != names(v) if k == "album_artist" else key(current.get(k)) != key(v))}
+
+
+def retag_in_place(path, tags):
+    """Sets [tags] on [path], keeping its other tags and cover; an empty value removes that tag."""
+    path = Path(path)
+    tmp = path.with_name(f".retag-{path.name}")
+    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-map", "0", "-c", "copy"]
+    if path.suffix.lower() == ".mp3":
+        cmd += ["-id3v2_version", "3"]
+    for k, v in tags.items():
+        cmd += ["-metadata", f"{k}={v or ''}"]
+    subprocess.run(cmd + [str(tmp)], check=True, capture_output=True, stdin=subprocess.DEVNULL)
+    tmp.replace(path)
+
+
+def update_album(cfg, place, changes, undo, rid):
+    """Puts [changes] on every file of [place]'s album, its songs and its background score, and renames their
+    folders when the year in the name changed ("Jailer 2 (2025)" → "Jailer 2 (2026)"). [place] is updated to the
+    new names. Every file's old tags and every rename go to [undo]."""
+    music = Path(cfg["ROOT"])
+    tags = {k: c["to"] for k, c in changes.items()}
+    songs = re.sub(r"\s*\(original background score\)\s*$", "", place["folder"], flags=re.I)
+    filing = filing_folder(cfg, place)
+    folders = [f for f in dict.fromkeys([songs, songs + SCORE, filing, filing + SCORE]) if (music / f).is_dir()]
+    renamed = {}
+    for folder in folders:
+        for f in sorted((music / folder).iterdir()):
+            if f.name.startswith(".") or f.suffix.lower() not in AUDIO:
+                continue
+            old = {k: v for k, v in album_tags_from(f).items() if k in tags}
+            retag_in_place(f, tags)
+            undo.write(json.dumps({"request": rid, "retag": str(f.relative_to(music)), "tags": old}) + "\n")
+            undo.flush()
+        if "date" in changes and changes["date"]["from"]:
+            name = os.path.basename(folder)
+            new_name = name.replace(f"({changes['date']['from']})", f"({changes['date']['to']})", 1)
+            new = os.path.join(os.path.dirname(folder), new_name)
+            if new_name != name and not (music / new).exists():
+                (music / folder).rename(music / new)
+                undo.write(json.dumps({"request": rid, "rename": new, "from": folder}) + "\n")
+                undo.flush()
+                renamed[folder] = new
+    for k in ("folder", "sampleFile"):
+        for old, new in renamed.items():
+            if place.get(k) and (place[k] == old or place[k].startswith(old + "/")):
+                place[k] = new + place[k][len(old):]
+                break
+
+
 def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=None):
     """Downloads one request's music. [whole]: a song request standing for two or more songs asked for from the same
     album (their request ids): the whole album is downloaded with it, and the others come with it."""
@@ -609,7 +693,8 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
     year = year_of(match)
     composer = people(meta.get("music") or "")
     lyricists = people(meta.get("lyricists") or "")
-    cover_url = urljoin(base, meta.get("poster") or best.get("poster") or "") or None
+    poster = meta.get("poster") or best.get("poster")
+    cover_url = urljoin(base, poster) if poster else None  # urljoin(base, "") is the page itself
     is_song = request["item"]["kind"] == "song"
     language = (meta.get("language") or "").strip().lower() or language_of(cfg["LIBRARY_NAME"])
     if not target(cfg, language):
@@ -695,10 +780,34 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
         review.update(destination="new", destinationFolder=suggested, suggestedFolder=suggested, scoreFolder=suggested + SCORE)
         if music_exists(cfg, suggested):
             notes.append(f"A folder called {suggested} is already in the library; the songs will be added to it")
+            # Not found as an album (one song taken for background score, say), but its folder is there: a feed's
+            # songs join it with its tags, as they would an album that was found (a request has its review for this).
+            sample = music_sample(cfg, suggested) if rid is None else None
+            if sample:
+                existing = {"folder": suggested, "sampleFile": sample, "library": into}
+                have = [re.sub(r"^\d+\s*-\s*", "", Path(n).stem) for n in music_names(cfg, suggested)]
+                kept = [(n, t) for n, t in picked if not has_song(have, clean_title(t.get("name"), album))]
+                review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
+                picked = kept
+                if not picked:
+                    return review, None, "already"
     say(f"      goes to   {'joins ' + os.path.basename(existing['folder']) + ' (already in the library), into ' + review['destinationFolder'] if existing else 'new folder ' + review['destinationFolder']}"
         + (f", as its background score ({review['scoreFolder']})" if score_album else ""))
     if review.get("skipped"):
         say(f"      skipping  {len(review['skipped'])} already in the library: {', '.join(review['skipped'])}")
+    copied = {}
+    if existing:
+        say("      tags      reading the album's tags from the library…", end="")
+        copied = {k: v for k, v in music_tags(cfg, existing["sampleFile"]).items() if v}
+        say(f" ✓ {copied.get('album', album)} ({copied.get('date', year)})")
+        # The newest download wins: a year or album artist that differs from the album's goes on the whole album
+        # when it's filed (move_in), logged for undo.
+        changes = album_changes(copied, year, composer)
+        if changes:
+            review["albumChanges"] = changes
+            text = "; ".join(f"{ALBUM_FIELDS[k]} {c['from'] or '(none)'} → {c['to']}" for k, c in changes.items())
+            notes.append(f"The album's own tags change with it: {text}")
+            say(f"      updates   {text}")
     if dry:
         review["tracks"] = [{"n": n, "file": "", "title": clean_title(t.get("name"), album)} for n, t in picked]
         return review, existing, None
@@ -718,7 +827,9 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             continue
         say("      cover     downloading…", end="")
         try:
-            fetch(client, url, raw / "cover.jpg")
+            fetch(client, url, raw / "cover.jpg", referer=base or None)
+            if not looks_like_image(raw / "cover.jpg"):
+                raise RuntimeError("not an image (a page?)")
             cover = raw / "cover.jpg"
             review["coverUrl"] = url
             say(" ✓" + (" (the catalog's, the page's poster failed)" if failed else ""))
@@ -732,12 +843,9 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
         notes.append(f"Cover from the catalog (the page's poster failed: {failed[0]})")
 
     base_tags = {"album": album, "date": str(year) if year else None, "album_artist": composer, "composer": composer,
-                 "genre": language.title()}
-    if existing:
-        say("      tags      reading the album's tags from the library…", end="")
-        copied = {k: v for k, v in music_tags(cfg, existing["sampleFile"]).items() if v}
-        base_tags.update(copied)
-        say(f" ✓ {copied.get('album', album)} ({copied.get('date', year)})")
+                 "genre": language.title(), "source": "masstamilan"}
+    base_tags.update(copied)
+    base_tags.update({k: c["to"] for k, c in (review.get("albumChanges") or {}).items()})
 
     out = []
     width = max(2, len(str(total or len(tracks))))
@@ -757,7 +865,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             if not TTY:
                 say(f"{head} downloading {kbps} kbps…")
             try:
-                fetch(client, urljoin(base, link), dest, progress=say_progress)
+                fetch(client, urljoin(base, link), dest, progress=say_progress, referer=base or None)
             except RuntimeError as e:
                 notes.append(f"{title}: {kbps} kbps link failed ({e})")
                 live(f"{head} {kbps} kbps failed ({e})")
@@ -975,6 +1083,12 @@ def move_in(cfg, rid, review, existing_place, undo):
     work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
     music = Path(cfg["ROOT"])
     if existing_place:
+        # The newer download's year and album artist go on the album first (looked at again: it may have changed).
+        wanted = review.get("albumChanges") or {}
+        changes = album_changes(music_tags(cfg, existing_place["sampleFile"]), (wanted.get("date") or {}).get("to"),
+                                (wanted.get("album_artist") or {}).get("to"))
+        if changes:
+            update_album(cfg, existing_place, changes, undo, rid)
         folder = filing_folder(cfg, existing_place)
         # The album's own tags win, so the songs join it (also when the admin picked it, or it arrived since).
         copied = {k: v for k, v in music_tags(cfg, existing_place["sampleFile"]).items() if v and k != "composer"}
@@ -1509,15 +1623,27 @@ def file_feeds(cfg):
 
 def undo(cfg, path):
     music = Path(cfg["ROOT"])
-    removed = 0
-    for line in Path(path).read_text().splitlines():
-        f = music / json.loads(line)["file"]
+    removed = restored = 0
+    # Last first: the files that went into a renamed folder go, the folder gets its old name, then its old tags.
+    for line in reversed(Path(path).read_text().splitlines()):
+        entry = json.loads(line)
+        if "rename" in entry:
+            if (music / entry["rename"]).is_dir() and not (music / entry["from"]).exists():
+                (music / entry["rename"]).rename(music / entry["from"])
+            continue
+        if "retag" in entry:
+            if (music / entry["retag"]).exists():
+                retag_in_place(music / entry["retag"], entry["tags"])
+                restored += 1
+            continue
+        f = music / entry["file"]
         if f.exists():
             f.unlink()
             removed += 1
             if f.parent != music and not any(f.parent.iterdir()):
                 f.parent.rmdir()
-    print(f"Removed {removed} file(s). Run a library scan (or wait for the hourly one) to update Jukebox.")
+    print(f"Removed {removed} file(s), gave {restored} their old tags back. "
+          "Run a library scan (or wait for the hourly one) to update Jukebox.")
 
 
 def main():
