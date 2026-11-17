@@ -431,15 +431,17 @@ def reachable(url):
             f"The network's DNS may be blocking the site")
 
 
-def fetch(client, url, dest, tries=3, progress=None):
-    """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written."""
+def fetch(client, url, dest, tries=3, progress=None, referer=None):
+    """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written. [referer]: the
+    page the link is on (masstamilan answers a song's link without one with 403)."""
     last = None
     for attempt in range(tries):
         try:
             current = url
             for _ in range(6):
                 public_url(current)
-                with client.stream("GET", current, follow_redirects=False) as r:
+                with client.stream("GET", current, follow_redirects=False,
+                                   headers={"Referer": referer} if referer else None) as r:
                     if r.status_code in (301, 302, 303, 307, 308):
                         current = urljoin(current, r.headers["location"])
                         continue
@@ -855,7 +857,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             if not TTY:
                 say(f"{head} downloading {kbps} kbps…")
             try:
-                fetch(client, urljoin(base, link), dest, progress=say_progress)
+                fetch(client, urljoin(base, link), dest, progress=say_progress, referer=base or None)
             except RuntimeError as e:
                 notes.append(f"{title}: {kbps} kbps link failed ({e})")
                 live(f"{head} {kbps} kbps failed ({e})")
