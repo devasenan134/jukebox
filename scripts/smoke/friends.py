@@ -91,6 +91,26 @@ async def main():
         check(title_a and title_a == title_b, f"in the jam both hear the same song ({title_a!r} / {title_b!r})")
         await b.screenshot(path=str(OUT / "3-jam.png"))
 
+        # The host queues two songs with "Play next" (they go right after the playing one, not at the end):
+        # the friend's queue follows the host's play order.
+        for i in (1, 2):
+            # In-app navigation: a page reload would take the host out of the jam.
+            await a.evaluate("history.pushState({}, '', '/albums'); dispatchEvent(new PopStateEvent('popstate'))")
+            await a.wait_for_selector(".card")
+            await a.locator(".card .name").nth(i).click()
+            await a.wait_for_selector(".song-row")
+            await a.locator(".song-row").first.click(button="right")
+            await a.get_by_text("Play next", exact=True).click()
+            await a.wait_for_timeout(1500)
+        await a.locator(".player-bar [aria-label='Queue']").click()
+        await b.locator(".player-bar [aria-label='Queue']").click()
+        await b.wait_for_timeout(2500)
+        queue_a = await a.locator(".queue-panel .queue-row .title").all_inner_texts()
+        queue_b = await b.locator(".queue-panel .queue-row .title").all_inner_texts()
+        check(len(queue_a) >= 3 and queue_a == queue_b, f"the friend's queue has the host's order ({queue_a} / {queue_b})")
+        check(await b.locator(".queue-panel .drag-handle").count() == 0, "the friend can't change the host's queue")
+        await b.screenshot(path=str(OUT / "4-jam-queue.png"))
+
         check(not errors, "no page errors: " + "; ".join(errors[:3]))
         await browser.close()
     print("PROBLEMS:" if problems else "ALL GOOD", *problems, sep="\n  ")

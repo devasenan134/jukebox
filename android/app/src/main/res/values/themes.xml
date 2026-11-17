@@ -7,6 +7,5 @@
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
     </style>
-    <color name="launch_background">#FF16131F</color>
-    <color name="launcher_background">#FF1F1A2E</color>
+    <color name="launch_background">#FF141210</color>
 </resources>

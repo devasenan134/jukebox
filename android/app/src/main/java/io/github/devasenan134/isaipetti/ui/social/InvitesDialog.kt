@@ -213,14 +213,14 @@ private fun expiresIn(millis: Long): String {
 
 private fun copyCode(context: Context, code: String) {
     val clipboard = context.getSystemService(ClipboardManager::class.java)
-    clipboard.setPrimaryClip(ClipData.newPlainText("Isaipetti invite code", code))
+    clipboard.setPrimaryClip(ClipData.newPlainText("Jukebox invite code", code))
     Toast.makeText(context, "Copied $code", Toast.LENGTH_SHORT).show()
 }
 
 /** Shares the code with what to type, since the app has no servers built in. */
 private fun shareInvite(app: IsaipettiApp, context: Context, code: String) {
     val creds = app.session.credentials.value
-    val text = "Join me on Isaipetti! Install the app, tap \"Got an invite code? Sign up\" and enter:\n" +
+    val text = "Join me on Jukebox! Install the app, tap \"Got an invite code? Sign up\" and enter:\n" +
         "Music server: ${creds?.server.orEmpty().removePrefix("https://")}\n" +
         "Friends server: ${creds?.socialServer.orEmpty().removePrefix("https://")}\n" +
         "Invite code: $code"

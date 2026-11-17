@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /** Live events the server pushes to the app over the WebSocket. The JSON has a "type" field. */
@@ -46,6 +47,63 @@ data class ReadEvent(val conversationId: Long, val userId: Long, val messageId: 
 @Serializable @SerialName("conversationRemoved")
 data class ConversationRemovedEvent(val conversationId: Long) : Event
 
+// --- Realtime Gateway Device & Remote Control events (Milestone 3) ---
+
+@Serializable
+data class DeviceDto(
+    val id: String,
+    val name: String,
+    val type: String, // "web", "android", "desktop", "other"
+    val isCurrent: Boolean = false,
+    val isActive: Boolean = false,
+    val playing: Boolean = false,
+    val song: SongRef? = null,
+    val positionMs: Long = 0,
+    val volume: Float = 1f,
+    val lastSeen: Long = 0,
+    val source: String? = null,
+)
+
+@Serializable
+data class DevicePlaybackState(
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val queueId: String? = null,
+    val index: Int = 0,
+    val positionMs: Long = 0,
+    val playing: Boolean = false,
+    val volume: Float = 1f,
+    val updatedAt: Long = 0,
+    val source: String? = null,
+)
+
+/** The list of connected devices for the current user and which one is active. */
+@Serializable @SerialName("devices")
+data class DevicesEvent(
+    val activeDeviceId: String?,
+    val devices: List<DeviceDto>,
+) : Event
+
+/** A remote control command sent to this device from another device of the same user. */
+@Serializable @SerialName("remoteCommand")
+data class RemoteCommandEvent(
+    val commandId: String,
+    val action: String, // "play", "pause", "next", "previous", "seek", "volume", "sync"
+    val positionMs: Long? = null,
+    val volume: Float? = null,
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val index: Int? = null,
+    val byDeviceId: String? = null,
+) : Event
+
+/** Transferred playback from another device: start playing this state. */
+@Serializable @SerialName("transferPlayback")
+data class TransferPlaybackEvent(
+    val state: DevicePlaybackState,
+    val fromDeviceId: String,
+) : Event
+
 /** Events the app sends to the server. */
 @Serializable
 sealed interface ClientEvent
@@ -61,59 +119,251 @@ data class TypingUpdate(val conversationId: Long) : ClientEvent
 @Serializable @SerialName("appState")
 data class AppStateUpdate(val visible: Boolean) : ClientEvent
 
+/** This device's playback changed (Milestone 3). */
+@Serializable @SerialName("devicePlayback")
+data class DevicePlaybackUpdate(val playback: DevicePlaybackState) : ClientEvent
+
+/** Send a remote playback command to one of your other devices (Milestone 3). */
+@Serializable @SerialName("remoteCommand")
+data class RemoteCommand(
+    val targetDeviceId: String,
+    val action: String, // "play", "pause", "next", "previous", "seek", "volume"
+    val positionMs: Long? = null,
+    val volume: Float? = null,
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val index: Int? = null,
+) : ClientEvent
+
+/** Transfer playback from one device to another (Milestone 3). */
+@Serializable @SerialName("transferPlayback")
+data class TransferPlayback(
+    val toDeviceId: String,
+    val state: DevicePlaybackState? = null,
+) : ClientEvent
+
+/** Manually set which device is the active player (Milestone 3). */
+@Serializable @SerialName("setActiveDevice")
+data class SetActiveDevice(
+    val deviceId: String,
+) : ClientEvent
+
 val eventJson = Json {
     ignoreUnknownKeys = true
     encodeDefaults = true
 }
 
 /**
- * Keeps track of who is connected right now and what they're playing, and delivers events.
- * A user counts as online while at least one of their devices has the WebSocket open.
- * None of this is saved: after a restart everyone simply reconnects.
+ * Realtime Gateway: tracks connected devices, what they are playing, and delivers events.
+ * A user counts as online while at least one device has the WebSocket open.
  */
 class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
-    private val connections = ConcurrentHashMap<Long, MutableSet<WebSocketSession>>()
+    data class DeviceSession(
+        val deviceId: String,
+        val userId: Long,
+        val deviceName: String,
+        val clientType: String,
+        val session: WebSocketSession,
+        val isExplicitDevice: Boolean,
+        var visible: Boolean = false,
+        var playback: DevicePlaybackState? = null,
+        val connectedAt: Long = System.currentTimeMillis(),
+        var lastSeen: Long = System.currentTimeMillis(),
+    )
+
+    private val userDevices = ConcurrentHashMap<Long, ConcurrentHashMap<String, DeviceSession>>()
+    private val activeDevices = ConcurrentHashMap<Long, String>()
     private val nowPlaying = ConcurrentHashMap<Long, SongRef>()
-    private val visible = ConcurrentHashMap<WebSocketSession, Boolean>()
     private val lock = Mutex()
 
-    fun isOnline(userId: Long) = connections[userId]?.isNotEmpty() == true
+    fun isOnline(userId: Long) = userDevices[userId]?.isNotEmpty() == true
 
-    /** True if one of the user's phones has the app on screen right now. */
-    fun isVisible(userId: Long) = connections[userId]?.any { visible[it] == true } == true
+    /** True if one of the user's devices has the app on screen right now. */
+    fun isVisible(userId: Long) = userDevices[userId]?.values?.any { it.visible } == true
+
     fun nowPlaying(userId: Long): SongRef? = nowPlaying[userId]
 
-    suspend fun connected(userId: Long, session: WebSocketSession) {
-        val cameOnline = lock.withLock {
-            val set = connections.getOrPut(userId) { mutableSetOf() }
-            set.add(session)
-            set.size == 1
-        }
-        if (cameOnline) announcePresence(userId)
+    fun activeDeviceId(userId: Long): String? = activeDevices[userId]
+
+    private fun devicesList(userId: Long, forDeviceId: String?): List<DeviceDto> {
+        val active = activeDevices[userId]
+        return userDevices[userId]?.values?.map { d ->
+            DeviceDto(
+                id = d.deviceId,
+                name = d.deviceName,
+                type = d.clientType,
+                isCurrent = d.deviceId == forDeviceId,
+                isActive = d.deviceId == active,
+                playing = d.playback?.playing == true,
+                song = d.playback?.song,
+                positionMs = d.playback?.positionMs ?: 0L,
+                volume = d.playback?.volume ?: 1f,
+                lastSeen = d.lastSeen,
+                source = d.playback?.source,
+            )
+        }.orEmpty()
     }
 
-    suspend fun disconnected(userId: Long, session: WebSocketSession) {
+    private suspend fun pushDevices(userId: Long) {
+        val devices = userDevices[userId]?.values ?: return
+        val active = activeDevices[userId]
+        val textCache = mutableMapOf<String, String>()
+        for (d in devices) {
+            if (!d.isExplicitDevice) continue // Only push DevicesEvent to clients that opted into device awareness
+            val event = DevicesEvent(activeDeviceId = active, devices = devicesList(userId, d.deviceId))
+            val text = textCache.getOrPut(d.deviceId) { eventJson.encodeToString(Event.serializer(), event) }
+            runCatching { d.session.send(Frame.Text(text)) }
+        }
+    }
+
+    suspend fun connected(
+        userId: Long,
+        session: WebSocketSession,
+        deviceId: String = "legacy-${System.identityHashCode(session)}",
+        deviceName: String = "Device",
+        clientType: String = "other",
+        isExplicitDevice: Boolean = false,
+    ) {
+        val cameOnline = lock.withLock {
+            val map = userDevices.getOrPut(userId) { ConcurrentHashMap() }
+            val dev = DeviceSession(deviceId, userId, deviceName, clientType, session, isExplicitDevice)
+            map[deviceId] = dev
+            if (activeDevices[userId] == null) {
+                activeDevices[userId] = deviceId
+            }
+            map.size == 1
+        }
+        if (cameOnline) announcePresence(userId)
+        pushDevices(userId)
+    }
+
+    suspend fun disconnected(userId: Long, session: WebSocketSession, deviceId: String? = null) {
         val wentOffline = lock.withLock {
-            val set = connections[userId] ?: return
-            set.remove(session)
-            visible.remove(session)
-            if (set.isEmpty()) {
-                connections.remove(userId)
+            val map = userDevices[userId] ?: return
+            val key = deviceId ?: map.entries.firstOrNull { it.value.session == session }?.key ?: return
+            map.remove(key)
+            if (activeDevices[userId] == key) {
+                val nextActive = map.values.firstOrNull { it.playback?.playing == true }?.deviceId
+                    ?: map.keys.firstOrNull()
+                if (nextActive != null) {
+                    activeDevices[userId] = nextActive
+                } else {
+                    activeDevices.remove(userId)
+                }
+            }
+            if (map.isEmpty()) {
+                userDevices.remove(userId)
+                activeDevices.remove(userId)
                 nowPlaying.remove(userId)
                 true
             } else {
                 false
             }
         }
-        if (wentOffline) announcePresence(userId)
+        if (wentOffline) announcePresence(userId) else pushDevices(userId)
     }
 
-    suspend fun handle(userId: Long, session: WebSocketSession, event: ClientEvent) {
+    suspend fun handle(userId: Long, session: WebSocketSession, event: ClientEvent, deviceId: String? = null) {
+        val dev = userDevices[userId]?.let { map ->
+            (deviceId?.let { map[it] } ?: map.values.firstOrNull { it.session == session })
+        }
+        dev?.lastSeen = System.currentTimeMillis()
+
         when (event) {
-            is AppStateUpdate -> visible[session] = event.visible
+            is AppStateUpdate -> {
+                dev?.visible = event.visible
+            }
             is NowPlayingUpdate -> {
-                if (event.song == null) nowPlaying.remove(userId) else nowPlaying[userId] = event.song
+                if (event.song == null) {
+                    nowPlaying.remove(userId)
+                    dev?.playback = dev?.playback?.copy(song = null, playing = false)
+                } else {
+                    nowPlaying[userId] = event.song
+                    dev?.playback = (dev?.playback ?: DevicePlaybackState()).copy(song = event.song, playing = true)
+                    dev?.let { activeDevices[userId] = it.deviceId }
+                }
                 announcePresence(userId)
+                pushDevices(userId)
+            }
+            is DevicePlaybackUpdate -> {
+                dev?.playback = event.playback
+                if (event.playback.playing) {
+                    dev?.let { activeDevices[userId] = it.deviceId }
+                    event.playback.song?.let { nowPlaying[userId] = it }
+                    announcePresence(userId)
+                } else if (activeDevices[userId] == dev?.deviceId) {
+                    nowPlaying.remove(userId)
+                    announcePresence(userId)
+                }
+                pushDevices(userId)
+            }
+            is SetActiveDevice -> {
+                if (userDevices[userId]?.containsKey(event.deviceId) == true) {
+                    activeDevices[userId] = event.deviceId
+                    pushDevices(userId)
+                }
+            }
+            is RemoteCommand -> {
+                val target = userDevices[userId]?.get(event.targetDeviceId)
+                if (target != null) {
+                    if (event.action == "play") {
+                        activeDevices[userId] = target.deviceId
+                    }
+                    val cmd = RemoteCommandEvent(
+                        commandId = UUID.randomUUID().toString(),
+                        action = event.action,
+                        positionMs = event.positionMs,
+                        volume = event.volume,
+                        song = event.song,
+                        queue = event.queue,
+                        index = event.index,
+                        byDeviceId = dev?.deviceId,
+                    )
+                    val text = eventJson.encodeToString(Event.serializer(), cmd)
+                    runCatching { target.session.send(Frame.Text(text)) }
+                    if (event.action == "play") {
+                        pushDevices(userId)
+                    }
+                }
+            }
+            is TransferPlayback -> {
+                val target = userDevices[userId]?.get(event.toDeviceId)
+                if (target != null) {
+                    val explicitState = event.state?.takeIf { it.song != null || !it.queue.isNullOrEmpty() }
+                    val devState = dev?.playback?.takeIf { it.song != null || !it.queue.isNullOrEmpty() }
+                    val activeSession = activeDevices[userId]?.let { userDevices[userId]?.get(it) }
+                    val activeState = activeSession?.playback?.takeIf { it.song != null || !it.queue.isNullOrEmpty() }
+                    val anyOtherState = userDevices[userId]?.values
+                        ?.firstOrNull { it.deviceId != target.deviceId && it.playback?.song != null }
+                        ?.playback
+
+                    val sourceDev = when {
+                        devState != null && dev?.deviceId != target.deviceId -> dev
+                        activeState != null && activeSession?.deviceId != target.deviceId -> activeSession
+                        dev?.deviceId != target.deviceId -> dev
+                        else -> null
+                    }
+
+                    val stateToTransfer = explicitState ?: devState ?: activeState ?: anyOtherState ?: (dev?.playback ?: DevicePlaybackState())
+
+                    if (sourceDev != null && sourceDev.playback?.playing == true) {
+                        val pauseCmd = RemoteCommandEvent(
+                            commandId = UUID.randomUUID().toString(),
+                            action = "pause",
+                            byDeviceId = dev?.deviceId,
+                        )
+                        val pauseText = eventJson.encodeToString(Event.serializer(), pauseCmd)
+                        runCatching { sourceDev.session.send(Frame.Text(pauseText)) }
+                    }
+                    val transfer = TransferPlaybackEvent(
+                        state = stateToTransfer.copy(playing = true),
+                        fromDeviceId = sourceDev?.deviceId ?: dev?.deviceId ?: "unknown",
+                    )
+                    val transferText = eventJson.encodeToString(Event.serializer(), transfer)
+                    runCatching { target.session.send(Frame.Text(transferText)) }
+                    activeDevices[userId] = target.deviceId
+                    pushDevices(userId)
+                }
             }
             else -> Unit // listen-together events are handled by ListenTogether
         }
@@ -121,10 +371,18 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
 
     /** Closes every connection of a user (their account was removed). */
     suspend fun kick(userId: Long) {
-        val sessions = lock.withLock { connections.remove(userId)?.toList().orEmpty() }
-        sessions.forEach { visible.remove(it) }
-        nowPlaying.remove(userId)
-        sessions.forEach { runCatching { it.close(CloseReason(CloseReason.Codes.NORMAL, "Account removed")) } }
+        val sessions = lock.withLock {
+            val devs = userDevices.remove(userId)?.values?.toList().orEmpty()
+            activeDevices.remove(userId)
+            nowPlaying.remove(userId)
+            devs
+        }
+        sessions.forEach { runCatching { it.session.close(CloseReason(CloseReason.Codes.NORMAL, "Account removed")) } }
+    }
+
+    /** Sends [event] to every connected device of everyone. */
+    suspend fun sendToAll(event: Event) {
+        send(lock.withLock { userDevices.keys.toList() }, event)
     }
 
     /** Sends [event] to every connected device of [userIds]. Returns the users who were offline. */
@@ -132,7 +390,7 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
         val text = eventJson.encodeToString(Event.serializer(), event)
         val offline = mutableListOf<Long>()
         for (id in userIds.toSet()) {
-            val sessions = connections[id]?.toList().orEmpty()
+            val sessions = userDevices[id]?.values?.map { it.session }.orEmpty()
             if (sessions.isEmpty()) offline += id
             sessions.forEach { runCatching { it.send(Frame.Text(text)) } }
         }
@@ -143,3 +401,4 @@ class Hub(private val friendsOf: suspend (Long) -> List<Long>) {
         send(friendsOf(userId), PresenceEvent(userId, isOnline(userId), nowPlaying[userId]))
     }
 }
+

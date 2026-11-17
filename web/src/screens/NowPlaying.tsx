@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { subsonic } from '../api/subsonic'
 import * as player from '../player/player'
 import { currentItem, usePlayer } from '../player/player'
 import { usePosition } from '../player/MiniPlayer'
-import { Cover, formatDuration, LikeButton, useLoad } from '../ui/components'
+import { AddToPlaylistSheet, Cover, formatDuration, LikeButton, startStation, useLoad } from '../ui/components'
+import { SongDetailsSection } from '../player/SongDetails'
+import { ShareSongSheet } from '../social/ShareSongSheet'
 import { useCoverColor } from '../ui/coverColor'
 import { Slider } from '../player/PlayerBar'
+import { QueueSheet } from '../player/QueuePanel'
+import { DevicePickerButton } from '../player/DevicePicker'
 import { likes, useLikes } from '../state/likes'
 import { Icon, IconButton } from '../ui/kit'
 import { useNav, usePlayerOpen } from '../ui/nav'
@@ -24,15 +28,20 @@ export function NowPlaying() {
   const lyrics = useLoad(['lyrics', song?.id], async () => (song ? subsonic.lyrics(song.id) : []))
   const tint = useCoverColor(song?.coverArt)
   const liked = useLikes((s) => !!song && s.songs.some((x) => x.id === song.id))
+  const [queue, setQueue] = useState(false)
+  const [sheet, setSheet] = useState<'save' | 'share' | null>(null)
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    // Escape closes the queue sheet first (it listens itself), then the player.
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.sheet') && close()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   if (!song) return null
   const best = lyrics.data?.find((l) => l.synced) ?? lyrics.data?.[0]
+  // The line being sung, under the cover on narrow screens (where the lyrics are further down).
+  const sung = best?.synced ? [...best.line].reverse().find((l) => (l.start ?? Infinity) <= position)?.value : undefined
   return (
     <div
       style={{
@@ -47,11 +56,21 @@ export function NowPlaying() {
           <div className="label-medium" style={{ opacity: 0.75, letterSpacing: '0.08em' }}>PLAYING FROM</div>
           <div className="body-medium ellipsis" style={{ fontWeight: 700 }}>{song.album ?? 'Your queue'}</div>
         </div>
-        <div style={{ width: 48 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <DevicePickerButton />
+          <IconButton icon="queue_music" label="Queue" onClick={() => setQueue(true)} style={{ color: '#fff' }} />
+        </div>
       </div>
-      <div className="now-playing" style={{ flex: 1, minHeight: 0, display: 'grid', gap: 32, padding: '16px 24px 24px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', overflowY: 'auto', alignItems: 'center', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
+      {queue && <QueueSheet onClose={() => setQueue(false)} />}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'clip' }}>
+      <div className="now-playing" style={{ display: 'grid', gap: 32, padding: '16px 24px 24px', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', alignItems: 'center', maxWidth: 1200, width: '100%', margin: '0 auto' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
-          <Cover coverArt={song.coverArt} size={800} corner={8} style={{ width: 'min(460px, 84vw, 52vh)', aspectRatio: '1', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }} />
+          <CoverCarousel width="min(460px, 76vw, 52vh)" />
+          {sung && (
+            <button key={sung} className="np-line title-medium" onClick={() => document.querySelector('.np-lyrics')?.scrollIntoView({ behavior: 'smooth' })}>
+              {sung}
+            </button>
+          )}
           <div style={{ width: 'min(460px, 84vw)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -84,10 +103,21 @@ export function NowPlaying() {
               <IconButton icon="skip_next" filled label="Next" size={40} onClick={player.next} className="big" style={{ color: '#fff' }} />
               <IconButton icon={repeat === 'one' ? 'repeat_one' : 'repeat'} label="Repeat" onClick={player.cycleRepeat} color={repeat !== 'off' ? 'var(--primary)' : '#fff'} />
             </div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 4 }}>
+              <IconButton icon="playlist_add" label="Add to playlist" onClick={() => setSheet('save')} style={{ color: '#fff' }} />
+              <IconButton icon="share" label="Share with friends" onClick={() => setSheet('share')} style={{ color: '#fff' }} />
+              <IconButton icon="radio" label="Start song radio" onClick={() => void startStation('song', song.id)} style={{ color: '#fff' }} />
+            </div>
           </div>
         </div>
         <Lyrics lines={best?.line ?? []} synced={!!best?.synced} position={position} loading={lyrics.loading} />
       </div>
+      <div style={{ padding: '0 24px' }}>
+        <SongDetailsSection songId={song.id} onOpenAlbum={nav.openAlbum} />
+      </div>
+      </div>
+      {sheet === 'save' && <AddToPlaylistSheet song={song} onClose={() => setSheet(null)} />}
+      {sheet === 'share' && <ShareSongSheet song={song} onClose={() => setSheet(null)} />}
     </div>
   )
 }
@@ -107,7 +137,7 @@ function Lyrics({ lines, synced, position, loading }: { lines: { start?: number;
   }, [current])
 
   return (
-    <div ref={box} style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: '24px 24px', overflowY: 'auto', maxHeight: '72vh', minHeight: 220 }}>
+    <div ref={box} className="np-lyrics" style={{ background: 'rgba(0,0,0,0.25)', borderRadius: 12, padding: '24px 24px', overflowY: 'auto', maxHeight: '72vh', minHeight: 220 }}>
       <div className="label-large" style={{ marginBottom: 12, opacity: 0.8 }}>Lyrics</div>
       {loading ? null : lines.length === 0 ? (
         <div className="body-medium muted" style={{ textAlign: 'center', paddingTop: 40 }}>No lyrics for this song yet</div>
@@ -129,3 +159,48 @@ function Lyrics({ lines, synced, position, loading }: { lines: { start?: number;
     </div>
   )
 }
+
+/**
+ * The cover, with the previous and next songs' covers peeking out behind it (smaller and dimmer). Tap one, or
+ * swipe, to play it; the covers slide across as the song changes (each keeps its element, keyed by queue entry).
+ */
+function CoverCarousel({ width }: { width: string }) {
+  const order = usePlayer((s) => s.order)
+  const items = usePlayer((s) => s.items)
+  const current = usePlayer((s) => s.current)
+  const touchX = useRef<number | null>(null)
+  const pos = order.indexOf(current)
+  // Two each side: the far ones are hidden, ready to slide in.
+  const slots = [-2, -1, 0, 1, 2].flatMap((d) => (order[pos + d] != null && items[order[pos + d]] ? [{ d, item: items[order[pos + d]] }] : []))
+  const swipe = (dx: number) => {
+    if (Math.abs(dx) < 50) return
+    if (dx < 0) player.nextSong()
+    else player.previousSong()
+  }
+  return (
+    <div
+      className="cover-carousel"
+      style={{ width }}
+      onTouchStart={(e) => (touchX.current = e.touches[0].clientX)}
+      onTouchEnd={(e) => {
+        if (touchX.current != null) swipe(e.changedTouches[0].clientX - touchX.current)
+        touchX.current = null
+      }}
+    >
+      {slots.map(({ d, item }) => (
+        <div
+          key={item.uid}
+          className={`cc-slot${d === 0 ? ' current' : ''}`}
+          // The far ones are hidden and behind, and don't take taps.
+          style={{ '--d': d, opacity: d === 0 ? 1 : Math.abs(d) === 1 ? 0.5 : 0, zIndex: d === 0 ? 1 : -Math.abs(d), pointerEvents: Math.abs(d) > 1 ? 'none' : undefined } as CSSProperties}
+          onClick={d === -1 ? player.previousSong : d === 1 ? player.nextSong : undefined}
+          aria-hidden={d !== 0}
+          title={d === -1 ? `Previous: ${item.song.title}` : d === 1 ? `Next: ${item.song.title}` : undefined}
+        >
+          <Cover coverArt={item.song.coverArt} size={800} corner={8} style={{ width: '100%', height: '100%' }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+

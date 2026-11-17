@@ -191,6 +191,14 @@ data class Conversation(
 @Serializable
 sealed interface SocialEvent
 
+/** Something you played (here or on another device): fetch Recently played again. */
+@Serializable @SerialName("recentsChanged")
+data object RecentsChangedEvent : SocialEvent
+
+/** Trending or Latest changed on the music site: Home's rows are fetched again. */
+@Serializable @SerialName("feedsChanged")
+data object FeedsChangedEvent : SocialEvent
+
 @Serializable @SerialName("presence")
 data class PresenceEvent(val userId: Long, val online: Boolean, val nowPlaying: SongRef? = null) : SocialEvent
 
@@ -248,6 +256,52 @@ data class MessageUpdatedEvent(val message: ChatMessage) : SocialEvent
 @Serializable @SerialName("listenState")
 data class ListenStateEvent(val conversationId: Long, val state: ListenState, val by: Long, val serverTime: Long) : SocialEvent
 
+@Serializable @SerialName("devices")
+data class DevicesEvent(val activeDeviceId: String?, val devices: List<DeviceDto>) : SocialEvent
+
+@Serializable @SerialName("remoteCommand")
+data class RemoteCommandEvent(
+    val commandId: String,
+    val action: String,
+    val positionMs: Long? = null,
+    val volume: Float? = null,
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val index: Int? = null,
+    val byDeviceId: String? = null,
+) : SocialEvent
+
+@Serializable @SerialName("transferPlayback")
+data class TransferPlaybackEvent(val state: DevicePlaybackState, val fromDeviceId: String) : SocialEvent
+
+@Serializable
+data class DeviceDto(
+    val id: String,
+    val name: String,
+    val type: String,
+    val isCurrent: Boolean = false,
+    val isActive: Boolean = false,
+    val playing: Boolean = false,
+    val song: SongRef? = null,
+    val positionMs: Long = 0,
+    val volume: Float = 1f,
+    val lastSeen: Long = 0,
+    val source: String? = null,
+)
+
+@Serializable
+data class DevicePlaybackState(
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val queueId: String? = null,
+    val index: Int = 0,
+    val positionMs: Long = 0,
+    val playing: Boolean = false,
+    val volume: Float = 1f,
+    val updatedAt: Long = 0,
+    val source: String? = null,
+)
+
 /** What the app sends over the WebSocket. */
 @Serializable
 sealed interface ClientEvent
@@ -275,6 +329,26 @@ data class ListenLeave(val conversationId: Long) : ClientEvent
 @Serializable @SerialName("listenUpdate")
 data class ListenUpdate(val conversationId: Long, val state: ListenState) : ClientEvent
 
+@Serializable @SerialName("devicePlayback")
+data class DevicePlaybackUpdate(val playback: DevicePlaybackState) : ClientEvent
+
+@Serializable @SerialName("remoteCommand")
+data class RemoteCommand(
+    val targetDeviceId: String,
+    val action: String,
+    val positionMs: Long? = null,
+    val volume: Float? = null,
+    val song: SongRef? = null,
+    val queue: List<SongRef>? = null,
+    val index: Int? = null,
+) : ClientEvent
+
+@Serializable @SerialName("transferPlayback")
+data class TransferPlayback(val toDeviceId: String, val state: DevicePlaybackState? = null) : ClientEvent
+
+@Serializable @SerialName("setActiveDevice")
+data class SetActiveDevice(val deviceId: String) : ClientEvent
+
 // Admin listening stats (server: Stats.kt). Only admins get these.
 
 @Serializable data class AdminAccess(val isAdmin: Boolean = false)
@@ -301,12 +375,16 @@ data class UserStats(
 
 @Serializable data class DayHours(val date: String, val hours: Double)
 
+/** One sort of mix over the last 30 days, everyone together: opened (a station: started), songs played and skipped. */
+@Serializable data class MixStats(val name: String, val opened: Int = 0, val played: Int = 0, val skipped: Int = 0)
+
 @Serializable
 data class ListeningStats(
     val generatedAt: Long,
     val users: List<UserStats> = emptyList(),
     val daily: List<DayHours> = emptyList(),
     val hourOfDay: List<Double> = emptyList(),
+    val mixes: List<MixStats> = emptyList(),
 )
 
 // Search by Isai Pettai (the friends server): forgives spelling, and knows lyricists and actors.
@@ -322,11 +400,11 @@ data class PersonHit(
     val songCount: Int = 0,
     val movieCount: Int = 0,
 ) {
-    /** "Actor · Lyricist · 45 movies" */
+    /** "Artist · 45 albums" */
     val description get() = (
-        roles.map { when (it) { "composer" -> "Composer"; "singer" -> "Artist"; "lyricist" -> "Lyricist"; else -> "Actor" } } +
+        roles.map { when (it) { "composer" -> "Composer"; else -> "Artist" } }.distinct() +
             listOfNotNull(
-                if ("actor" in roles || "composer" in roles) movieCount.takeIf { it > 0 }?.let { if (it == 1) "1 movie" else "$it movies" }
+                if ("composer" in roles || "artist" in roles || "singer" in roles || "lyricist" in roles) movieCount.takeIf { it > 0 }?.let { if (it == 1) "1 album" else "$it albums" }
                 else songCount.takeIf { it > 0 }?.let { if (it == 1) "1 song" else "$it songs" },
             )
         ).joinToString(" · ")
@@ -408,9 +486,53 @@ data class MusicRequest(
     val mine: Boolean = false,
     /** Everyone who asked, by name. */
     val askedBy: List<String> = emptyList(),
+    /** While it's being filled: "review" (downloaded, waiting for an admin), "approved" or "rejected". */
+    val stage: String? = null,
+    /** What was downloaded, for admins to check. */
+    val review: RequestReview? = null,
+    /** Why the last check was rejected (admins). */
+    val reviewNote: String? = null,
 ) {
     val isOpen get() = status == "open"
 }
+
+/** A fulfilled request's download, waiting for an admin to listen and approve (docs/request-fulfilment.md). */
+@Serializable
+data class RequestReview(
+    val album: String,
+    val year: Int? = null,
+    val composer: String? = null,
+    val lyricists: String? = null,
+    val coverUrl: String? = null,
+    val source: String? = null,
+    val score: Double? = null,
+    /** "existing": joins an album in the library; "new": a new album folder. */
+    val destination: String = "new",
+    val destinationAlbumId: String? = null,
+    val destinationFolder: String? = null,
+    val suggestedFolder: String? = null,
+    val destinationChosen: Boolean = false,
+    val scoreFolder: String? = null,
+    val tracks: List<ReviewTrack> = emptyList(),
+    /** Songs the album already has, left out of the download. */
+    val skipped: List<String> = emptyList(),
+    val coveredBy: Long? = null,
+    val notes: List<String> = emptyList(),
+)
+
+@Serializable
+data class ReviewTrack(
+    val n: Int,
+    val file: String,
+    val title: String,
+    val singers: String? = null,
+    val durationMs: Long? = null,
+    val bitrate: Int? = null,
+    /** "synced", "plain" or "none". */
+    val lyrics: String = "none",
+    /** Background score: filed under the album's background score. */
+    val score: Boolean = false,
+)
 
 /** A catalog result, with its request if someone asked for it already. */
 @Serializable
@@ -426,3 +548,59 @@ data class CatalogResults(val movies: List<CatalogHit> = emptyList(), val songs:
         songs.map { if (it.item.id == itemId) it.copy(request = request) else it },
     )
 }
+
+// ---- Importing playlists from other services ----
+
+/** One song of a playlist from somewhere else, as that service describes it. */
+@Serializable
+data class ImportedTrack(
+    val title: String,
+    val artists: List<String> = emptyList(),
+    val album: String? = null,
+    val durationMs: Long? = null,
+    val isrc: String? = null,
+    /** Its catalog id (Apple Music songs), so it can be requested straight away. */
+    val catalogId: String? = null,
+)
+
+/** A song of the playlist and what it is in the library: [match] if found ([sure] when nothing is in doubt), [choices] to pick from. */
+@Serializable
+data class ImportRow(val track: ImportedTrack, val match: MixSong? = null, val sure: Boolean = false, val choices: List<MixSong> = emptyList())
+
+@Serializable
+data class ImportPreview(
+    val name: String,
+    /** "spotify", "apple", "youtube" or "file". */
+    val source: String,
+    val rows: List<ImportRow>,
+    val truncated: Boolean = false,
+    val note: String? = null,
+)
+
+@Serializable
+data class ImportCreated(val playlistId: String, val songCount: Int = 0, val missingCount: Int = 0)
+
+/** A song of a saved playlist: one of the library's ([songId]), or one it doesn't have ([track]), kept greyed out to request. */
+@Serializable
+data class ImportItem(val songId: String? = null, val track: ImportedTrack? = null)
+
+/** What became of a song asked for: "queued", "requested", "in_library" or "not_found" (see [note]). */
+@Serializable
+data class QueuedRequest(val status: String = "queued", val note: String? = null)
+
+/** A song of a playlist the library doesn't have: before the song at [before] (the end if past it), and its request. */
+@Serializable
+data class MissingSong(
+    val id: Long,
+    val before: Int,
+    val track: ImportedTrack,
+    val request: MusicRequest? = null,
+    /** Waiting in the server's queue to be requested (it goes at the pace the music catalog allows). */
+    val queued: Boolean = false,
+    /** Why it couldn't be requested, or why it's still waiting. */
+    val note: String? = null,
+)
+
+/** A playlist's missing songs; [filled]: how many just arrived in the library and became songs of it (reload them). */
+@Serializable
+data class PlaylistMissing(val songs: List<MissingSong> = emptyList(), val filled: Int = 0)

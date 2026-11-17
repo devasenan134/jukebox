@@ -7,6 +7,10 @@ import { session, useSession } from '../state/session'
 import { useListen, setListenSender } from './listen'
 import { onPlayback } from '../player/player'
 import { toast } from '../ui/kit'
+import { getDeviceId, getDeviceName, getClientType } from '../state/deviceIdentity'
+import { syncCurrentPlayback } from '../state/devices'
+import { syncRecents } from '../state/history'
+import { queryClient } from '../state/queries'
 
 /**
  * Everything friends-related the UI needs, kept up to date live (port of social/Social.kt).
@@ -168,14 +172,16 @@ async function refreshAll() {
 /** Opens the WebSocket and resolves when it closes. */
 function runSocket(): Promise<void> {
   return new Promise((resolve) => {
-    const url = api.eventsUrl()
+    const url = api.eventsUrl(getDeviceId(), getDeviceName(), getClientType())
     if (!url) return resolve()
     const ws = new WebSocket(url)
     socket = ws
     ws.onopen = () => {
       setS({ status: 'Online' })
+      void syncRecents()
       sendEvent({ type: 'appState', visible: visible() })
       if (nowPlaying) sendEvent({ type: 'nowPlaying', song: nowPlaying })
+      syncCurrentPlayback()
       useListen.getState().onConnected()
     }
     ws.onmessage = (m) => {
@@ -262,6 +268,7 @@ onPlayback((song, isPlaying) => {
     nowPlaying = shown
     sendEvent({ type: 'nowPlaying', song: shown })
   }
+  syncCurrentPlayback()
   reconsider()
 })
 
@@ -305,6 +312,13 @@ function handle(event: SocialEvent) {
     }
     case 'friendRequest':
       void refreshRequests()
+      break
+    case 'recentsChanged':
+      void syncRecents()
+      break
+    case 'feedsChanged':
+      // Trending or Latest changed on the music site: Home's rows follow.
+      void queryClient.invalidateQueries({ queryKey: ['home', 'feeds'] })
       break
     case 'conversationUpdated':
       void refreshConversations()

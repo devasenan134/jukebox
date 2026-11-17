@@ -12,6 +12,7 @@ import java.io.File
  *   jukebox user admin <username> on|off
  *   jukebox user remove <username>
  *   jukebox user list
+ *   jukebox user token <username>    a session token for scripts (the fulfil script), printed once
  *
  * The password is asked for (or read from JUKEBOX_PASSWORD, for scripts). It works while the server runs:
  * a removed person's sessions end at once, though a connected phone notices only on its next request.
@@ -28,6 +29,7 @@ class UserCommand(private val db: Db, private val signIn: SignIn) {
             command == "password" -> password(username)
             command == "admin" && args.getOrNull(2) in setOf("on", "off") -> admin(username, args[2] == "on")
             command == "remove" -> remove(username)
+            command == "token" -> token(username)
             else -> usage()
         }
     }
@@ -68,6 +70,16 @@ class UserCommand(private val db: Db, private val signIn: SignIn) {
         val id = userId(username) ?: return fail("No account $username")
         db.tx { retireUser(id) }
         println("Removed $username (their messages stay, marked as left)")
+        return 0
+    }
+
+    /** A new session, like signing in, for a script that calls the API as this account. */
+    private suspend fun token(username: String): Int {
+        val id = userId(username) ?: return fail("No account $username")
+        val token = ByteArray(32).also(java.security.SecureRandom()::nextBytes).let { java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
+        val hash = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).joinToString("") { "%02x".format(it) }
+        db.tx { update("INSERT INTO sessions VALUES (?, ?, ?)", hash, id, now()) }
+        println(token)
         return 0
     }
 
@@ -112,7 +124,8 @@ class UserCommand(private val db: Db, private val signIn: SignIn) {
           |       jukebox user password <username>
           |       jukebox user admin <username> on|off
           |       jukebox user remove <username>
-          |       jukebox user list""".trimMargin(),
+          |       jukebox user list
+          |       jukebox user token <username>""".trimMargin(),
     )
 
     private fun fail(message: String): Int {

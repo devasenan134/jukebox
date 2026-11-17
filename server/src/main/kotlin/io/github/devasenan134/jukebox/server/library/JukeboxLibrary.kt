@@ -6,7 +6,12 @@ import io.github.devasenan134.jukebox.server.LibrarySnapshot
 import io.github.devasenan134.jukebox.server.LibrarySong
 import io.github.devasenan134.jukebox.server.MusicSource
 import io.github.devasenan134.jukebox.server.Person
+import io.github.devasenan134.jukebox.server.PlaylistTaste
+import io.github.devasenan134.jukebox.server.SongLabel
+import io.github.devasenan134.jukebox.server.learnedLabel
 import io.github.devasenan134.jukebox.server.moodScores
+import io.github.devasenan134.jukebox.server.zScores
+import io.github.devasenan134.jukebox.server.playlistTaste
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.coroutines.Dispatchers
@@ -61,12 +66,20 @@ class JukeboxLibrary(
             "SELECT json_extract(payload, '$.recording'), at FROM events WHERE user_id = ? AND type = 'played' ORDER BY seq DESC LIMIT 5000", userId,
         ) { rs -> snapshot.index[rs.getString(1)]?.let { it to rs.getLong(2) } }.filterNotNull()
         val likes = query("SELECT item_type, item_id FROM likes WHERE user_id = ?", userId) { it.getString(1) to it.getString(2) }
+        // Playlists they made, and playlists they liked (someone else's, or a deleted one's leftovers aren't there).
+        val playlistRows = query(
+            """SELECT e.playlist_id, p.owner_id = ?, e.recording_id, e.added_at FROM playlist_entries e JOIN playlists p ON p.id = e.playlist_id
+                 WHERE p.owner_id = ? OR e.playlist_id IN (SELECT playlist_id FROM liked_playlists WHERE user_id = ?)""",
+            userId, userId, userId,
+        ) { rs -> snapshot.index[rs.getString(3)]?.let { Triple(rs.getString(1), rs.getInt(2) == 1, it to rs.getLong(4)) } }.filterNotNull()
+        val playlists = playlistRows.groupBy { it.first }.values.map { rows -> PlaylistTaste(rows.map { it.third }, own = rows.first().second) }
         History(
             playCount, lastPlayed, plays,
             starred = likes.filter { it.first == "recording" }.mapNotNull { snapshot.index[it.second] }.toSet(),
             starredAlbums = likes.filter { it.first == "album" }.map { it.second }.toSet(),
             starredArtists = likes.filter { it.first == "person" }.map { it.second }.toSet(),
             rating = emptyMap(),
+            playlisted = playlistTaste(playlists, System.currentTimeMillis()),
         )
     }
 
@@ -102,14 +115,19 @@ class JukeboxLibrary(
                     ORDER BY r.id, CASE rl.kind WHEN 'soundtrack' THEN 0 WHEN 'album' THEN 0 WHEN 'score' THEN 1 ELSE 2 END, coalesce(f.bitrate, 0) DESC""",
             ) { rs ->
                 val id = rs.getString(1)
-                val score = rs.getString(8) == "score"
+                val relKind = rs.getString(8)
+                val albumRaw = rs.getString(6)
+                val title = rs.getString(2)
+                val isScoreRelease = relKind == "score"
+                // ScoreSplitter has put background music named or sounding like it on the score release already.
+                val score = isScoreRelease
                 val roles = credits[id].orEmpty()
                 val singers = roles["singer"].orEmpty()
                 LibrarySong(
                     id = id,
-                    title = rs.getString(2),
-                    album = if (score) rs.getString(6) + " (Original Background Score)" else rs.getString(6),
-                    albumId = if (score) rs.getString(9) else rs.getString(7),
+                    title = title,
+                    album = if (isScoreRelease) albumRaw + " (Original Background Score)" else albumRaw,
+                    albumId = if (isScoreRelease) rs.getString(9) else rs.getString(7),
                     artist = singers.joinToString(" • ") { it.name },
                     singers = singers,
                     composer = roles["composer"]?.firstOrNull(),
@@ -119,6 +137,7 @@ class JukeboxLibrary(
                     addedAt = rs.getLong(5),
                     karaoke = rs.getString(3) == "karaoke",
                     lyricists = roles["lyricist"].orEmpty(),
+                    score = score,
                 )
             }.distinctBy { it.id }
         }
@@ -127,6 +146,7 @@ class JukeboxLibrary(
         val energy = FloatArray(songs.size) { Float.NaN }
         val rhythm = FloatArray(songs.size) { Float.NaN }
         val prompts = HashMap<String, FloatArray>()
+        val learned = HashMap<String, FloatArray>()
         withContext(Dispatchers.IO) {
             val features = featuresDb?.takeIf { File(it).isFile }
             // The analyzer this server came from keyed songs by Navidrome's ids; those can't be matched any more.
@@ -147,16 +167,53 @@ class JukeboxLibrary(
                         sound[i] = floats(rs.getBytes(4))
                     }
                     c.query("SELECT key, embedding FROM prompts") { rs -> prompts[rs.getString(1)] = floats(rs.getBytes(2)) }
+                    // Labels the analyzer learned from the language model's (an older analyzer has none).
+                    val keys = runCatching { c.queryOne("SELECT value FROM meta WHERE key = 'learned_keys'") { it.getString(1) } }.getOrNull()?.split(',')
+                    if (keys != null) {
+                        keys.forEach { learned[it] = FloatArray(songs.size) { Float.NaN } }
+                        c.query("SELECT id, scores FROM learned") { rs ->
+                            val i = position[rs.getString(1)] ?: return@query
+                            floats(rs.getBytes(2)).forEachIndexed { k, v -> if (k < keys.size) learned.getValue(keys[k])[i] = v }
+                        }
+                    }
                 }
             }
         }
-        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm)
+        // What other services know (SongSignals): songs their listeners play together, and how much each is played.
+        val index = snapshotIndex(songs)
+        val links = Array(songs.size) { IntArray(0) }
+        val plays = FloatArray(songs.size) { Float.NaN }
+        db.read {
+            query("SELECT recording_id, other_id FROM song_links ORDER BY recording_id, rank") { rs -> index[rs.getString(1)]?.let { it to index[rs.getString(2)] } }
+                .filter { it?.second != null }.groupBy({ it!!.first }, { it!!.second!! })
+                .forEach { (i, others) -> links[i] = others.distinct().toIntArray() }
+            query("SELECT recording_id, max(plays) FROM song_fame GROUP BY recording_id") { rs ->
+                index[rs.getString(1)]?.let { plays[it] = kotlin.math.ln(1.0 + rs.getLong(2)).toFloat() }
+            }
+        }
+        val labels = arrayOfNulls<SongLabel>(songs.size)
+        db.read {
+            query("SELECT recording_id, moods, energy, valence, themes, instrumental, sure FROM song_labels") { rs ->
+                index[rs.getString(1)]?.let { i ->
+                    fun set(s: String) = s.split(',').filter { it.isNotBlank() }.toSet()
+                    labels[i] = SongLabel(set(rs.getString(2)), rs.getInt(3), rs.getInt(4), set(rs.getString(5)), rs.getInt(6) == 1, rs.getInt(7) == 1)
+                }
+            }
+        }
+        // Songs the language model didn't label (new ones) go by what the analyzer learned from its labels.
+        for (i in labels.indices) if (labels[i] == null) labels[i] = learnedLabel(learned, i)
+        return LibrarySnapshot(songs, sound, moodScores(sound, prompts), prompts, tempo, energy, version, rhythm, links, zScores(plays), labels, learned)
     }
 
     private fun snapshotIndex(songs: List<LibrarySong>): Map<String, Int> = songs.withIndex().associate { (i, s) -> s.id to i }
 
     private fun featuresVersion(): String = featuresDb?.takeIf { File(it).isFile }?.let { path ->
-        readOnly(path) { c -> c.queryOne("SELECT count(*), max(analyzed_at) FROM songs") { "${it.getInt(1)}-${it.getLong(2)}" } }
+        readOnly(path) { c ->
+            // updated_at changes when songs are analyzed and when labels are learned again.
+            c.queryOne("SELECT count(*), max(analyzed_at), (SELECT value FROM meta WHERE key = 'updated_at') FROM songs") {
+                "${it.getInt(1)}-${it.getLong(2)}-${it.getString(3)}"
+            }
+        }
     } ?: "none"
 
     private fun <T> readOnly(path: String, block: (Connection) -> T): T =

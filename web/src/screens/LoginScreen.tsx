@@ -61,10 +61,10 @@ export function LoginScreen() {
   }
 
   return (
-    <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'radial-gradient(ellipse at top, hsl(32 60% 22%) 0%, #121212 55%, #000 100%)' }}>
+    <div style={{ minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'radial-gradient(ellipse at top, hsl(30 60% 22%) 0%, #141210 55%, #000 100%)' }}>
       <form onSubmit={submit} style={{ width: '100%', maxWidth: 380, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, animation: 'rise 0.35s ease-out backwards' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--primary)' }}>
-          <span className="icon filled" style={{ fontSize: 40 }}>album</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img src="/logo.svg" alt="" width={44} height={44} />
           <span style={{ fontSize: 34, fontFamily: 'var(--display)', fontWeight: 900, letterSpacing: '-0.04em' }}>Jukebox</span>
         </div>
         <h1 className="display-small" style={{ margin: '12px 0 8px', textAlign: 'center' }}>{signingUp ? 'Join your friends' : 'Log in to Jukebox'}</h1>

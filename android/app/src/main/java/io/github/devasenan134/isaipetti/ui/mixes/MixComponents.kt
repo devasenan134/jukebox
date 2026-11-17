@@ -5,6 +5,12 @@ import androidx.core.graphics.ColorUtils
 import io.github.devasenan134.isaipetti.ui.components.UiSize
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.layout.fillMaxHeight
+import io.github.devasenan134.isaipetti.data.MixArt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -62,6 +68,11 @@ fun Mix.tint(): Color = runCatching { Color(android.graphics.Color.parseColor(co
  */
 @Composable
 fun MixCover(mix: Mix, modifier: Modifier = Modifier, size: Dp = 150.dp) {
+    // Designed covers (MixArt.kt) for every mix the server describes; the looks below are for older servers.
+    mix.art?.let { art ->
+        MixArtCover(mix, art, modifier.size(size), corner = size / 18)
+        return
+    }
     val big = size > 120.dp
     val tiny = size < 80.dp // a thumbnail: just the artwork
     val tint = mix.tint()
@@ -131,11 +142,14 @@ private fun withHsl(color: Color, change: (FloatArray) -> Unit): Color {
     return Color(ColorUtils.HSLToColor(hsl))
 }
 
-/** A tile on Home: the artwork, then the mix's one-line description. */
+/** A tile on Home: the artwork (with "New" on a mix that's new to your Home), then the mix's one-line description. */
 @Composable
 fun MixCard(mix: Mix, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.width(UiSize.Tile).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp)) {
-        MixCover(mix, size = UiSize.Tile - 12.dp)
+        Box {
+            MixCover(mix, size = UiSize.Tile - 12.dp)
+            if (mix.isNew) NewBadge(Modifier.align(Alignment.TopEnd).padding((UiSize.Tile - 12.dp) / 18))
+        }
         Text(
             mix.subtitle,
             style = MaterialTheme.typography.bodySmall,
@@ -147,6 +161,25 @@ fun MixCard(mix: Mix, onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
+/** "NEW" in the Saffron gradient, opposite the mark on a mix's artwork. */
+@Composable
+private fun NewBadge(modifier: Modifier = Modifier) {
+    Text(
+        "NEW",
+        color = Color(0xFF2B1300),
+        fontWeight = FontWeight.ExtraBold,
+        fontSize = 10.sp,
+        letterSpacing = 0.5.sp,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(Brush.linearGradient(listOf(Color(0xFFFFE36E), Color(0xFFFF9F1C), Color(0xFFE5480B))))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/** The rows drawn as pages of big and wide tiles ([MixBento]); the rest are rows of square tiles. */
+private val BENTO_SECTIONS = setOf("made-for-you", "top-mixes")
+
 /** Home's rows of mixes ("Made for you", "Moods and vibes", ...). */
 fun LazyListScope.mixSections(sections: List<MixSection>, nav: Nav) {
     for (section in sections) {
@@ -156,10 +189,112 @@ fun LazyListScope.mixSections(sections: List<MixSection>, nav: Nav) {
                 // "Made for Devs", like Spotify's "Made For <name>".
                 val name = madeForName()
                 SectionTitle(if (section.id == "made-for-you" && name != null) "Made for $name" else section.title)
-                LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
-                    items(section.mixes, key = { it.id }) { mix -> MixCard(mix, onClick = { nav.openMix(mix.id) }) }
+                if (section.id in BENTO_SECTIONS) {
+                    MixBento(section.mixes, nav)
+                } else {
+                    LazyRow(contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        items(section.mixes, key = { it.id }) { mix -> MixCard(mix, onClick = { nav.openMix(mix.id) }) }
+                    }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Mixes as pages of 4 to swipe through: a big square, two wide tiles stacked beside it, and one across the
+ * bottom. Every other page has the big square on the other side. A last page with fewer fills what it has.
+ */
+@Composable
+private fun MixBento(mixes: List<Mix>, nav: Nav) {
+    val pages = mixes.chunked(4)
+    val pager = rememberPagerState { pages.size }
+    HorizontalPager(
+        pager,
+        contentPadding = PaddingValues(start = 16.dp, end = 40.dp),
+        pageSpacing = 12.dp,
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+    ) { p -> BentoPage(pages[p], flip = p % 2 == 1, nav = nav) }
+}
+
+@Composable
+private fun BentoPage(page: List<Mix>, flip: Boolean, nav: Nav) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val gap = 10.dp
+        val column = (maxWidth - gap) / 2
+        val row = (maxWidth - gap * 3) / 4
+        val width = maxWidth
+        @Composable fun tile(mix: Mix, big: Boolean, modifier: Modifier) = BentoTile(mix, big, modifier) { nav.openMix(mix.id) }
+        Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+            if (page.size <= 2) {
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) { page.forEach { tile(it, true, Modifier.size(column)) } }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    val big = @Composable { tile(page[0], true, Modifier.size(column)) }
+                    val stacked = @Composable {
+                        Column(verticalArrangement = Arrangement.spacedBy(gap)) { page.subList(1, 3).forEach { tile(it, false, Modifier.size(column, row)) } }
+                    }
+                    if (flip) { stacked(); big() } else { big(); stacked() }
+                }
+                page.getOrNull(3)?.let { tile(it, false, Modifier.size(width, row)) }
+            }
+        }
+    }
+}
+
+/**
+ * A designed cover on a bento tile: the whole cover on a big square; on a wide tile, the cover on the left and
+ * its name and line beside it, on the cover's own colour.
+ */
+@Composable
+private fun ArtBentoTile(mix: Mix, art: MixArt, big: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val ground = runCatching { Color(android.graphics.Color.parseColor(art.ground)) }.getOrDefault(Color.DarkGray)
+    val ink = runCatching { Color(android.graphics.Color.parseColor(art.ink)) }.getOrDefault(Color.White)
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(ground).clickable(onClick = onClick)) {
+        if (big) {
+            MixArtCover(mix, art, Modifier.fillMaxSize())
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                MixArtCover(mix, art, Modifier.fillMaxHeight())
+                Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.Bottom) {
+                    Text(mix.title, color = ink, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(mix.subtitle, color = ink.copy(alpha = 0.75f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        if (mix.isNew) NewBadge(Modifier.align(if (big) Alignment.TopEnd else Alignment.TopStart).padding(10.dp))
+    }
+}
+
+/** A mix's cover filling the tile (four of them on a big tile), its name and line over it, and "New". */
+@Composable
+private fun BentoTile(mix: Mix, big: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    mix.art?.let { art ->
+        ArtBentoTile(mix, art, big, modifier, onClick)
+        return
+    }
+    val tint = mix.tint()
+    Box(modifier.clip(RoundedCornerShape(14.dp)).background(tint).clickable(onClick = onClick)) {
+        if (big && mix.covers.size >= 4) {
+            Column(Modifier.fillMaxSize()) {
+                mix.covers.take(4).chunked(2).forEach { pair ->
+                    Row(Modifier.weight(1f)) { pair.forEach { Cover(it, Modifier.weight(1f).fillMaxSize(), size = 300, corner = 0.dp) } }
+                }
+            }
+        } else {
+            mix.covers.firstOrNull()?.let { Cover(it, Modifier.fillMaxSize(), size = if (big) 500 else 400, corner = 0.dp) }
+        }
+        // Darker towards the bottom, in the mix's colour, so the name reads on any picture.
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.3f to Color.Transparent, 1f to tint.copy(alpha = 0.9f))))
+        if (mix.isNew) NewBadge(Modifier.align(Alignment.TopStart).padding(10.dp))
+        Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Text(
+                mix.title, color = Color.White, fontWeight = FontWeight.ExtraBold,
+                fontSize = if (big) 22.sp else 15.sp, lineHeight = if (big) 26.sp else 18.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            Text(mix.subtitle, color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

@@ -1,0 +1,49 @@
+# Builds Jukebox.app and Jukebox.dmg for macOS (one universal file for Apple silicon and Intel Macs).
+# - Publishing an app release (vX.Y.Z, the one with the APK) builds the DMG with that version and attaches it,
+#   so each release has both. The Android updater only looks at the .apk, so the DMG doesn't get in its way.
+# - Next to the DMG go the app's signed update (jukebox-X.Y.Z-macos.app.tar.gz) and latest-macos.json, which
+#   installed apps read from the latest release to update themselves. The signing key is the
+#   TAURI_SIGNING_PRIVATE_KEY secret (kept by the maintainer; the public half is in tauri.conf.json).
+# - Run it by hand with a tag to add the DMG to a release made earlier.
+# - Every change to desktop/ also builds one, kept under the run's Artifacts, to try before releasing.
+# - GitHub's Apple silicon Macs are sometimes all busy and a job waits 15 minutes for one, then gives up. Then a
+#   release (or a run by hand with a tag) builds on an Intel Mac instead, so the release still gets its Mac files.
+# - Installed apps read latest-macos.json from the mac-latest release first (a pre-release that only holds the
+#   newest good build's manifest), then from the latest release. So while a new release's Mac build is still
+#   running, or if it fails, apps still find the last good update instead of an error.
+name: Desktop (macOS)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the DMG to (e.g. v0.12.1); empty = build only
+        required: false
+  push:
+    branches: ['**']
+    paths: ['desktop/**', '.github/workflows/desktop-macos.yml', '.github/workflows/desktop-macos-build.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Releases of the app only (vX.Y.Z), never mac-latest.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
+    uses: ./.github/workflows/desktop-macos-build.yml
+    with:
+      runner: macos-latest
+      tag: ${{ github.event.release.tag_name || inputs.tag }}
+    secrets: inherit
+
+  intel:
+    # Only when the Apple silicon build didn't succeed, and only for a release's files.
+    needs: build
+    if: always() && needs.build.result != 'success' && needs.build.result != 'skipped' && (github.event.release.tag_name || inputs.tag)
+    uses: ./.github/workflows/desktop-macos-build.yml
+    with:
+      runner: macos-15-intel
+      tag: ${{ github.event.release.tag_name || inputs.tag }}
+    secrets: inherit

@@ -86,4 +86,23 @@ class StatsTest {
         assertEquals(24, report.hourOfDay.size)
         assertEquals(1.5, report.hourOfDay.sum(), 0.02) // 1.3 h (devs) + 0.2 h (sathya)
     }
+
+    @Test
+    fun `how each sort of mix did`(): Unit = runBlocking {
+        val db = db()
+        val now = System.currentTimeMillis()
+        db.tx {
+            for ((mix, kind, first) in listOf(Triple("daily-1", "mix", 0), Triple("daily-2", "mix", 0), Triple("radio-song-s1", "radio", 0), Triple("radio-song-s1", "radio", 20))) {
+                update("INSERT INTO suggestion_lists (user_id, mix_id, kind, songs_hash, first_position, served_at) VALUES (1, ?, ?, 0, ?, ?)", mix, kind, first, now)
+            }
+            for ((source, skipped) in listOf("mix:daily-1" to 0, "mix:daily-2" to 1, "mix:daily-2" to 0, "mix:radio-song-s1" to 1, "playlist:x" to 0)) {
+                update("INSERT INTO plays (user_id, song_id, at, played_ms, duration_ms, skipped, source) VALUES (1, 's1', ?, 1000, 2000, ?, ?)", now, skipped, source)
+            }
+        }
+        val mixes = Stats(db, StatsMusic(), defaultZone = "Asia/Kolkata").report(UserDto(1, "devs", "Devs"), null).mixes
+        assertEquals(MixStatsDto("Daily Mixes", opened = 2, played = 3, skipped = 1), mixes.first())
+        // A station counts as opened once, when it starts; its later batches don't.
+        assertEquals(MixStatsDto("Stations", opened = 1, played = 1, skipped = 1), mixes.first { it.name == "Stations" })
+        assertEquals(2, mixes.size)
+    }
 }

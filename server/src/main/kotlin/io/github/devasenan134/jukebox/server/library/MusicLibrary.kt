@@ -30,7 +30,8 @@ data class LibraryStatus(
  * The music folders, scanned when the server starts (and every [rescanEveryMinutes]), with the slow
  * fingerprint pass running in the background in between.
  *
- * Settings (environment): LIBRARIES="name=path:kind:language;..." (kind "film" or "album"),
+ * Settings (environment): LIBRARIES="name=path:kind:language[:albums of];..." (kind "film" or "album"; the
+ * fourth part names another library whose albums this one's files add to),
  * SAAVN_ID_MAP=a CSV with path and saavn_id columns (paths inside the library), FINGERPRINTS=off to skip
  * the background pass.
  */
@@ -42,6 +43,7 @@ class MusicLibrary(
     saavnIdMap: File? = null,
     private val fingerprintsOn: Boolean = true,
     private val rescanEveryMinutes: Long = 60,
+    featuresDb: String? = null,
 ) {
     private val saavnIds: Map<String, String> = saavnIdMap?.takeIf { it.isFile }?.let(::readSaavnIds).orEmpty()
     val scanner = Scanner(db, tools, artworkDir, externalIds = { _, path -> saavnIds[path] }, threads = 3)
@@ -49,20 +51,33 @@ class MusicLibrary(
     /** One person, one entry: spellings folded together after each scan; `people-overrides.txt` next to the artwork corrects it. */
     val people = PeopleMerger(db, File(artworkDir.parentFile, "people-overrides.txt"))
     val covers = Covers(artworkDir, tools)
+    /** Background music in a song album goes to the film's score (`score-overrides.txt` next to the artwork corrects it). */
+    val scores = ScoreSplitter(db, featuresDb, artworkDir.parentFile)
+    val photos = PeoplePhotos(db, File(artworkDir.parentFile, "people-photos"), artworkDir)
     private val lock = Mutex()
     @Volatile private var scanning = false
+    /** A scan was asked for and is waiting for the lock: status says "scanning" from the moment it's asked. */
+    @Volatile private var queued = false
     @Volatile private var roots: Map<Long, String> = emptyMap()
 
     /** Library id → folder, for turning a file's path into a file. */
     fun roots(): Map<Long, String> = roots
 
+    fun queueScan() { queued = true }
+
     suspend fun scanAll(): List<ScanReport> = lock.withLock {
         scanning = true
+        queued = false
         try {
-            libraries.mapNotNull { l -> runCatching { scanner.scan(l) }.onFailure { log.error("Scanning {} failed", l.name, it) }.getOrNull() }
+            libraries.mapNotNull { l ->
+                val nested = libraries.filter { it !== l }.map { File(it.path) }.toSet()
+                runCatching { scanner.scan(l, nested) }.onFailure { log.error("Scanning {} failed", l.name, it) }.getOrNull()
+            }
                 .also {
                     refreshRoots()
                     runCatching { people.run() }.onFailure { log.error("Merging people failed", it) }
+                    runCatching { scores.run() }.onFailure { log.error("Sorting out background score failed", it) }
+                    runCatching { photos.run() }.onFailure { log.warn("Reading people's photos failed", it) }
                     runCatching { covers.warm(db) }.onFailure { log.warn("Making small covers failed", it) }
                 }
         } finally {
@@ -96,7 +111,7 @@ class MusicLibrary(
         fun count(sql: String) = query(sql) { it.getInt(1) }.first()
         LibraryStatus(
             libraries = libraries.map { "${it.name} (${it.kind})" },
-            scanning = scanning,
+            scanning = scanning || queued,
             lastScans = query("SELECT info FROM scans WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT ?", libraries.size.coerceAtLeast(1)) {
                 runCatching { kotlinx.serialization.json.Json.decodeFromString(ScanReport.serializer(), it.getString(1)) }.getOrNull()
             }.filterNotNull(),
@@ -113,7 +128,10 @@ class MusicLibrary(
         fun parse(setting: String?): List<LibraryDef> = setting.orEmpty().split(';').map(String::trim).filter { '=' in it }.map { entry ->
             val name = entry.substringBefore('=').trim()
             val parts = entry.substringAfter('=').split(':')
-            LibraryDef(name, parts[0].trim(), parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: "album", parts.getOrNull(2)?.trim()?.ifEmpty { null })
+            LibraryDef(
+                name, parts[0].trim(), parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: "album", parts.getOrNull(2)?.trim()?.ifEmpty { null },
+                albumsOf = parts.getOrNull(3)?.trim()?.ifEmpty { null },
+            )
         }
 
         /** A CSV with a header naming "path" and "saavn_id" columns (like the collectors' songs.csv). */

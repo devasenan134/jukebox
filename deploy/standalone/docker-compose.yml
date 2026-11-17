@@ -1,0 +1,19 @@
+# Jukebox: Standalone Music Server
+# Private, single-user or family music server without social or chat features.
+# Web app is served at the same address.
+services:
+  jukebox:
+    image: ghcr.io/devasenan134/jukebox:latest
+    container_name: jukebox
+    env_file: .env
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - DB_PATH=/data/jukebox.db
+      - JUKEBOX_SOCIAL=off
+    volumes:
+      - ./data:/data
+      - ${MUSIC_FOLDER}:/music:ro
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8095}:8095"
+    mem_limit: ${MEM_LIMIT:-1g}
+    restart: unless-stopped

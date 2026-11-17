@@ -1,35 +1,41 @@
 /*
  * Jukebox's look: a dark music app. The page is near-black and the music brings the colour: page headers
- * and the players take their tint from the cover (ui/coverColor.ts). One accent, mango, marks what's yours
- * and what's playing. The variable names are the Material roles the screens already use.
+ * and the players take their tint from the cover (ui/coverColor.ts). The accent is the logo's "Saffron" (gold
+ * through saffron to deep orange): saffron marks what's yours and what's playing, the full gradient fills the
+ * main buttons, and the greys lean slightly warm, like the logo's dark version. The variable names are the Material roles the screens
+ * already use.
  */
 
 :root {
   --app-bg: #000000;
-  --primary: #ffb547;
-  --on-primary: #1d1300;
-  --primary-container: #4a3412;
-  --on-primary-container: #ffe0b0;
-  --secondary-container: #2a2a2a;
+  --primary: #ffa12b;
+  --on-primary: #2b1300;
+  --primary-container: #5c3000;
+  --on-primary-container: #ffdcb8;
+  --secondary-container: #2c2723;
   --on-secondary-container: #ffffff;
-  --tertiary: #8fd3c1;
-  --background: #121212;
+  --tertiary: #ffe36e;
+  --background: #141210;
   --on-background: #ffffff;
-  --surface: #121212;
+  --surface: #141210;
   --on-surface: #ffffff;
-  --surface-variant: #2a2a2a;
-  --on-surface-variant: #a7a7a7;
-  --surface-container-lowest: #0a0a0a;
-  --surface-container-low: #181818;
-  --surface-container: #1f1f1f;
-  --surface-container-high: #282828;
-  --surface-container-highest: #333333;
+  --surface-variant: #2c2723;
+  --on-surface-variant: #ada59d;
+  --surface-container-lowest: #0c0a09;
+  --surface-container-low: #1a1714;
+  --surface-container: #211d1a;
+  --surface-container-high: #2a2521;
+  --surface-container-highest: #35302b;
   --inverse-surface: #ffffff;
-  --inverse-on-surface: #121212;
-  --outline: #727272;
-  --outline-variant: #2e2e2e;
+  --inverse-on-surface: #141210;
+  --outline: #78716a;
+  --outline-variant: #302b27;
   --error: #f3727f;
   --scrim: rgba(0, 0, 0, 0.7);
+  --primary-rgb: 255, 161, 43;
+  /* The logo's gradient, for the main buttons, with dark text and icons on it. */
+  --brand: linear-gradient(135deg, #ffe36e 0%, #ff9f1c 55%, #e5480b 100%);
+  --on-brand: #2b1300;
   --hover: rgba(255, 255, 255, 0.07);
   --hover-strong: rgba(255, 255, 255, 0.12);
   color-scheme: dark;
@@ -52,7 +58,8 @@
   font-style: normal;
   font-weight: 400;
   font-display: block;
-  src: url('/fonts/material-symbols-rounded.woff2') format('woff2');
+  /* Bundled by Vite, so its file name has a hash: a new icon set is fetched at once, never stuck in a cache. */
+  src: url('./assets/fonts/material-symbols-rounded.woff2') format('woff2');
 }
 
 * {
@@ -245,7 +252,7 @@ a:hover {
   display: flex;
   height: calc(var(--nav-height) + env(safe-area-inset-bottom));
   padding: 8px 0 env(safe-area-inset-bottom);
-  background: linear-gradient(to top, #000 55%, rgba(0, 0, 0, 0.85) 80%, transparent);
+  background: linear-gradient(to top, var(--app-bg) 55%, rgba(0, 0, 0, 0.85) 80%, transparent);
 }
 .nav-item {
   flex: 1;
@@ -278,6 +285,177 @@ a:hover {
 }
 a.nav-item:hover {
   text-decoration: none;
+}
+/* Admin stats: how each sort of mix did (screens/StatsScreen.tsx). */
+.mix-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.mix-stats th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--outline);
+}
+.mix-stats td {
+  padding: 8px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.mix-stats th:not(:first-child),
+.mix-stats td:not(:first-child) {
+  text-align: right;
+}
+.mix-stats td:last-child > span {
+  justify-content: flex-end;
+}
+
+/*
+ * Made for you and Your top mixes (ui/mixes.tsx): pages of 4 tiles to swipe through. A page is two columns:
+ * a big square, two wide tiles stacked beside it, then one tile across the bottom (rows a quarter of the
+ * page's width, less the gaps). .flip puts the big square on the right.
+ */
+.bento-pages {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 0 16px 8px;
+  scroll-padding: 0 16px;
+  scrollbar-width: none;
+}
+.bento-pages::-webkit-scrollbar {
+  display: none;
+}
+.bento-page {
+  flex: 0 0 min(calc(100% - 40px), 520px);
+  scroll-snap-align: start;
+  container-type: inline-size;
+}
+.bento-grid {
+  --gap: 10px;
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: calc((100cqw - 3 * var(--gap)) / 4);
+  grid-template-areas: 'a b' 'a c' 'd d';
+}
+.bento-grid.flip {
+  grid-template-areas: 'b a' 'c a' 'd d';
+}
+.bento-grid > :nth-child(1) { grid-area: a; }
+.bento-grid > :nth-child(2) { grid-area: b; }
+.bento-grid > :nth-child(3) { grid-area: c; }
+.bento-grid > :nth-child(4) { grid-area: d; }
+/* A last page of 2: two big squares; of 1: one big square. */
+.bento-grid.n2 {
+  grid-template-areas: 'a b' 'a b';
+}
+.bento-grid.n1 {
+  grid-template-areas: 'a .' 'a .';
+}
+.bento-tile {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  text-align: left;
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s;
+}
+.bento-tile:active {
+  transform: scale(0.98);
+}
+/* A designed cover on a wide tile: the square cover on the left, its name beside it. */
+.bento-art-row {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.bento-art-square {
+  height: 100%;
+  aspect-ratio: 1;
+  flex-shrink: 0;
+}
+.bento-art-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 10px 12px;
+}
+.bento-tile.art .bento-sub {
+  opacity: 0.75;
+}
+.bento-collage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.bento-shade {
+  position: absolute;
+  inset: 0;
+}
+.bento-text {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.bento-title {
+  font-weight: 800;
+  font-size: 15px;
+  line-height: 18px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.bento-title.big {
+  font-size: 22px;
+  line-height: 26px;
+}
+.bento-sub {
+  font-size: 12px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "New" on a mix tile (ui/mixes.tsx), opposite the Jukebox mark. */
+.mix-new {
+  position: absolute;
+  top: 6%;
+  right: 5.5%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.mix-new.left {
+  right: auto;
+  left: 10px;
+  top: 10px;
+  z-index: 1;
 }
 .badge {
   position: absolute;
@@ -432,8 +610,8 @@ a.nav-item:hover {
   height: 36px;
   border-radius: 50%;
   border: 0;
-  background: #fff;
-  color: #000;
+  background: var(--brand);
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -546,8 +724,8 @@ a.nav-item:hover {
   padding: 0 28px;
   border-radius: 22px;
   border: 0;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--brand);
+  color: var(--on-brand);
   font-weight: 800;
   font-size: 15px;
   cursor: pointer;
@@ -598,8 +776,8 @@ a.nav-item:hover {
   height: 56px;
   border-radius: 50%;
   border: 0;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--brand);
+  color: var(--on-brand);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -617,6 +795,53 @@ a.nav-item:hover {
 }
 .fab-play .icon {
   font-size: 32px;
+}
+/* A text-only button inside a line of text ("Change"). */
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* A fulfilled request waiting for an admin's check (RequestsScreen). */
+.review-card {
+  margin: 0 8px 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface-container);
+  border: 1px solid var(--outline-variant);
+}
+.review-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.review-notes {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--primary);
+  font-size: 13px;
+}
+/* "Album" / "Song" on a request (RequestsScreen). */
+.kind-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--outline);
+  color: var(--on-surface-variant);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+}
+.kind-tag.album {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--primary);
 }
 .chip {
   height: 32px;
@@ -835,8 +1060,8 @@ a.nav-item:hover {
   height: 48px;
   border-radius: 50%;
   border: 0;
-  background: var(--primary);
-  color: var(--on-primary);
+  background: var(--brand);
+  color: var(--on-brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1028,7 +1253,7 @@ a.nav-item:hover {
     line-height: 1;
     margin: 6px 0 10px;
   }
-  .hero.round .art {
+  .hero.round-art .art {
     border-radius: 50%;
   }
   .hero-bar {
@@ -1083,6 +1308,27 @@ a.nav-item:hover {
 .song-row .dur {
   font-variant-numeric: tabular-nums;
   color: var(--on-surface-variant);
+}
+/* The saved tick's place: the same width on every row (and in the column heads), ticked or not. */
+.song-row .saved-slot,
+.track-head .saved-slot {
+  width: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+}
+/* A song of a playlist that isn't in the library: greyed out, but its Request and Remove aren't. */
+.song-row.missing {
+  cursor: default;
+}
+.song-row.missing:hover {
+  background: none;
+}
+.song-row.missing > :not(.missing-action) {
+  opacity: 0.38;
+}
+.song-row.missing .missing-action {
+  margin-left: 8px;
 }
 @media (min-width: 900px) {
   .tracks {
@@ -1344,8 +1590,8 @@ a.nav-item:hover {
   }
 }
 .toast {
-  background: #2e77d0;
-  color: #fff;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
   font-weight: 600;
   padding: 10px 16px;
   border-radius: 8px;
@@ -1472,5 +1718,342 @@ a.nav-item:hover {
 @media (hover: none) {
   .bubble-tools {
     display: none !important;
+  }
+}
+
+/* ---- The queue: a panel on the right of wide screens (player/QueuePanel.tsx) ---- */
+.queue-panel {
+  display: none;
+}
+@media (min-width: 900px) {
+  .app.with-queue {
+    grid-template-columns: var(--sidebar-width) 1fr var(--queue-width, 340px);
+  }
+  .app.with-queue .player-bar {
+    grid-column: 1 / 4;
+  }
+  .queue-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    grid-column: 3;
+    grid-row: 1;
+    overflow: hidden;
+  }
+}
+.queue-row .drag-handle {
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--on-surface-variant);
+  cursor: grab;
+  touch-action: none;
+}
+.queue-row .drag-handle:active {
+  cursor: grabbing;
+}
+@media (hover: hover) {
+  .queue-row .row-remove {
+    opacity: 0;
+  }
+  .queue-row:hover .row-remove,
+  .queue-row .row-remove:focus-visible {
+    opacity: 1;
+  }
+}
+.hero-bar .resume {
+  height: 36px;
+  padding: 0 16px 0 12px;
+  gap: 6px;
+  min-width: 0;
+  max-width: 280px;
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+/* ---- Full player extras: the line being sung, About this song ---- */
+/* The player's cover with the previous and next ones peeking out behind it (screens/NowPlaying.tsx). */
+.cover-carousel {
+  position: relative;
+  aspect-ratio: 1;
+  isolation: isolate;
+}
+.cc-slot {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  transform: translateX(calc(var(--d) * 26%)) scale(0.82);
+  transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.45s;
+}
+.cc-slot.current {
+  cursor: default;
+  transform: none;
+  border-radius: 8px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+.np-line {
+  border: 0;
+  background: none;
+  color: #fff;
+  font-weight: 800;
+  text-align: center;
+  cursor: pointer;
+  max-width: min(460px, 84vw);
+  animation: rise 0.3s ease-out;
+}
+@media (min-width: 900px) {
+  .np-line {
+    display: none;
+  }
+}
+.song-details {
+  max-width: 760px;
+  margin: 8px auto 24px;
+}
+.details-card {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+}
+.details-card .detail {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 14px;
+}
+
+/* ---- Rows of chips; small buttons (requests, filters) ---- */
+.chips {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.chips .chip {
+  gap: 6px;
+  flex-shrink: 0;
+}
+.btn.small {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.btn.danger {
+  background: var(--error);
+  color: #fff;
+}
+
+/* ---- Chat tools: pinned bar, @mentions, search, a message being jumped to ---- */
+.pinned-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 6px 16px;
+  background: var(--surface-container);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.mention-list {
+  background: var(--surface-container);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.mention {
+  color: var(--primary);
+}
+.mention.me {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.chat-search {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.bubble-row.flash > div,
+[data-mid].flash {
+  animation: flash 1.6s ease-out;
+}
+@keyframes flash {
+  0%,
+  40% {
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
+    border-radius: 12px;
+  }
+  100% {
+    background: transparent;
+  }
+}
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: rec-blink 1.2s infinite;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ---- Reactions ---- */
+.reaction-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.menu .reaction-row {
+  margin: -4px -4px 4px;
+}
+.emoji {
+  border: 0;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  padding: 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease-spring), background 0.12s;
+}
+.emoji:hover {
+  transform: scale(1.18);
+  background: var(--hover);
+}
+.emoji.mine {
+  background: var(--primary-container);
+}
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  max-height: 260px;
+  overflow-y: auto;
+}
+/* The menu's button style is for its text rows: the emoji row keeps its own sizes. */
+.menu:has(.reaction-row) {
+  max-width: none;
+}
+.menu .reaction-row button {
+  width: auto;
+  height: auto;
+  padding: 6px;
+  font-size: 22px;
+  gap: 0;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.menu .reaction-row .icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+/* ---- Listening stats: a meter per person, single-series bar charts (screens/StatsScreen.tsx) ---- */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-container-highest);
+  overflow: hidden;
+}
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+}
+.bar-chart .chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 140px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.bar-hit {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+.bar-hit span {
+  display: block;
+  width: 100%;
+  min-height: 1px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary);
+  opacity: 0.85;
+  transition: opacity 0.12s;
+}
+.bar-hit.on span,
+.bar-hit:hover span {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--background);
+}
+.bar-chart .chart-bars:hover .bar-hit:not(:hover) span {
+  opacity: 0.55;
+}
+.bar-ticks {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+}
+.bar-ticks span {
+  flex: 1;
+  font-size: 11px;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  overflow: visible;
+}
+
+/* ---- Importing a playlist (screens/ImportScreen.tsx) ---- */
+.import-card {
+  background: var(--surface-container-low);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.import-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.3fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 6px;
+}
+.import-row:hover {
+  background: var(--hover);
+}
+.import-row .to {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+@media (max-width: 700px) {
+  /* Phones: the song from the playlist above, what it is here below. */
+  .import-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .import-row .arrow {
+    display: none;
+  }
+  .import-row .from {
+    opacity: 0.8;
   }
 }

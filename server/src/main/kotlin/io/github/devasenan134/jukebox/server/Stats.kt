@@ -33,6 +33,12 @@ data class UserStatsDto(
 
 @Serializable data class DayHoursDto(val date: String, val hours: Double)
 
+/**
+ * How one sort of mix did over the last 30 days, everyone together: how often one was opened (a station: started),
+ * and the songs played from it, of which how many were skipped in their first 30 seconds.
+ */
+@Serializable data class MixStatsDto(val name: String, val opened: Int, val played: Int, val skipped: Int)
+
 @Serializable
 data class StatsDto(
     val generatedAt: Long,
@@ -41,6 +47,8 @@ data class StatsDto(
     val daily: List<DayHoursDto>,
     /** Everyone's listening by hour of the day (0–23) over the last 30 days. */
     val hourOfDay: List<Double>,
+    /** Each sort of mix, the most played first. */
+    val mixes: List<MixStatsDto> = emptyList(),
 )
 
 /**
@@ -91,7 +99,23 @@ class Stats(private val db: Db, private val music: MusicSource?, private val def
         }
         val byHour = last30.groupBy { Instant.ofEpochMilli(it.at).atZone(zone).hour }
         val hourOfDay = (0..23).map { h -> hours(byHour[h].orEmpty().sumOf { it.song.duration.toDouble() }) }
-        return StatsDto(snapshot.takenAt, users, daily, hourOfDay)
+        return StatsDto(snapshot.takenAt, users, daily, hourOfDay, mixStats(since.getValue("30d")))
+    }
+
+    /** Opens and plays of each sort of mix since [from] (see suggestion_lists, and the plays the apps report with their source). */
+    private suspend fun mixStats(from: Long): List<MixStatsDto> = db.read {
+        val opened = query(
+            "SELECT mix_id, count(*) FROM suggestion_lists WHERE served_at >= ? AND (kind = 'mix' OR (kind = 'radio' AND first_position = 0)) GROUP BY mix_id",
+            from,
+        ) { MixMaker.family(it.getString(1)) to it.getInt(2) }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+        val plays = query(
+            "SELECT substr(source, 5), count(*), sum(skipped) FROM plays WHERE at >= ? AND source LIKE 'mix:%' GROUP BY source",
+            from,
+        ) { Triple(MixMaker.family(it.getString(1)), it.getInt(2), it.getInt(3)) }.groupBy { it.first }
+        (opened.keys + plays.keys).map { name ->
+            val p = plays[name].orEmpty()
+            MixStatsDto(name, opened[name] ?: 0, p.sumOf { it.second }, p.sumOf { it.third })
+        }.sortedWith(compareByDescending<MixStatsDto> { it.played }.thenByDescending { it.opened })
     }
 
     private fun summarize(plays: List<Pair<LibrarySong, Int>>): RangeStatsDto {

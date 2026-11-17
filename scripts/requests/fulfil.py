@@ -1,0 +1,1597 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["httpx>=0.27"]
+# ///
+"""
+Fills music requests from the matcher's JSON (docs/request-fulfilment.md). Two halves, one script:
+
+- On the laptop (REMOTE set), where the download site can be reached: download, check, tag and fetch
+  lyrics, rsync each request's folder to the server's REQUESTS_FOLDER right away, hand it in for an
+  admin's check, then start the waiting half on the server over ssh.
+- On the server's host, beside the music folder: wait for the admin's decisions and file approved music.
+  (Without REMOTE it can also do the downloading itself, if that machine can reach the site.)
+
+    fulfil.py run batch.json [--dry-run]   download, check, tag and hand in each request for an admin's
+                                           check, then wait in the background for the decisions
+    fulfil.py resume                       act on decisions left over (after a reboot), same waiting
+    fulfil.py resend                       send downloads left on the laptop after a failed rsync, hand them in
+    fulfil.py status                       what's waiting for a check, approved or rejected
+    fulfil.py covers [--dry-run]           on the server: downloaded albums without a cover get iTunes' album art
+    fulfil.py feeds [--dry-run] [--only trending,latest]
+                                           every album on the site's Trending and Latest lists into the library
+                                           (whole, no check), and the lists to Home
+    fulfil.py file-feeds                   on the server: files what feeds left there (feeds runs it over ssh)
+    fulfil.py undo <log.jsonl>             take music filed by a run back out of the library
+
+The admin listens on the Requests page and approves or rejects. Approved music is moved into the
+library (into its album's folder if the album is there), the library is rescanned, the request is
+closed (askers get "ready") and the analyzer is woken. Rejected downloads are deleted and the request
+waits again.
+
+Settings: ~/.config/jukebox-fulfil.env (KEY=value lines, chmod 600):
+    JUKEBOX_URL      server: http://127.0.0.1:8098 · laptop: https://jukebox.craftingtable.cc
+    JUKEBOX_TOKEN    an admin's token: docker exec jukebox /app/bin/jukebox user token <admin>
+    MUSIC_FOLDER     the main library's folder on the server (the one mounted at /music)
+    LIBRARY_NAME     its name in LIBRARIES (tamil)
+    MUSIC_ROOT       the folder holding every library (/mnt/ugreen/NAS/MusicLibrary); default MUSIC_FOLDER
+    LIBRARY_FOLDERS  every library's folder inside MUSIC_ROOT, as in LIBRARIES:
+                     tamil=tamil/jiosaavn_m4a,tamil-masstamilan=tamil/masstamilan,malayalam-masstamilan=malayalam/masstamilan
+    SOURCE           where downloads come from (masstamilan): music in <language> goes to the library
+                     "<language>-<SOURCE>" (its own folder), by the matcher's language
+    REQUESTS_FOLDER  where downloads wait on the server (mounted read-only in the container as REQUESTS_DIR)
+    ANALYZER         server: the analyzer's container (jukebox-analyzer), woken after a scan; blank: don't
+  laptop only:
+    REMOTE           the server's ssh name (craftingtable); MUSIC_FOLDER and REQUESTS_FOLDER are then on it
+    REMOTE_FULFIL    this script's path on the server (/mnt/ugreen/jukebox/scripts/requests/fulfil.py)
+    STAGING_FOLDER   where downloads are put together on the laptop (default ~/.cache/jukebox-fulfil)
+  feeds:
+    API_ANYTHING     the api-anything command (default: api-anything on the PATH), with the masstamilan site's
+                     trending, latest, album and search operations
+Needs ffmpeg and ffprobe (and rsync + ssh on the laptop).
+"""
+
+import argparse
+import fcntl
+import html
+import ipaddress
+import json
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import unicodedata
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+import httpx
+
+POLL_SECONDS = 30
+WAIT_DAYS = 7
+MAX_FILE_BYTES = 60 * 1024 * 1024
+LENGTH_SLACK_MS = 3000
+LRCLIB = os.environ.get("LRCLIB_URL", "https://lrclib.net")
+# Tests point the downloads at a local server; real runs only ever fetch https from public addresses.
+ALLOW_LOCAL = os.environ.get("FULFIL_ALLOW_LOCAL") == "1"
+AGENT = "jukebox-fulfil (https://github.com/devasenan134/jukebox)"
+
+
+TTY = sys.stdout.isatty()
+
+
+def say(text="", end="\n"):
+    """Progress for the person running a batch (no timestamps; the server half logs with them)."""
+    print(text, end=end, flush=True)
+
+
+def live(text):
+    """A line that's rewritten as it changes (download progress), when the output is a terminal."""
+    if TTY:
+        print("\r\033[K" + text, end="", flush=True)
+
+
+def megabytes(n):
+    return f"{n / 1_048_576:.1f} MB"
+
+
+def log(*parts):
+    print(datetime.now().strftime("%H:%M:%S"), *parts, flush=True)
+
+
+# ---------------------------------------------------------------- settings and the server
+
+
+def settings():
+    path = Path(os.path.expanduser(str(os.environ.get("FULFIL_ENV") or "~/.config/jukebox-fulfil.env")))
+    values = {}
+    if path.is_file():
+        for line in path.read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                values[k.strip()] = v.strip().strip('"')
+    values.update({k: v for k, v in os.environ.items() if k in KEYS})
+    optional = {"ANALYZER", "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER", "LANGUAGES", "MUSIC_ROOT", "LIBRARY_FOLDERS", "SOURCE", "API_ANYTHING"}
+    missing = [k for k in KEYS if k not in optional and not values.get(k)]
+    if values.get("REMOTE") and not values.get("REMOTE_FULFIL"):
+        missing.append("REMOTE_FULFIL")
+    if missing:
+        sys.exit(f"Missing settings in {path}: {', '.join(missing)}")
+    # Every path below is inside ROOT; each library's folder is FOLDERS[library] there.
+    values["ROOT"] = (values.get("MUSIC_ROOT") or values["MUSIC_FOLDER"]).rstrip("/")
+    main = os.path.relpath(values["MUSIC_FOLDER"].rstrip("/"), values["ROOT"])
+    values["FOLDERS"] = {values["LIBRARY_NAME"]: "" if main == "." else main}
+    for entry in [x.strip() for x in (values.get("LIBRARY_FOLDERS") or "").split(",") if "=" in x]:
+        name, folder = entry.split("=", 1)
+        values["FOLDERS"][name.strip().lower()] = folder.strip().strip("/")
+    for language in [x.strip().lower() for x in (values.get("LANGUAGES") or "").split(",") if x.strip()]:
+        values["FOLDERS"].setdefault(language, language)  # older settings: MUSIC_ROOT/<language>
+    # Where downloads are put together: the waiting folder itself on the server, a staging folder on the laptop.
+    values["WORK_FOLDER"] = (os.path.expanduser(values.get("STAGING_FOLDER") or "~/.cache/jukebox-fulfil")
+                             if values.get("REMOTE") else values["REQUESTS_FOLDER"])
+    return values
+
+
+KEYS = ["JUKEBOX_URL", "JUKEBOX_TOKEN", "MUSIC_FOLDER", "LIBRARY_NAME", "REQUESTS_FOLDER", "ANALYZER",
+        "REMOTE", "REMOTE_FULFIL", "STAGING_FOLDER", "LANGUAGES", "MUSIC_ROOT", "LIBRARY_FOLDERS", "SOURCE", "API_ANYTHING"]
+
+
+def libraries(cfg):
+    """The libraries music can go to: the main one and one per language."""
+    return list(cfg["FOLDERS"])
+
+
+def language_of(library):
+    """"tamil-masstamilan" → "tamil"."""
+    return library.split("-", 1)[0]
+
+
+def target(cfg, language):
+    """The library music in [language] is filed into: "<language>-<SOURCE>" if there's one, else the language's own."""
+    for name in (f"{language}-{cfg.get('SOURCE') or 'masstamilan'}", language):
+        if name in cfg["FOLDERS"]:
+            return name
+    return None
+
+
+def filing_folder(cfg, place):
+    """Where songs joining [place]'s album go: a folder of the same name in the library downloads are filed into,
+    with the album's own tags, so the scanner adds them to that album. For a background score's own entry, the
+    songs' folder name it sits beside."""
+    name = os.path.basename(place["folder"])
+    if place.get("score"):
+        name = re.sub(r"\s*\(original background score\)\s*$", "", name, flags=re.I)
+    return in_library(cfg, target(cfg, language_of(place["library"])) or place["library"], name)
+
+
+def in_library(cfg, library, path):
+    """[path] inside [library]'s folder, as a path inside MUSIC_ROOT ("malayalam/Premam (2015)")."""
+    return f"{cfg['FOLDERS'][library]}/{path}".lstrip("/")
+
+
+# ---------------------------------------------------------------- the server's files, from either machine
+
+
+# One ssh connection for the whole run: the first one stays open in the background and every later ssh and
+# rsync goes through it, so the server's password (if it asks for one) is typed once, not at every step.
+SSH_SHARE = ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/jukebox-fulfil-%C", "-o", "ControlPersist=15m"]
+
+
+def ssh(cfg, command, **kw):
+    """Runs [command] (a list of words) on the server, quoted for its shell."""
+    return subprocess.run(["ssh", *SSH_SHARE, cfg["REMOTE"], " ".join(shlex.quote(c) for c in command)], stdin=subprocess.DEVNULL, **kw)
+
+
+def connect(cfg):
+    """Opens the shared connection (the only place a password can be asked for). False if it can't."""
+    return subprocess.run(["ssh", *SSH_SHARE, cfg["REMOTE"], "true"]).returncode == 0
+
+
+def disconnect(cfg):
+    subprocess.run(["ssh", *SSH_SHARE, "-O", "exit", cfg["REMOTE"]], capture_output=True, stdin=subprocess.DEVNULL)
+
+
+def music_exists(cfg, relative):
+    path = str(Path(cfg["ROOT"]) / relative)
+    if cfg.get("REMOTE"):
+        return ssh(cfg, ["test", "-e", path], capture_output=True).returncode == 0
+    return Path(path).exists()
+
+
+def music_tags(cfg, relative):
+    """The album tags of a file in the library (on the server)."""
+    path = str(Path(cfg["ROOT"]) / relative)
+    if not cfg.get("REMOTE"):
+        return album_tags_from(path)
+    out = ssh(cfg, ["ffprobe", "-v", "error", "-show_entries", "format_tags", "-of", "json", path], capture_output=True, text=True)
+    t = {k.lower(): v for k, v in ((json.loads(out.stdout or "{}").get("format") or {}).get("tags") or {}).items()} if out.returncode == 0 else {}
+    return tags_of(t)
+
+
+def send_to_server(cfg, rid):
+    """Copies request [rid]'s folder from the laptop into the server's waiting folder, then drops the local copy."""
+    local = Path(cfg["WORK_FOLDER"]) / str(rid)
+    remote = f"{cfg['REQUESTS_FOLDER'].rstrip('/')}/{rid}"
+    ssh(cfg, ["mkdir", "-p", remote], check=True, capture_output=True)
+    done = subprocess.run(["rsync", "-a", "--delete", "--exclude", ".*", "-e", " ".join(["ssh", *SSH_SHARE]),
+                           f"{local}/", f"{cfg['REMOTE']}:{shlex.quote(remote)}/"],
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise RuntimeError(f"rsync to {cfg['REMOTE']} failed: {done.stderr.strip()[:300]}")
+    shutil.rmtree(local, ignore_errors=True)
+
+
+class Server:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.http = httpx.Client(base_url=cfg["JUKEBOX_URL"].rstrip("/"), timeout=60,
+                                 headers={"Authorization": f"Bearer {cfg['JUKEBOX_TOKEN']}"})
+
+    def call(self, method, path, ok=(200, 204), **kw):
+        r = self.http.request(method, path, **kw)
+        if r.status_code not in ok:
+            try:
+                why = r.json().get("error") or r.text
+            except ValueError:
+                why = r.text
+            raise ServerError(r.status_code, f"{method} {path}: {r.status_code} {why}")
+        return r.json() if r.content and r.headers.get("content-type", "").startswith("application/json") else None
+
+    def requests(self):
+        return {r["id"]: r for r in self.call("GET", "/admin/requests")}
+
+    def place(self, rid, year=None, composer=None, title=None, album_id=None, movie=None, score=False):
+        """Where a request's album is in the library; with no request ([rid] None), the album called [movie]."""
+        params = {k: v for k, v in {"year": year, "composer": composer, "title": title, "albumId": album_id, "movie": movie,
+                                    "score": "true" if score else None}.items() if v}
+        try:
+            place = self.call("GET", f"/admin/requests/{rid}/place" if rid is not None else "/admin/library/place", params=params)
+        except ServerError as e:
+            if e.status == 404:
+                return None
+            raise
+        # Only albums in a library this script files into; their paths as paths inside MUSIC_ROOT. (The folder can be
+        # unknown, which is enough for closing a request but not for filing music into it.)
+        if not place or place.get("library") not in libraries(self.cfg):
+            return None
+        if place.get("folder") is not None:
+            place["folder"] = in_library(self.cfg, place["library"], place["folder"])
+        if place.get("sampleFile"):
+            place["sampleFile"] = in_library(self.cfg, place["library"], place["sampleFile"])
+        return place
+
+    def scan(self):
+        self.call("POST", "/library/scan", ok=(200, 202))
+        started = time.time()
+        while time.time() - started < 30 * 60:
+            time.sleep(3)
+            if not self.call("GET", "/library/status")["scanning"]:
+                return True
+        return False
+
+
+class ServerError(Exception):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+
+
+# ---------------------------------------------------------------- names
+
+
+# The library keeps an album's background score beside it: "<Album> (<Year>) (Original Background Score)/", album tag
+# "<Album> (Original Background Score)", which the scanner files as the album's score.
+SCORE = " (Original Background Score)"
+SCORE_ALBUM = re.compile(r"\b(bgm|bgms|ost|background\s+(score|music)|original\s+score)\b", re.I)
+# Only what says so: "Pichaikkaran (Theme Music)" is score, "Hridayam - Theme" (a song) and "Anti Bikili Theme Song" aren't.
+SCORE_TRACK = re.compile(r"\b(bgm|theme\s+music|background\s+(score|music)|instrumental|original\s+score)\b", re.I)
+
+
+# Other versions of a song that pages list beside it; an album download leaves them out unless they were asked for.
+# ("Reprise" and "Unplugged" stay: films have real reprise songs.)
+VERSION = re.compile(r"\b(karaoke|remix|edm|lo-?fi|slowed|reverb|8d|sped\s*up|mash-?up|dj\s*mix)\b", re.I)
+
+
+def score_base(title):
+    """"Remo Special BGM Additional" → "Remo": the album whose background score this is."""
+    t = re.sub(r"\b(original|background|score|music|bgms?|ost|special|additional|songs?|tracks?|soundtrack|and|\+)\b", " ", title, flags=re.I)
+    t = re.sub(r"[()\[\]&+]", " ", t)
+    return re.sub(r"\s+", " ", t).strip() or title
+
+
+def loose(text):
+    """For "is this song already there": spelling doubles fold ("Unakkaga" = "Unakaga")."""
+    return re.sub(r"(.)\1+", r"\1", key(text))
+
+
+OWN_SONG = re.compile(r"\b(reprise|unplugged|female|male|sad|happy|duet|version|part\s*\d|theme|extended|reloaded)\b", re.I)
+
+
+def has_song(titles, title):
+    """Whether [title] is among [titles], however each site writes it: "Hukum - Thalaivar Alappara" is "Hukum", and
+    "Unakkaga" is "Unakaga"."""
+    def names(t):  # the whole title, and its part before " - " or "(" (a subtitle or a "From"), unless that part
+        # says it's another song of the film ("Kanmani (Reprise)", "Kanmani - Female")
+        if OWN_SONG.search(t or ""):
+            return {loose(t)} - {""}
+        return {loose(t), loose(re.split(r"\s+-\s+|\s*\(", t or "")[0])} - {""}
+    mine = names(title)
+    return any(mine & names(t) for t in titles)
+
+
+def clean_album(title):
+    """"Anbe Aaruyire (Ah Aah)" → "Anbe Aaruyire"; soundtrack labels go too."""
+    t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]\s*", " ", title or "")
+    t = re.sub(r"\b(original motion picture soundtrack|soundtrack|songs?)\b", " ", t, flags=re.I)
+    return re.sub(r"\s+", " ", t).strip() or (title or "").strip()
+
+
+def clean_title(name, album):
+    """"Aararai Kodi (Anbe Aaruyire)" → "Aararai Kodi": the album's name after a song adds nothing."""
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)\s*$", name or "")
+    if m and key(m.group(2)) == key(album):
+        return m.group(1).strip()
+    return (name or "").strip()
+
+
+def key(text):
+    text = unicodedata.normalize("NFKD", text or "").lower()
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def people(text):
+    """"Naresh Iyer, Madhushree" / "A & B" → "Naresh Iyer, Madhushree" (the way the scanner splits names)."""
+    parts = re.split(r"\s*(?:,|&|\band\b)\s*", text or "")
+    return ", ".join(p.strip() for p in parts if p.strip())
+
+
+def safe_name(text):
+    return re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", text).strip().rstrip(".") or "Untitled"
+
+
+def millis(duration):
+    """"05:21" or "1:02:03" → milliseconds."""
+    try:
+        parts = [int(p) for p in str(duration).split(":")]
+    except ValueError:
+        return None
+    total = 0
+    for p in parts:
+        total = total * 60 + p
+    return total * 1000 if total else None
+
+
+def catalog_art(request):
+    """The request's album art from the catalog (iTunes, at 1000 px), the cover when the page's poster can't be had."""
+    url = (request.get("item") or {}).get("artworkUrl") or ""
+    return re.sub(r"/\d+x\d+bb\.", "/1000x1000bb.", url) or None
+
+
+def year_of(match):
+    meta = match.get("metadata") or {}
+    if meta.get("year"):
+        return int(meta["year"])
+    poster = meta.get("poster") or (match.get("best_match") or {}).get("poster") or ""
+    found = re.search(r"-((?:19|20)\d\d)\.(?:jpe?g|png|webp)$", poster)
+    return int(found.group(1)) if found else None
+
+
+# ---------------------------------------------------------------- downloading
+
+
+def public_url(url):
+    """Refuses anything but https to a public address: the server sits on the home network."""
+    u = urlparse(url)
+    if ALLOW_LOCAL and u.scheme in ("http", "https"):
+        return
+    if u.scheme != "https" or not u.hostname:
+        raise ValueError(f"not an https link: {url}")
+    for info in socket.getaddrinfo(u.hostname, u.port or 443):
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise ValueError(f"{u.hostname} is a local address")
+
+
+def reachable(url):
+    """Whether this machine can open a connection to [url]'s site; a reason if not."""
+    u = urlparse(url)
+    port = u.port or (443 if u.scheme == "https" else 80)
+    try:
+        addresses = sorted({i[4][0] for i in socket.getaddrinfo(u.hostname, port, type=socket.SOCK_STREAM)})
+    except OSError as e:
+        return f"{u.hostname} doesn't resolve here ({e})"
+    for address in addresses:
+        try:
+            socket.create_connection((address, port), timeout=10).close()
+            return None
+        except OSError:
+            continue
+    return (f"can't connect to {u.hostname}: this machine's DNS gives {', '.join(addresses)} and none of them answer. "
+            f"The network's DNS may be blocking the site")
+
+
+def fetch(client, url, dest, tries=3, progress=None):
+    """Downloads [url] to [dest], following redirects by hand (each hop checked). Returns bytes written."""
+    last = None
+    for attempt in range(tries):
+        try:
+            current = url
+            for _ in range(6):
+                public_url(current)
+                with client.stream("GET", current, follow_redirects=False) as r:
+                    if r.status_code in (301, 302, 303, 307, 308):
+                        current = urljoin(current, r.headers["location"])
+                        continue
+                    r.raise_for_status()
+                    size = 0
+                    expected = int(r.headers.get("content-length") or 0)
+                    part = dest.with_name(dest.name + ".part")
+                    with open(part, "wb") as f:
+                        for chunk in r.iter_bytes(64 * 1024):
+                            size += len(chunk)
+                            if size > MAX_FILE_BYTES:
+                                raise ValueError("bigger than 60 MB")
+                            f.write(chunk)
+                            if progress:
+                                progress(size, expected)
+                    part.rename(dest)
+                    return size
+            raise ValueError("too many redirects")
+        except httpx.HTTPStatusError as e:
+            last = f"HTTP {e.response.status_code}"
+            if e.response.status_code in (403, 404, 410):
+                break  # a dead link stays dead
+            time.sleep(2 * (attempt + 1))
+            continue
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            last = f"can't connect ({type(e).__name__})"
+            if attempt >= 1:
+                break  # an unreachable site won't start answering in a few seconds
+            time.sleep(2)
+            continue
+        except (httpx.HTTPError, ValueError, OSError) as e:
+            last = str(e).splitlines()[0] if str(e) else type(e).__name__
+            if isinstance(e, ValueError) and ("local address" in last or "not an https" in last):
+                break
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"couldn't download: {last}")
+
+
+def probe(path):
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration,bit_rate:format_tags:stream=codec_name,codec_type",
+                          "-of", "json", str(path)], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    if out.returncode != 0:
+        return None
+    data = json.loads(out.stdout or "{}")
+    fmt = data.get("format") or {}
+    audio = [s for s in data.get("streams", []) if s.get("codec_type") == "audio"]
+    if not audio:
+        return None
+    return {
+        "durationMs": int(float(fmt.get("duration", 0)) * 1000),
+        "bitrate": int(int(fmt.get("bit_rate", 0)) / 1000),
+        "codec": audio[0].get("codec_name"),
+        "tags": {k.lower(): v for k, v in (fmt.get("tags") or {}).items()},
+    }
+
+
+def looks_like_mp3(path):
+    head = path.read_bytes()[:3]
+    return head == b"ID3" or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)
+
+
+def tag(src, dest, tags, cover=None):
+    """Rewrites [src] into [dest] with only our tags (the site's own name and cover go) and the cover."""
+    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(src)]
+    if cover:
+        cmd += ["-i", str(cover), "-map", "0:a", "-map", "1:v", "-c", "copy", "-disposition:v", "attached_pic",
+                "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
+    else:
+        cmd += ["-map", "0:a", "-c", "copy"]
+    cmd += ["-map_metadata", "-1", "-id3v2_version", "3", "-write_id3v1", "0"]
+    for k, v in tags.items():
+        if v:
+            cmd += ["-metadata", f"{k}={v}"]
+    subprocess.run(cmd + [str(dest)], check=True, capture_output=True, stdin=subprocess.DEVNULL)
+
+
+# Each language's own script (Unicode block); lyrics in another Indian script are another language's song of the
+# same name ("Kanave Kanave" from the Hindi David). English letters are fine for any language.
+SCRIPTS = {"tamil": (0x0B80, 0x0BFF), "malayalam": (0x0D00, 0x0D7F), "telugu": (0x0C00, 0x0C7F), "hindi": (0x0900, 0x097F),
+           "kannada": (0x0C80, 0x0CFF)}
+
+
+def in_language(text, language):
+    """Whether [text] is written in [language]'s script or in English letters, not in another Indian script."""
+    own = SCRIPTS.get(language)
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters or not own:
+        return True
+    foreign = sum(1 for ch in letters if ord(ch) >= 0x0900 and not own[0] <= ord(ch) <= own[1])
+    return foreign < len(letters) * 0.2
+
+
+def lyrics(client, title, artist, album, duration_ms, language="tamil"):
+    """Lyrics for a song: LRCLIB's synced (LRC) or plain, else JioSaavn's plain text, in the song's language.
+    ("synced", text), ("plain", text) or ("none", None)."""
+    secs = round((duration_ms or 0) / 1000)
+    def ask(path, params):
+        """One LRCLIB lookup (tried twice: it's sometimes slow); [] if it has nothing or can't be reached."""
+        for attempt in range(2):
+            try:
+                r = client.get(f"{LRCLIB}/api/{path}", params=params, timeout=30)
+                if r.status_code == 404:
+                    return []
+                r.raise_for_status()
+                body = r.json()
+                return body if isinstance(body, list) else [body]
+            except (httpx.HTTPError, ValueError):
+                time.sleep(2)
+        return []
+
+    found = ask("get", {"track_name": title, "artist_name": artist.split(",")[0].strip(), "album_name": album, "duration": secs})
+    found += [x for x in ask("search", {"track_name": title, "album_name": album})
+              if not secs or abs((x.get("duration") or 0) - secs) <= 3]
+    # LRCLIB often knows a Tamil song but has no words for it: an entry only counts with lyrics.
+    synced = next((x["syncedLyrics"] for x in found if x.get("syncedLyrics") and in_language(x["syncedLyrics"], language)), None)
+    if synced:
+        return "synced", synced
+    plain = next((x["plainLyrics"] for x in found if x.get("plainLyrics") and in_language(x["plainLyrics"], language)), None)
+    if plain:
+        return "plain", plain
+    text = saavn_lyrics(client, title, album, secs)
+    return ("plain", text) if text and in_language(text, language) else ("none", None)
+
+
+SAAVN = os.environ.get("SAAVN_URL", "https://www.jiosaavn.com/api.php")
+
+
+def saavn_lyrics(client, title, album, secs):
+    """JioSaavn's lyrics (plain text) for the song called [title] on [album], about [secs] long; None if it has none."""
+    def call(**params):
+        params.update(_format="json", _marker="0", api_version="4", ctx="web6dot0")
+        r = client.get(SAAVN, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+        r.raise_for_status()
+        return r.json()
+
+    def bare(text):  # "Kanave Kanave (From &quot;David&quot;)" → "kanavekanave"
+        return loose(re.sub(r"\s*\(from[^)]*\)", "", html.unescape(text or ""), flags=re.I))
+
+    try:
+        results = call(__call="search.getResults", q=f"{title} {album}", n=10, p=1).get("results") or []
+        for hit in results:
+            more = hit.get("more_info") or {}
+            if (more.get("has_lyrics") == "true" and bare(hit.get("title")) == bare(title)
+                    and bare(more.get("album")).startswith(bare(album))
+                    and (not secs or abs(int(more.get("duration") or 0) - secs) <= 3)):
+                text = call(__call="lyrics.getLyrics", lyrics_id=hit["id"]).get("lyrics") or ""
+                text = html.unescape(re.sub(r"<br\s*/?>", "\n", text)).strip()
+                return text or None
+    except (httpx.HTTPError, ValueError, KeyError):
+        pass
+    return None
+
+
+# ---------------------------------------------------------------- handing in
+
+
+def album_tags_from(folder_file):
+    """The album tags of a file already in the album, so a new song joins it (the scanner groups by album + year)."""
+    return tags_of((probe(folder_file) or {"tags": {}})["tags"])
+
+
+def tags_of(t):
+    return {
+        "album": t.get("album"),
+        "date": t.get("date") or t.get("year"),
+        "album_artist": t.get("album_artist") or t.get("album artist"),
+        "composer": t.get("composer"),
+        "genre": t.get("genre"),
+        "discsubtitle": t.get("discsubtitle") or t.get("tsst"),
+    }
+
+
+def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=None):
+    """Downloads one request's music. [whole]: a song request standing for two or more songs asked for from the same
+    album (their request ids): the whole album is downloaded with it, and the others come with it."""
+    rid = match["request_id"]  # None for an album no one asked for (feeds): it's filed by its name, in work_id's folder
+    work_id = match.get("work_id") or rid
+    meta = match.get("metadata") or {}
+    best = match.get("best_match") or {}
+    base = best.get("url") or ""
+    # Named after the request (the catalog's name, which the library uses too: "Vishwaroopam II"), not the matched
+    # page's title ("Vishwaroopam 2 2").
+    album = clean_album(request["item"]["movie"] or best.get("title") or "")
+    year = year_of(match)
+    composer = people(meta.get("music") or "")
+    lyricists = people(meta.get("lyricists") or "")
+    cover_url = urljoin(base, meta.get("poster") or best.get("poster") or "") or None
+    is_song = request["item"]["kind"] == "song"
+    language = (meta.get("language") or "").strip().lower() or language_of(cfg["LIBRARY_NAME"])
+    if not target(cfg, language):
+        notes.append(f"{language.title()} has no library of its own (LIBRARY_FOLDERS); it goes with {language_of(cfg['LIBRARY_NAME']).title()}")
+        language = language_of(cfg["LIBRARY_NAME"])
+    into = target(cfg, language)
+    tracks = match.get("tracks") or []
+    total = int(meta.get("track_count") or len(tracks) or 0)
+
+    # A whole album of background score ("Vishwaroopam II BGM") is filed as that album's score.
+    score_album = not is_song and bool(SCORE_ALBUM.search(best.get("title") or ""))
+    asked_score = bool(SCORE_ALBUM.search(request["item"]["movie"] or ""))
+    if not is_song and score_album != asked_score:
+        notes.append("The request is for the film's background score, but the match is its songs" if asked_score else
+                     "The request is for the film's songs, but the match is its background score: reject it unless that's what was wanted")
+    if score_album:
+        album = score_base(album)
+    review = {"album": album, "year": year, "composer": composer or None, "lyricists": lyricists or None,
+              "coverUrl": cover_url, "source": base or None, "score": match.get("match_score"), "notes": notes}
+    if covered_by:
+        review.update(coveredBy=covered_by, destination="new", tracks=[])
+        return review, None, None
+
+    # Which files, and their track numbers.
+    if is_song and whole:
+        # Two or more songs of this album were asked for: the whole album, but the other versions only if one was asked for.
+        song = match.get("matched_song") or {}
+        asked = {key(song.get("name"))}
+        picked = [(n, t) for n, t in enumerate(tracks, 1) if key(t.get("name")) in asked or not VERSION.search(t.get("name") or "")]
+        notes.append(f"{len(whole)} songs of this album were asked for (#{', #'.join(str(x) for x in whole)}): the whole album is downloaded")
+        if len(picked) < len(tracks):
+            notes.append(f"Left out {len(tracks) - len(picked)} other version(s): "
+                         + ", ".join(clean_title(t.get("name"), album) for n, t in enumerate(tracks, 1) if (n, t) not in picked))
+    elif is_song:
+        song = match.get("matched_song") or {}
+        if not song:
+            raise RuntimeError("a song request without matched_song")
+        position = next((i for i, t in enumerate(tracks) if key(t.get("name")) == key(song.get("name"))), None)
+        picked = [(position + 1 if position is not None else 1, song)]
+        if VERSION.search(song.get("name") or "") and not VERSION.search(request["item"]["title"] or ""):
+            notes.append(f"The match is a version (\"{song.get('name')}\"), not the song that was asked for")
+    else:
+        picked = list(enumerate(tracks, 1))
+        versions = [t for n, t in picked if VERSION.search(t.get("name") or "")]
+        if versions and len(versions) < len(picked) and not VERSION.search(request["item"]["movie"] or ""):
+            picked = [(n, t) for n, t in picked if not VERSION.search(t.get("name") or "")]
+            notes.append(f"Left out {len(versions)} other version(s): " + ", ".join(clean_title(t.get("name"), album) for t in versions))
+        if total and len(tracks) != total:
+            notes.append(f"The page lists {len(tracks)} songs, the album should have {total}")
+    if not picked:
+        raise RuntimeError("no tracks to download")
+
+    say(f"      matched   {album}{f' ({year})' if year else ''}" + (f" · music {composer}" if composer else "")
+        + (f" · score {round(match['match_score'])}" if match.get("match_score") is not None else "")
+        + (f" · {len(picked)} of {len(tracks)} songs" if is_song and not whole else f" · {len(picked)} songs") + f" · {language.title()}")
+
+    # Where it goes: the album's own folder if it's in the library (same title, and its year or composer).
+    title_for_place = clean_title((match.get("matched_song") or {}).get("name"), album) if is_song else None
+    place = server.place(rid, year, composer, title_for_place, movie=album if score_album or rid is None else None, score=score_album)
+    existing = None
+    suggested = in_library(cfg, into, safe_name(f"{album} ({year})" if year else album))
+    if place and place.get("folder") is None:
+        place = None  # in the library, but its files can't be found: file it as a new album
+    if place and language_of(place["library"]) != language:
+        notes.append(f"Found {album} in the {language_of(place['library']).title()} library though the page says {language.title()}; it joins that album")
+    if place:
+        existing = place
+        folder = filing_folder(cfg, place)
+        review.update(destination="existing", destinationAlbumId=place["albumId"], destinationFolder=folder,
+                      suggestedFolder=suggested, scoreFolder=folder + SCORE)
+        # Already there: a song that's in the album, or every song of the album, needs no download.
+        if is_song and place.get("songId") and not whole:
+            return review, existing, "already"
+        if not score_album or place.get("score"):
+            # Songs (or, for a score, background pieces) the album already has aren't downloaded again.
+            have = place.get("songs") or []
+            kept = [(n, t) for n, t in picked if not has_song(have, clean_title(t.get("name"), album))]
+            review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
+            picked = kept
+            if not picked:
+                return review, existing, "already"
+    else:
+        review.update(destination="new", destinationFolder=suggested, suggestedFolder=suggested, scoreFolder=suggested + SCORE)
+        if music_exists(cfg, suggested):
+            notes.append(f"A folder called {suggested} is already in the library; the songs will be added to it")
+    say(f"      goes to   {'joins ' + os.path.basename(existing['folder']) + ' (already in the library), into ' + review['destinationFolder'] if existing else 'new folder ' + review['destinationFolder']}"
+        + (f", as its background score ({review['scoreFolder']})" if score_album else ""))
+    if review.get("skipped"):
+        say(f"      skipping  {len(review['skipped'])} already in the library: {', '.join(review['skipped'])}")
+    if dry:
+        review["tracks"] = [{"n": n, "file": "", "title": clean_title(t.get("name"), album)} for n, t in picked]
+        return review, existing, None
+
+    work = Path(cfg["WORK_FOLDER"]) / str(work_id)
+    shutil.rmtree(work, ignore_errors=True)
+    raw = work / ".raw"
+    raw.mkdir(parents=True)
+
+    # The page's poster, else the catalog's (iTunes) album art: an album never goes in without a cover.
+    cover = None
+    failed = []
+    # Last, iTunes' art found by the album's name: only looked up if the others fail.
+    candidates = list(dict.fromkeys(u for u in (cover_url, catalog_art(request)) if u)) + [lambda: itunes_cover(client, album, year)]
+    for url in candidates:
+        if callable(url) and not (url := url()):
+            continue
+        say("      cover     downloading…", end="")
+        try:
+            fetch(client, url, raw / "cover.jpg")
+            cover = raw / "cover.jpg"
+            review["coverUrl"] = url
+            say(" ✓" + (" (the catalog's, the page's poster failed)" if failed else ""))
+            break
+        except RuntimeError as e:
+            failed.append(f"{urlparse(url).netloc}: {e}")
+            say(f" ✗ {e}")
+    if not cover:
+        notes.append("No cover: " + ("; ".join(failed) if failed else "neither the page nor the catalog has one"))
+    elif failed:
+        notes.append(f"Cover from the catalog (the page's poster failed: {failed[0]})")
+
+    base_tags = {"album": album, "date": str(year) if year else None, "album_artist": composer, "composer": composer,
+                 "genre": language.title()}
+    if existing:
+        say("      tags      reading the album's tags from the library…", end="")
+        copied = {k: v for k, v in music_tags(cfg, existing["sampleFile"]).items() if v}
+        base_tags.update(copied)
+        say(f" ✓ {copied.get('album', album)} ({copied.get('date', year)})")
+
+    out = []
+    width = max(2, len(str(total or len(tracks))))
+    for i, (n, t) in enumerate(picked, 1):
+        title = clean_title(t.get("name"), album)
+        head = f"      {i}/{len(picked)} {title[:34]:<34}"
+        expected = millis(t.get("duration"))
+        downloaded = None
+        for quality in ("download320", "download128"):
+            link = t.get(quality)
+            if not link:
+                continue
+            dest = raw / f"{n:0{width}d}.mp3"
+            kbps = quality[8:]
+            say_progress = (lambda got, size, kbps=kbps: live(f"{head} downloading {kbps} kbps… {megabytes(got)}"
+                                                               + (f" of {megabytes(size)}" if size else "")))
+            if not TTY:
+                say(f"{head} downloading {kbps} kbps…")
+            try:
+                fetch(client, urljoin(base, link), dest, progress=say_progress)
+            except RuntimeError as e:
+                notes.append(f"{title}: {kbps} kbps link failed ({e})")
+                live(f"{head} {kbps} kbps failed ({e})")
+                say() if TTY else say(f"{head} {kbps} kbps failed ({e})")
+                continue
+            info = probe(dest)
+            problem = None
+            if not looks_like_mp3(dest) or not info:
+                problem = "not an mp3"
+            elif expected and abs(info["durationMs"] - expected) > LENGTH_SLACK_MS:
+                problem = f"{info['durationMs'] // 1000} s long, the page says {expected // 1000} s"
+            if problem:
+                notes.append(f"{title}: {quality[8:]} kbps file is {problem}")
+                dest.unlink(missing_ok=True)
+                continue
+            if quality == "download320" and info["bitrate"] < 224:  # masstamilan's "320" files are often ~250 kbps VBR
+                notes.append(f"{title}: the 320 kbps file is really {info['bitrate']} kbps")
+            if quality == "download128":
+                notes.append(f"{title}: only the 128 kbps file worked")
+            downloaded = (dest, info)
+            break
+        if not downloaded:
+            raise RuntimeError(f"couldn't get a good file for {title}")
+        dest, info = downloaded
+        name = safe_name(f"{n:0{width}d} - {title}")
+        singers = people(t.get("artist") or "")
+        is_score = score_album or bool(SCORE_TRACK.search(title))
+        tags = dict(base_tags, title=title, artist=singers, lyricist=lyricists or None,
+                    track=f"{n}/{total}" if total else str(n), disc="1/1")
+        if is_score:
+            tags.update(album=base_tags["album"] + SCORE, discsubtitle=None)
+        live(f"{head} tagging…")
+        tag(dest, work / f"{name}.mp3", tags, cover)
+        live(f"{head} looking for lyrics…")
+        kind, text = lyrics(client, title, singers, album, info["durationMs"], language)
+        if text:
+            (work / f"{name}.{'lrc' if kind == 'synced' else 'txt'}").write_text(text.rstrip() + "\n", encoding="utf-8")
+        size = (work / f"{name}.mp3").stat().st_size
+        done = (f"{head} ✓ {info['durationMs'] // 60000}:{info['durationMs'] // 1000 % 60:02d} · {info['bitrate']} kbps · "
+                f"{megabytes(size)} · {dict(synced='synced lyrics', plain='plain lyrics').get(kind, 'no lyrics')}")
+        live(done)
+        say() if TTY else say(done)
+        out.append({"n": n, "file": f"{name}.mp3", "title": title, "singers": singers or None,
+                    "durationMs": info["durationMs"], "bitrate": info["bitrate"], "lyrics": kind, "score": is_score})
+    if cover:
+        shutil.copy(cover, work / "cover.jpg")
+    shutil.rmtree(raw)
+    review["tracks"] = out
+    if any(t["score"] for t in out):
+        say(f"      score     {sum(t['score'] for t in out)} background score track(s) go to {review['scoreFolder']}")
+    return review, existing, None
+
+
+def album_key_of(match):
+    """Which album a match is from: its page's title and the year (songs of one film share it)."""
+    return key(clean_album((match.get("best_match") or {}).get("title") or "")), year_of(match)
+
+
+def song_groups(matches, requests):
+    """Albums two or more open song requests in the batch are from, each with those requests' ids: the whole album is
+    downloaded for them (only when the matches list every song of the album with a link to download it)."""
+    groups = {}
+    for m in matches:
+        r = requests.get(m.get("request_id"))
+        if not r or r["status"] != "open" or r.get("stage") or not m.get("match_found") or r["item"]["kind"] != "song":
+            continue
+        tracks = m.get("tracks") or []
+        if not tracks or not all(t.get("download320") or t.get("download128") for t in tracks):
+            continue
+        groups.setdefault(album_key_of(m), []).append(m["request_id"])
+    return {k: sorted(set(ids)) for k, ids in groups.items() if len(set(ids)) >= 2}
+
+
+def run(cfg, batch, dry):
+    server = Server(cfg)
+    matches = json.loads(Path(batch).read_text())
+    if isinstance(matches, dict):
+        matches = [matches]
+    remote = cfg.get("REMOTE")
+    steps = 4 if remote else 3
+    say(f"Jukebox fulfil · {len(matches)} request(s) in {Path(batch).name}{' · dry run: nothing is downloaded or changed' if dry else ''}")
+    say()
+
+    say(f"Step 1/{steps}  Checking the requests in Jukebox…", end="")
+    requests = server.requests()
+    say(f" ✓ {sum(1 for r in requests.values() if r['status'] == 'open')} open")
+    # Whole albums first: a song from an album in the same batch comes with it.
+    matches.sort(key=lambda m: 0 if (requests.get(m.get("request_id")) or {}).get("item", {}).get("kind") == "movie" else 1)
+
+    if dry:
+        say(f"Step 2/{steps}  Checking the download site… skipped (dry run)")
+    else:
+        sites = {urlparse(urljoin((m.get("best_match") or {}).get("url") or "", l)).scheme + "://" + urlparse(urljoin((m.get("best_match") or {}).get("url") or "", l)).netloc
+                 for m in matches if m.get("match_found")
+                 for t in ([m["matched_song"]] if m.get("matched_song") else m.get("tracks") or [])
+                 for l in [t.get("download320") or t.get("download128") or ""] if l}
+        say(f"Step 2/{steps}  Checking the download site…", end="")
+        for site in sorted(sites):
+            why = reachable(site)
+            if why:
+                say(" ✗")
+                sys.exit(f"Stopped before downloading anything: {why}.")
+        say(f" ✓ {', '.join(urlparse(x).netloc for x in sorted(sites)) or 'nothing to download'}")
+
+    if remote:
+        say(f"Step 3/{steps}  Connecting to {remote} (if it asks for a password, this is the only time)…")
+        if not connect(cfg):
+            sys.exit(f"Couldn't connect to {remote} with ssh; check that `ssh {remote}` works.")
+        say(f"           ✓ connected")
+    say(f"Step {steps}/{steps}  Filling the requests")
+
+    albums = {}
+    songs_of = song_groups(matches, requests)
+    handed, report = [], []
+    with httpx.Client(timeout=httpx.Timeout(60, connect=15), headers={"User-Agent": AGENT}) as client:
+        for i, match in enumerate(matches, 1):
+            rid = match.get("request_id")
+            request = requests.get(rid)
+            label = f"#{rid} {match.get('title') or ''} ({match.get('movie') or ''})"
+            kind = (request or {}).get("item", {}).get("kind")
+            say()
+            say(f"  [{i}/{len(matches)}] {label}" + (f" · {'album' if kind == 'movie' else 'song'} · asked by {', '.join(request['askedBy'])}" if request else ""))
+            if not request or request["status"] != "open":
+                report.append(f"skipped  {label}: not open any more")
+                say("      skipped   not open any more")
+                continue
+            if request.get("stage") and not dry:
+                report.append(f"skipped  {label}: already handed in ({request['stage']})")
+                say(f"      skipped   already handed in ({request['stage']})")
+                continue
+            if not match.get("match_found"):
+                report.append(f"skipped  {label}: the matcher found nothing")
+                say("      skipped   the matcher found nothing")
+                continue
+            album_key = album_key_of(match)
+            covered_by = albums.get(album_key) if kind == "song" else None
+            whole = songs_of.get(album_key) if kind == "song" and not covered_by else None
+            if covered_by:
+                say(f"      comes with #{covered_by} (its album is in this batch): nothing to download")
+            elif whole:
+                say(f"      {len(whole)} songs of this album were asked for: downloading the whole album")
+            notes = []
+            try:
+                review, existing, outcome = prepare(cfg, server, client, match, request, covered_by, notes, dry, whole)
+                if outcome == "already":
+                    # Everything asked for is already in the library: close it with that album, nothing to download.
+                    if dry:
+                        report.append(f"would close {label}: already in the library ({review['destinationFolder']})")
+                        say("      would close it: already in the library")
+                        continue
+                    place = existing
+                    server.call("POST", f"/admin/requests/{rid}/done",
+                                json={k: v for k, v in {"albumId": place["albumId"], "songId": place.get("songId")}.items() if v})
+                    report.append(f"closed   {label}: already in the library ({review['destinationFolder']})")
+                    say(f"      ✓ closed: already in the library ({review['destinationFolder']}); the people who asked were told")
+                    continue
+            except Exception as e:  # one bad request doesn't stop the batch
+                shutil.rmtree(Path(cfg["WORK_FOLDER"]) / str(rid), ignore_errors=True)
+                report.append(f"failed   {label}: {e}")
+                say(f"      ✗ failed  {e}")
+                continue
+            if kind == "movie" or whole:
+                albums[album_key] = rid  # the album's other songs in this batch come with this one
+            where = (f"comes with #{covered_by}" if covered_by else
+                     f"joins {review['destinationFolder']}" if existing else f"new folder {review['destinationFolder']}")
+            lyr = sum(1 for t in review["tracks"] if t.get("lyrics") not in (None, "none"))
+            line = f"{'would hand in' if dry else 'handed in'} {label}: {len(review['tracks'])} song(s), {where}"
+            if review["tracks"] and not dry:
+                line += f", lyrics for {lyr}"
+            report.append(line + "".join(f"\n           ! {n}" for n in notes))
+            for n in notes:
+                say(f"      !         {n}")
+            if dry:
+                say("      would hand this in for your check")
+                continue
+            work = Path(cfg["WORK_FOLDER"]) / str(rid)
+            work.mkdir(parents=True, exist_ok=True)
+            (work / "review.json").write_text(json.dumps({"request": rid, "kind": request["item"]["kind"], "review": review,
+                                                          "match": match}, indent=1, ensure_ascii=False))
+            if remote:
+                files = [f for f in work.iterdir() if f.is_file() and not f.name.startswith(".")]
+                say(f"      sending   {len(files)} file{'' if len(files) == 1 else 's'} ({megabytes(sum(f.stat().st_size for f in files))}) to {remote}…", end="")
+                try:
+                    send_to_server(cfg, rid)
+                    say(" ✓")
+                except (RuntimeError, subprocess.CalledProcessError) as e:
+                    say(" ✗")
+                    report[-1] = f"failed   {label}: {e} (the download is kept in {work})"
+                    say(f"      ✗ failed  {e} (the download is kept in {work})")
+                    continue
+            server.call("POST", f"/admin/requests/{rid}/review", json=review)
+            handed.append(rid)
+            say(f"      ✓ handed in · {'closes when #' + str(covered_by) + ' is approved' if covered_by else 'waiting for your check'}")
+    if handed:
+        server.call("POST", "/admin/requests/reviews-ready", json={"ids": handed})
+
+    say()
+    say("Summary")
+    say("\n".join("  " + line for line in report) or "  Nothing in the file.")
+    say()
+    if handed:
+        say(f"Next: open Jukebox → Requests → Everyone's → Ready to check, listen, and Approve or Reject ({len(handed)} handed in).")
+        say("      Approved music is moved into the library, the library rescanned and the askers told, by the server.")
+    elif dry:
+        say("Next: run the same command without --dry-run to download and hand them in.")
+    return handed
+
+
+# ---------------------------------------------------------------- acting on decisions
+
+
+def move_in(cfg, rid, review, existing_place, undo):
+    """Moves request [rid]'s files into the library: songs to the album's folder, background score to its score
+    folder. Returns the album folder (inside MUSIC_ROOT)."""
+    work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
+    music = Path(cfg["ROOT"])
+    if existing_place:
+        folder = filing_folder(cfg, existing_place)
+        # The album's own tags win, so the songs join it (also when the admin picked it, or it arrived since).
+        copied = {k: v for k, v in music_tags(cfg, existing_place["sampleFile"]).items() if v and k != "composer"}
+        for t in review["tracks"]:
+            f = work / t["file"]
+            tags = dict(copied)
+            if t.get("score"):
+                tags["album"] = re.sub(r"\s*\(original background score\)\s*$", "", tags.get("album", review["album"]), flags=re.I) + SCORE
+                tags.pop("discsubtitle", None)
+            retagged = work / f".{t['file']}"
+            subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(f), "-map", "0", "-c", "copy",
+                            "-id3v2_version", "3"] + sum((["-metadata", f"{k}={v}"] for k, v in tags.items()), []) + [str(retagged)],
+                           check=True, capture_output=True, stdin=subprocess.DEVNULL)
+            retagged.replace(f)
+    else:
+        folder = review["destinationFolder"]
+    score_folder = folder + SCORE
+    where = {}  # file stem → folder
+    for t in review["tracks"]:
+        where[Path(t["file"]).stem] = score_folder if t.get("score") else folder
+    used = set()
+    for f in sorted(work.iterdir()):
+        if f.name.startswith(".") or f.name == "review.json" or not f.is_file():
+            continue
+        if f.name == "cover.jpg":
+            targets = [x for x in {folder, *where.values()} if not (music / x / "cover.jpg").exists()]
+            for x in targets:
+                (music / x).mkdir(parents=True, exist_ok=True)
+                shutil.copy(f, music / x / "cover.jpg")
+                undo.write(json.dumps({"request": rid, "file": f"{x}/cover.jpg"}) + "\n")
+            continue
+        dest = music / where.get(f.stem, folder)
+        dest.mkdir(parents=True, exist_ok=True)
+        used.add(dest)
+        target = dest / f.name
+        if target.exists():
+            target = dest / f"{f.stem} ({'request ' + str(rid) if str(rid).isdigit() else Path(str(rid)).name}){f.suffix}"
+        shutil.move(str(f), str(target))
+        undo.write(json.dumps({"request": rid, "file": str(target.relative_to(music))}) + "\n")
+        undo.flush()
+    return folder
+
+
+def is_score_request(review):
+    """A request filled with background score only (it closes with the score's own entry)."""
+    tracks = review.get("tracks") or []
+    return bool(tracks) and all(t.get("score") for t in tracks)
+
+
+def matched_title(cfg, rid):
+    """The song's name as the matcher found it (from the hand-in), for finding it after the scan."""
+    try:
+        saved = json.loads((Path(cfg["REQUESTS_FOLDER"]) / str(rid) / "review.json").read_text())
+    except (OSError, ValueError):
+        return None
+    song = (saved.get("match") or {}).get("matched_song") or {}
+    return clean_title(song.get("name"), saved.get("review", {}).get("album", "")) or None
+
+
+def asked_title(cfg, rid, review):
+    """The song a song request is for: the matched song (a request that brought its whole album has every song of it
+    in its tracks), else its one track."""
+    return matched_title(cfg, rid) or (review["tracks"][0]["title"] if review.get("tracks") else None)
+
+
+def act(cfg, server, waiting_for):
+    """One look at the decisions for the requests in [waiting_for]."""
+    requests = server.requests()
+    approved = []
+    for rid in sorted(waiting_for):
+        r = requests.get(rid)
+        work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
+        if not r or r["status"] != "open":
+            shutil.rmtree(work, ignore_errors=True)  # closed or declined meanwhile: nothing to file
+            continue
+        if not r.get("stage"):
+            # Not handed in yet: most likely still arriving from the laptop (rsync). Only a day-old one is a leftover.
+            if work.exists() and time.time() - work.stat().st_mtime > 86400:
+                shutil.rmtree(work, ignore_errors=True)
+            continue
+        if r["stage"] == "rejected":
+            shutil.rmtree(work, ignore_errors=True)
+            server.call("DELETE", f"/admin/requests/{rid}/review")
+            log(f"#{rid} rejected: download deleted, the request waits again")
+        elif r["stage"] == "approved":
+            approved.append(r)
+    if not approved:
+        return
+
+    music = Path(cfg["ROOT"])
+    logs = Path(cfg["REQUESTS_FOLDER"]) / "undo"
+    logs.mkdir(exist_ok=True)
+    undo_path = logs / f"{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+    moved_any = False
+    with open(undo_path, "a") as undo:
+        for r in approved:
+            rid = r["id"]
+            work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
+            review = r.get("review") or {}
+            if review.get("coveredBy") or (work / ".moved").exists():
+                continue  # comes with its album, or already in the library and waiting to be closed
+            first_title = asked_title(cfg, rid, review) if r["item"]["kind"] == "song" else None
+            if review.get("destination") == "existing" and review.get("destinationAlbumId"):
+                place = server.place(rid, album_id=review["destinationAlbumId"])  # the album it was checked against
+            elif review.get("destinationChosen"):
+                place = None  # the admin chose a new album
+            else:
+                place = server.place(rid, review.get("year"), review.get("composer"), first_title, movie=review.get("album"),
+                                     score=is_score_request(review))
+            if place and place.get("folder") is None:
+                place = None
+            try:
+                folder = move_in(cfg, rid, review, place, undo)
+            except Exception as e:
+                log(f"#{rid} couldn't be moved into the library: {e}")
+                (work / ".gave_up").write_text(str(e))
+                continue
+            work.mkdir(parents=True, exist_ok=True)
+            (work / ".moved").write_text(folder)
+            moved_any = True
+            log(f"#{rid} approved: moved into {folder}")
+    if undo_path.stat().st_size == 0:
+        undo_path.unlink()
+    else:
+        log(f"Undo log: {undo_path}")
+
+    if moved_any:
+        log("Rescanning the library…")
+        if not server.scan():
+            log("The scan is taking over 30 minutes; trying to close the requests anyway")
+    for r in approved:
+        rid = r["id"]
+        work = Path(cfg["REQUESTS_FOLDER"]) / str(rid)
+        review = r.get("review") or {}
+        if (work / ".gave_up").exists() or not ((work / ".moved").exists() or review.get("coveredBy")):
+            continue
+        song = r["item"]["kind"] == "song"
+        title = None
+        if song:
+            title = asked_title(cfg, rid, review) or r["item"]["title"]
+        if review.get("destination") == "existing" and review.get("destinationAlbumId"):
+            place = server.place(rid, title=title, album_id=review["destinationAlbumId"])
+        else:
+            place = server.place(rid, review.get("year"), review.get("composer"), title, movie=review.get("album"),
+                                 score=is_score_request(review))
+        if not place or (song and not place.get("songId")):
+            tries = int((work / ".close_tries").read_text()) + 1 if (work / ".close_tries").exists() else 1
+            (work / ".close_tries").write_text(str(tries))
+            if tries >= 4:  # about two minutes after the scan: the library view has long caught up
+                (work / ".gave_up").write_text("not found after the scan")
+                log(f"#{rid} is in the library but couldn't be matched to the request; close it in the app (Requests → Everyone's → Match album)")
+            continue
+        server.call("POST", f"/admin/requests/{rid}/done",
+                    json={k: v for k, v in {"albumId": place["albumId"], "songId": place.get("songId")}.items() if v})
+        shutil.rmtree(work, ignore_errors=True)
+        log(f"#{rid} closed: the people who asked have been told")
+    if moved_any and cfg.get("ANALYZER"):
+        subprocess.run(["docker", "kill", "-s", "USR1", cfg["ANALYZER"]], capture_output=True)
+        log("Analyzer woken for the new songs")
+
+
+def wait(cfg):
+    """Acts on decisions until nothing handed in is left undecided (or a week has passed)."""
+    folder = Path(cfg["REQUESTS_FOLDER"])
+    folder.mkdir(parents=True, exist_ok=True)
+    lock = open(folder / ".waiting.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("Another fulfil.py is already waiting for decisions; it will pick these up too")
+        return
+    server = Server(cfg)
+    started = time.time()
+    while time.time() - started < WAIT_DAYS * 86400:
+        try:
+            requests = server.requests()
+            for p in folder.iterdir():  # given up on, then closed by hand in the app: nothing left to do
+                if p.name.isdigit() and (p / ".gave_up").exists() and (requests.get(int(p.name)) or {}).get("status") != "open":
+                    shutil.rmtree(p, ignore_errors=True)
+            gave_up = {int(p.name) for p in folder.iterdir() if p.name.isdigit() and (p / ".gave_up").exists()}
+            pending = {int(p.name) for p in folder.iterdir() if p.is_dir() and p.name.isdigit()}
+            pending |= {rid for rid, r in requests.items() if r.get("stage") and r["status"] == "open"}
+            pending -= gave_up
+            if not pending:
+                log("Every request is decided. Done." + (f" Needs a look: {sorted(gave_up)} (see above)" if gave_up else ""))
+                return
+            act(cfg, server, pending)
+        except (httpx.HTTPError, ServerError) as e:
+            log(f"Couldn't reach Jukebox, trying again: {e}")
+        time.sleep(POLL_SECONDS)
+    log(f"Stopped waiting after {WAIT_DAYS} days; run `fulfil.py resume` to carry on")
+
+
+def wait_in_background(cfg):
+    """Keeps waiting after the terminal (or ssh session) closes, logging to REQUESTS_FOLDER/fulfil.log."""
+    out = open(Path(cfg["REQUESTS_FOLDER"]) / "fulfil.log", "a")
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "wait"], stdout=out, stderr=out,
+                     stdin=subprocess.DEVNULL, start_new_session=True, env=os.environ.copy())
+    print(f"Waiting for your decisions in the background (log: {out.name}). Check them on the Requests page.", flush=True)
+
+
+def resend(cfg):
+    """Hands in downloads that are ready but weren't handed in (an rsync that failed): sends them again, no download."""
+    server = Server(cfg)
+    requests = server.requests()
+    ready = sorted((p for p in Path(cfg["WORK_FOLDER"]).glob("*/review.json")), key=lambda p: int(p.parent.name))
+    if not ready:
+        say(f"Nothing waiting to be sent in {cfg['WORK_FOLDER']}.")
+        return []
+    if cfg.get("REMOTE"):
+        say(f"Connecting to {cfg['REMOTE']} (if it asks for a password, this is the only time)…")
+        if not connect(cfg):
+            sys.exit(f"Couldn't connect to {cfg['REMOTE']} with ssh; check that `ssh {cfg['REMOTE']}` works.")
+    handed = []
+    for saved in ready:
+        rid = int(saved.parent.name)
+        review = json.loads(saved.read_text())["review"]
+        r = requests.get(rid)
+        if not r or r["status"] != "open" or r.get("stage"):
+            say(f"  #{rid}: not waiting any more ({(r or {}).get('status')}, {(r or {}).get('stage')}); left in {saved.parent}")
+            continue
+        if cfg.get("REMOTE"):
+            say(f"  #{rid} {review.get('album')}: sending…", end="")
+            try:
+                send_to_server(cfg, rid)
+            except (RuntimeError, subprocess.CalledProcessError) as e:
+                say(f" ✗ {e}")
+                continue
+            say(" ✓")
+        server.call("POST", f"/admin/requests/{rid}/review", json=review)
+        handed.append(rid)
+        say(f"  #{rid}: ✓ handed in · waiting for your check")
+    if handed:
+        server.call("POST", "/admin/requests/reviews-ready", json={"ids": handed})
+    return handed
+
+
+def start_remote_waiter(cfg):
+    """Starts the waiting half on the server, which files approved music while the laptop is off."""
+    say(f"Starting the filing half on {cfg['REMOTE']}…", end="")
+    done = ssh(cfg, [cfg["REMOTE_FULFIL"], "resume"], capture_output=True, text=True)
+    if done.returncode != 0:
+        say(" ✗")
+        say(f"Couldn't start it; run: ssh {cfg['REMOTE']} {cfg['REMOTE_FULFIL']} resume")
+        return
+    say(" ✓ it waits for your decisions there, so this laptop can sleep now.")
+    say(f"      Its log: ssh {cfg['REMOTE']} tail -f {cfg['REQUESTS_FOLDER'].rstrip('/')}/fulfil.log")
+
+
+def status(cfg):
+    rows = [r for r in Server(cfg).requests().values() if r.get("stage")]
+    for r in rows:
+        review = r.get("review") or {}
+        print(f"#{r['id']:<5} {r['stage']:<9} {review.get('album', r['item']['movie'])} ({review.get('year') or '?'})"
+              f"  {len(review.get('tracks') or [])} song(s)  asked by {', '.join(r['askedBy'])}")
+    print(f"{len(rows)} in progress" if rows else "Nothing waiting.")
+
+
+AUDIO = {".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wav"}
+COVER_NAMES = {"cover", "folder", "front", "album"}  # the scanner's (Scanner.kt coverNames)
+
+
+def itunes_cover(client, album, year):
+    """The album art iTunes has for [album] from [year] (±1), at 1000 px; None if it has none."""
+    try:
+        r = client.get("https://itunes.apple.com/search", params={"term": album, "entity": "album", "country": "IN", "limit": 25}, timeout=20)
+        r.raise_for_status()
+        results = r.json().get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return None
+    for hit in results:
+        found = int((hit.get("releaseDate") or "0")[:4] or 0)
+        if key(clean_album(hit.get("collectionName"))) == key(album) and (not year or abs(found - year) <= 1) and hit.get("artworkUrl100"):
+            return hit["artworkUrl100"].replace("100x100bb", "1000x1000bb")
+    return None
+
+
+def covers(cfg, dry):
+    """Album folders in the libraries this script files into that have no cover (no cover.jpg beside the songs, none
+    inside them) get iTunes' album art as cover.jpg; then the library is rescanned so Jukebox shows them."""
+    music = Path(cfg["ROOT"])
+    added, missing = [], []
+    with httpx.Client(timeout=httpx.Timeout(30, connect=15), headers={"User-Agent": AGENT}) as client:
+        for library, folder in sorted(cfg["FOLDERS"].items()):
+            if library == cfg["LIBRARY_NAME"] or not (music / folder).is_dir():
+                continue  # the main library's albums came with their covers; only downloads are looked at
+            for album_dir in sorted(p for p in (music / folder).iterdir() if p.is_dir() and not p.name.startswith(".")):
+                songs = sorted(f for f in album_dir.iterdir() if f.suffix.lower() in AUDIO)
+                if not songs or any(f.stem.lower() in COVER_NAMES and f.suffix.lower() in (".jpg", ".jpeg", ".png") for f in album_dir.iterdir()):
+                    continue
+                if subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=index", "-of", "csv=p=0",
+                                   str(songs[0])], capture_output=True, text=True, stdin=subprocess.DEVNULL).stdout.strip():
+                    continue  # the picture is inside the songs
+                m = re.match(r"^(.*?)\s*\(((?:19|20)\d\d)\)", album_dir.name)
+                name, year = (m.group(1), int(m.group(2))) if m else (album_dir.name, None)
+                where = album_dir.relative_to(music)
+                url = itunes_cover(client, clean_album(name), year)
+                if not url:
+                    missing.append(str(where))
+                    say(f"  ✗ {where}: iTunes has no cover for it")
+                    continue
+                if dry:
+                    say(f"  would add {where}/cover.jpg ({url})")
+                    added.append(str(where))
+                    continue
+                try:
+                    fetch(client, url, album_dir / "cover.jpg")
+                    added.append(str(where))
+                    say(f"  ✓ {where}/cover.jpg")
+                except RuntimeError as e:
+                    missing.append(str(where))
+                    say(f"  ✗ {where}: {e}")
+    say(f"{len(added)} cover(s) {'to add' if dry else 'added'}, {len(missing)} album(s) still without one"
+        + (": give those a cover.jpg by hand" if missing else ""))
+    if added and not dry:
+        say("Rescanning the library…", end="")
+        say(" ✓" if Server(cfg).scan() else " still running after 30 minutes")
+
+
+# ---------------------------------------------------------------- the site's lists (feeds)
+
+
+# The site's lists, as api-anything operations of the "masstamilan" site (docs/request-fulfilment.md has the commands
+# that teach them), and their names on Home.
+FEEDS = {"trending": "Trending on MassTamilan", "latest": "Latest Tamil songs"}
+SITE = "https://www.masstamilan.dev"
+
+
+def site_call(cfg, op, **args):
+    """One api-anything call to the masstamilan site; its items as dicts."""
+    cmd = [cfg.get("API_ANYTHING") or "api-anything", "call", "masstamilan", op] + [f"{k}={v}" for k, v in args.items()]
+    out = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180)
+    line = next((x for x in out.stdout.splitlines() if x.startswith("{")), None)
+    result = json.loads(line) if line else {}
+    if not result.get("ok"):
+        raise RuntimeError(f"api-anything {op}: {result.get('reason') or result.get('error') or out.stderr.strip()[:300] or 'no answer'}")
+    data = result.get("data") or []
+    if isinstance(data, dict) and "columns" in data:  # long lists come back as columns and rows
+        data = [dict(zip(data["columns"], row)) for row in data["rows"]]
+    return data
+
+
+def page_of(url):
+    """"/jailer-2-2026-songs?ref=sb" → "jailer-2-2026-songs"."""
+    return urlparse(url or "").path.strip("/")
+
+
+def label_of(info, label):
+    """"Starring: … Music: Anirudh Ravichander Lyricists: Vivek Director: Nelson", "Music" → "Anirudh Ravichander"."""
+    m = re.search(rf"\b{label}:\s*(.*?)\s*(?=\b[A-Z][A-Za-z]+:|$)", re.sub(r"\s+", " ", info or ""))
+    return m.group(1).strip(" ,") or None if m else None
+
+
+def music_of(info):
+    return label_of(info, "Music")
+
+
+def feed_entries(cfg, feed):
+    """The site's list [feed]: each album's title, page, year, composer and poster, in the site's order."""
+    items = site_call(cfg, feed)
+    entries = []
+    for item in items:
+        page = page_of(item.get("url"))
+        if not page or not item.get("title"):
+            continue
+        poster = item.get("poster")
+        year = re.search(r"-((?:19|20)\d\d)-songs", page) or re.search(r"-((?:19|20)\d\d)\.(?:jpe?g|png|webp)$", poster or "")
+        entries.append({"title": html.unescape(item["title"]).strip(), "page": page, "year": int(year.group(1)) if year else None,
+                        "composer": music_of(item.get("info")), "lyricists": label_of(item.get("info"), "Lyricists"), "poster": poster})
+    return entries
+
+
+def complete(cfg, entry):
+    """Fills in what the list didn't say (Trending has only names) from the site's search: composer, poster, year."""
+    if entry["composer"] and entry["poster"] and entry["lyricists"]:
+        return entry
+    time.sleep(2)  # slowly: quick calls get Cloudflare's check
+    try:
+        hit = next((x for x in site_call(cfg, "search", keyword=entry["title"]) if page_of(x.get("url")) == entry["page"]), None)
+    except RuntimeError:
+        hit = None
+    if hit:
+        entry["composer"] = entry["composer"] or music_of(hit.get("info"))
+        entry["lyricists"] = entry["lyricists"] or label_of(hit.get("info"), "Lyricists")
+        entry["poster"] = entry["poster"] or hit.get("poster")
+        if not entry["year"]:
+            found = re.search(r"-((?:19|20)\d\d)\.(?:jpe?g|png|webp)$", hit.get("poster") or "")
+            entry["year"] = int(found.group(1)) if found else None
+    return entry
+
+
+def feeds(cfg, dry, only=None):
+    """Keeps the library up to date with the site's lists: every album on them is downloaded whole (the songs the
+    library doesn't have), filed straight into the library (no check: these aren't requests), and the lists are sent to
+    Jukebox for Home's rows."""
+    server = Server(cfg)
+    remote = cfg.get("REMOTE")
+    work_root = Path(cfg["WORK_FOLDER"]) / "feeds"
+    work_root.mkdir(parents=True, exist_ok=True)
+    lock = open(work_root / ".lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.exit("Another fulfil.py feeds is running")
+    say(f"Jukebox feeds · {datetime.now():%Y-%m-%d %H:%M}{' · dry run: nothing is downloaded or changed' if dry else ''}")
+
+    lists, albums = {}, {}
+    for feed in [f for f in FEEDS if not only or f in only]:
+        try:
+            lists[feed] = feed_entries(cfg, feed)
+        except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+            say(f"  ✗ {feed}: {e}")
+            continue
+        say(f"  {FEEDS[feed]}: {', '.join(e['title'] for e in lists[feed]) or 'empty'}")
+        for e in lists[feed]:
+            albums.setdefault(e["page"], e)
+            albums[e["page"]].update({k: v for k, v in e.items() if v and not albums[e["page"]].get(k)})  # Latest says more
+    if not lists:
+        sys.exit("Couldn't read any of the site's lists; nothing done")
+    if remote and not dry and not connect(cfg):
+        sys.exit(f"Couldn't connect to {remote} with ssh; check that `ssh {remote}` works.")
+
+    handed = []
+    with httpx.Client(timeout=httpx.Timeout(60, connect=15), headers={"User-Agent": AGENT}) as client:
+        for i, entry in enumerate(albums.values(), 1):
+            complete(cfg, entry)
+            say()
+            year = f" ({entry['year']})" if entry["year"] else ""
+            say(f"  [{i}/{len(albums)}] {entry['title']}{year}")
+            tracks = None
+            for attempt in range(2):
+                time.sleep(3 if attempt == 0 else 45)  # one page at a time, slowly: quick ones get Cloudflare's check
+                try:
+                    tracks = site_call(cfg, "album", path=entry["page"])
+                    break
+                except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+                    say(f"      ✗ couldn't read its page: {e}" + ("; trying again in a moment" if attempt == 0 else "; the next run tries again"))
+            if tracks is None:
+                continue
+            if not tracks:
+                say("      no songs on its page yet")
+                continue
+            match = {"request_id": None, "work_id": f"feeds/{entry['page']}", "match_found": True,
+                     "best_match": {"title": entry["title"], "url": f"{SITE}/{entry['page']}", "poster": entry["poster"]},
+                     "metadata": {"year": entry["year"], "music": entry["composer"], "lyricists": entry["lyricists"],
+                                  "poster": entry["poster"], "language": "tamil",
+                                  "track_count": len(tracks)},
+                     "tracks": tracks}
+            request = {"item": {"kind": "movie", "movie": entry["title"], "title": entry["title"]}}
+            notes = []
+            try:
+                review, existing, outcome = prepare(cfg, server, client, match, request, None, notes, dry)
+            except Exception as e:  # one bad album doesn't stop the rest
+                shutil.rmtree(work_root / entry["page"], ignore_errors=True)
+                say(f"      ✗ failed  {e}")
+                continue
+            for n in notes:
+                say(f"      !         {n}")
+            if outcome == "already" or dry:
+                say("      ✓ the library has every song" if outcome == "already" else f"      would add {len(review['tracks'])} song(s)")
+                continue
+            work = work_root / entry["page"]
+            (work / "review.json").write_text(json.dumps({"feed": True, "review": review, "match": match}, indent=1, ensure_ascii=False))
+            if remote:
+                say("      sending…", end="")
+                try:
+                    send_to_server(cfg, f"feeds/{entry['page']}")
+                    say(" ✓")
+                except (RuntimeError, subprocess.CalledProcessError) as e:
+                    say(f" ✗ {e} (kept in {work}; the next run downloads it again)")
+                    continue
+            handed.append(entry["page"])
+
+    if handed:
+        say()
+        say(f"Filing {len(handed)} album(s) into the library and rescanning…")
+        if remote:
+            done = ssh(cfg, [cfg["REMOTE_FULFIL"], "file-feeds"], text=True)
+            if done.returncode != 0:
+                say(f"  ✗ filing on {remote} failed; they wait in {cfg['REQUESTS_FOLDER']}/feeds for the next run")
+        else:
+            file_feeds(cfg)
+    if not dry:
+        for feed, entries in lists.items():
+            server.call("PUT", f"/admin/feeds/{feed}", json={"title": FEEDS[feed], "entries": [
+                {"title": e["title"], "year": e["year"], "composer": e["composer"], "url": f"{SITE}/{e['page']}",
+                 "poster": urljoin(SITE + "/", e["poster"]) if e["poster"] else None} for e in entries]})
+        say(f"Home's lists sent: {', '.join(FEEDS[f] for f in lists)}")
+    if remote and not dry:
+        disconnect(cfg)
+
+
+def file_feeds(cfg):
+    """On the server's host: files the albums the feeds sync left in REQUESTS_FOLDER/feeds into the library (into the
+    album's folder if it's there by now), rescans and wakes the analyzer."""
+    server = Server(cfg)
+    folder = Path(cfg["REQUESTS_FOLDER"]) / "feeds"
+    ready = sorted(p for p in folder.glob("*/review.json")) if folder.is_dir() else []
+    if not ready:
+        log("Nothing to file")
+        return
+    logs = Path(cfg["REQUESTS_FOLDER"]) / "undo"
+    logs.mkdir(exist_ok=True)
+    undo_path = logs / f"feeds-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+    moved = 0
+    with open(undo_path, "a") as undo:
+        for saved in ready:
+            review = json.loads(saved.read_text())["review"]
+            place = server.place(None, review.get("year"), review.get("composer"), movie=review["album"], score=is_score_request(review))
+            if place and place.get("folder") is None:
+                place = None
+            try:
+                where = move_in(cfg, f"feeds/{saved.parent.name}", review, place, undo)
+            except Exception as e:
+                log(f"{review['album']} couldn't be filed: {e}")
+                continue
+            shutil.rmtree(saved.parent, ignore_errors=True)
+            moved += 1
+            log(f"{review['album']}: {len(review['tracks'])} song(s) into {where}")
+    if undo_path.stat().st_size == 0:
+        undo_path.unlink()
+    else:
+        log(f"Undo log: {undo_path}")
+    if moved:
+        log("Rescanning the library…")
+        if not server.scan():
+            log("The scan is taking over 30 minutes; the albums show once it's done")
+        if cfg.get("ANALYZER"):
+            subprocess.run(["docker", "kill", "-s", "USR1", cfg["ANALYZER"]], capture_output=True)
+            log("Analyzer woken for the new songs")
+
+
+def undo(cfg, path):
+    music = Path(cfg["ROOT"])
+    removed = 0
+    for line in Path(path).read_text().splitlines():
+        f = music / json.loads(line)["file"]
+        if f.exists():
+            f.unlink()
+            removed += 1
+            if f.parent != music and not any(f.parent.iterdir()):
+                f.parent.rmdir()
+    print(f"Removed {removed} file(s). Run a library scan (or wait for the hourly one) to update Jukebox.")
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="command", required=True)
+    r = sub.add_parser("run")
+    r.add_argument("batch")
+    r.add_argument("--dry-run", action="store_true")
+    r.add_argument("--foreground", action="store_true", help="wait for the decisions here instead of in the background")
+    sub.add_parser("resume")
+    sub.add_parser("resend", help="send downloads left on the laptop (after a failed rsync) and hand them in")
+    sub.add_parser("wait")
+    sub.add_parser("status")
+    f = sub.add_parser("feeds", help="keep the library up to date with the site's Trending and Latest lists")
+    f.add_argument("--dry-run", action="store_true")
+    f.add_argument("--only", help="trending, latest or both (comma separated)")
+    sub.add_parser("file-feeds", help="on the server: file the albums feeds left there")
+    c = sub.add_parser("covers", help="give downloaded albums that have no cover iTunes' album art (on the server)")
+    c.add_argument("--dry-run", action="store_true")
+    u = sub.add_parser("undo")
+    u.add_argument("log")
+    args = p.parse_args()
+    cfg = settings()
+    remote = cfg.get("REMOTE")
+    if args.command == "run":
+        try:
+            handed = run(cfg, args.batch, args.dry_run)
+            if handed and not args.dry_run:
+                if remote:
+                    start_remote_waiter(cfg)
+                else:
+                    wait(cfg) if args.foreground else wait_in_background(cfg)
+        finally:
+            if remote:
+                disconnect(cfg)
+    elif args.command == "resend":
+        handed = resend(cfg)
+        if handed and remote:
+            start_remote_waiter(cfg)
+        elif handed:
+            wait_in_background(cfg)
+        if remote:
+            disconnect(cfg)
+    elif args.command == "resume":
+        if remote:
+            if not connect(cfg):
+                sys.exit(f"Couldn't connect to {remote} with ssh; check that `ssh {remote}` works.")
+            try:
+                start_remote_waiter(cfg)
+            finally:
+                disconnect(cfg)
+        else:
+            wait_in_background(cfg)
+    elif args.command == "wait":
+        if remote:
+            sys.exit("The waiting half runs on the server: fulfil.py resume")
+        wait(cfg)
+    elif args.command == "status":
+        status(cfg)
+    elif args.command == "feeds":
+        feeds(cfg, args.dry_run, [x.strip() for x in args.only.split(",")] if args.only else None)
+    elif args.command == "file-feeds":
+        if remote:
+            sys.exit(f"file-feeds runs on the server: ssh {remote} {cfg['REMOTE_FULFIL']} file-feeds")
+        file_feeds(cfg)
+    elif args.command == "covers":
+        if remote:
+            sys.exit(f"Run covers on the server: ssh {remote} {cfg['REMOTE_FULFIL']} covers")
+        covers(cfg, args.dry_run)
+    elif args.command == "undo":
+        if remote:
+            sys.exit(f"Run undo on the server: ssh {remote} {cfg['REMOTE_FULFIL']} undo <log>")
+        undo(cfg, args.log)
+
+
+if __name__ == "__main__":
+    main()

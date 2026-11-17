@@ -17,10 +17,21 @@ class RecentSongs(context: Context) {
     )
     val songs: StateFlow<List<SongRef>> = _songs
 
+    /** Sends a played song to the server, for your other devices (IsaipettiApp). */
+    var onPlayed: (SongRef) -> Unit = {}
+
     /** Called when a song starts playing. Clip details aren't kept: it's the song that was played. */
     fun played(song: SongRef) {
         val plain = song.copy(clipStartMs = null, clipEndMs = null)
         val list = (listOf(plain) + _songs.value.filter { it.id != plain.id }).take(MAX)
+        _songs.value = list
+        prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
+        onPlayed(plain)
+    }
+
+    /** Songs any of your devices played (from the server, newest first) ahead of the ones played here. */
+    fun merge(fromServer: List<SongRef>) {
+        val list = (fromServer + _songs.value.filter { song -> fromServer.none { it.id == song.id } }).take(MAX)
         _songs.value = list
         prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
     }

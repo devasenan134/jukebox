@@ -20,7 +20,11 @@ import java.security.SecureRandom
 import java.sql.Connection
 
 /** A music folder to scan. [kind] "film": its albums are films (soundtracks, scores, singles); "album": plain albums. */
-data class LibraryDef(val name: String, val path: String, val kind: String = "album", val language: String? = null)
+/**
+ * A music folder. [albumsOf]: another library whose albums this one's files belong to, so a folder of extra files
+ * (requests filled from another source: `tamil/masstamilan` beside `tamil/jiosaavn_m4a`) adds to the same albums.
+ */
+data class LibraryDef(val name: String, val path: String, val kind: String = "album", val language: String? = null, val albumsOf: String? = null)
 
 @Serializable
 data class ScanReport(
@@ -34,6 +38,8 @@ data class ScanReport(
     val unreadable: Int,
     val lyricsUpdated: Int,
     val ms: Long,
+    /** Albums without a cover that took one from an image put in their folder since. */
+    val coversAdded: Int = 0,
 )
 
 private val log = LoggerFactory.getLogger("jukebox.scanner")
@@ -66,14 +72,21 @@ class Scanner(
 
     private class Found(val path: String, val file: File, val size: Long, val mtime: Long)
 
-    suspend fun scan(library: LibraryDef): ScanReport = withContext(Dispatchers.IO) {
+    /**
+     * Scans [library]'s folder. [nested]: other libraries' folders inside it (a language's own folder,
+     * `…/malayalam` inside the Tamil one), which belong to those libraries and are left out here.
+     */
+    suspend fun scan(library: LibraryDef, nested: Set<File> = emptySet()): ScanReport = withContext(Dispatchers.IO) {
         val started = clock()
         val root = File(library.path)
         require(root.isDirectory) { "Not a folder: ${library.path}" }
         val libId = db.tx { libraryId(library) }
+        // Albums are grouped per library, or with the library this one adds to.
+        val albumLib = library.albumsOf?.let { name -> db.tx { queryOne("SELECT id FROM libraries WHERE name = ?", name) { it.getLong(1) } } } ?: libId
         val scanId = db.tx { insert("INSERT INTO scans (started_at, info) VALUES (?, ?)", started, library.name) }
 
-        val found = root.walkTopDown().onEnter { !it.name.startsWith(".") }
+        val skip = nested.map { it.canonicalFile }.toSet()
+        val found = root.walkTopDown().onEnter { !it.name.startsWith(".") && (it == root || it.canonicalFile !in skip) }
             .filter { it.isFile && it.extension.lowercase() in audioExtensions && !it.name.startsWith(".") }
             .map { Found(it.relativeTo(root).path, it, it.length(), it.lastModified()) }
             .toList()
@@ -117,17 +130,18 @@ class Scanner(
             val existing = known[f.path]
             val movedFrom = if (existing == null) movedFile(f, p, gone)?.also { gone.remove(it); moved++ } else null
             runCatching {
-                db.tx { save(library, libId, f, p, existing ?: movedFrom, folderCovers, recredited) }
+                db.tx { save(library, libId, albumLib, f, p, existing ?: movedFrom, folderCovers, recredited) }
             }.onFailure { log.warn("Couldn't add {}", f.path, it); unreadable++ }
                 .onSuccess { if (existing != null) updated++ else if (movedFrom == null) added++ }
         }
         val now = clock()
         db.tx { for (g in gone) if (g.missingSince == null) update("UPDATE files SET missing_since = ? WHERE id = ?", now, g.id) }
+        val coversAdded = db.tx { fillMissingCovers(libId, root, folderCovers) }
 
         val report = ScanReport(library.name, found.size, unchanged, added, updated, moved, gone.count { it.missingSince == null },
-            unreadable, lyricsUpdated, clock() - started)
+            unreadable, lyricsUpdated, clock() - started, coversAdded)
         db.tx { update("UPDATE scans SET finished_at = ?, info = ? WHERE id = ?", clock(), Json.encodeToString(ScanReport.serializer(), report), scanId) }
-        if (report.added + report.updated + report.moved + report.missing > 0) db.catalogChanged()
+        if (report.added + report.updated + report.moved + report.missing + report.coversAdded > 0) db.catalogChanged()
         log.info("Scanned {}: {}", library.name, report)
         report
     }
@@ -151,7 +165,7 @@ class Scanner(
 
     /** Writes one file into the catalog: its recording, album, release, track, people, lyrics and cover. */
     private fun Connection.save(
-        library: LibraryDef, libId: Long, f: Found, p: Probed, existing: Known?, folderCovers: HashMap<String, String?>, recredited: MutableSet<String>,
+        library: LibraryDef, libId: Long, albumLib: Long, f: Found, p: Probed, existing: Known?, folderCovers: HashMap<String, String?>, recredited: MutableSet<String>,
     ) {
         val now = clock()
         val titleTag = p.tag("title") ?: f.file.nameWithoutExtension.replace(Regex("""^\d+(-\d+)?\s*-\s*"""), "")
@@ -171,12 +185,12 @@ class Scanner(
         // The album and the release this track belongs to.
         val (albumTitle, isScore) = Names.album(p.tag("album") ?: f.file.parentFile?.name ?: "Unknown album")
         val year = Names.year(p.tag("date", "year", "originaldate"))
-        val albumKey = "$libId|${Fuzzy.key(albumTitle)}|${year ?: ""}"
+        val albumKey = "$albumLib|${Fuzzy.key(albumTitle)}|${year ?: ""}"
         val albumId = queryOne("SELECT id FROM albums WHERE group_key = ?", albumKey) { it.getString(1) }?.also {
             update("UPDATE albums SET title = ?, sort_title = ?, updated_at = ? WHERE id = ?", albumTitle, Names.sortTitle(albumTitle), now, it)
         } ?: newId().also {
             insert("""INSERT INTO albums (id, library_id, title, sort_title, year, kind, group_key, created_at, updated_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", it, libId, albumTitle, Names.sortTitle(albumTitle), year,
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", it, albumLib, albumTitle, Names.sortTitle(albumTitle), year,
                 if (library.kind == "film") "film" else "album", albumKey, now, now)
         }
         val subtitle = p.tag("discsubtitle", "setsubtitle", "tsst")
@@ -292,6 +306,30 @@ class Scanner(
             ?.sortedBy { f -> coverNames.indexOf(f.nameWithoutExtension.lowercase()).let { if (it < 0) 99 else it } }
             ?.firstOrNull { it.nameWithoutExtension.lowercase() in coverNames } ?: return null
         return storeArtwork(image.readBytes(), "folder")
+    }
+
+    /**
+     * Albums (and their releases and files) in library [libId] that have no cover take their folder's image, if one
+     * has been put there since: files that didn't change aren't read again, so a cover.jpg added beside them would
+     * otherwise never be seen. (A picture inside a file can't arrive without the file changing.) Returns how many
+     * albums got one.
+     */
+    private fun Connection.fillMissingCovers(libId: Long, root: File, folderCovers: HashMap<String, String?>): Int {
+        class Row(val fileId: Long, val path: String, val releaseId: String, val albumId: String)
+        val rows = query("""SELECT f.id, f.path, r.id, a.id FROM files f JOIN tracks t ON t.id = f.track_id
+                            JOIN releases r ON r.id = t.release_id JOIN albums a ON a.id = r.album_id
+                            WHERE f.library_id = ? AND f.missing_since IS NULL AND (r.cover_id IS NULL OR a.cover_id IS NULL)""", libId) {
+            Row(it.getLong(1), it.getString(2), it.getString(3), it.getString(4))
+        }
+        val albums = HashSet<String>()
+        for (row in rows) {
+            val folder = File(root, row.path).parentFile ?: continue
+            val coverId = folderCovers.getOrPut(folder.path) { folderCover(folder) } ?: continue
+            update("UPDATE files SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, row.fileId)
+            update("UPDATE releases SET cover_id = coalesce(cover_id, ?) WHERE id = ?", coverId, row.releaseId)
+            if (update("UPDATE albums SET cover_id = ? WHERE id = ? AND cover_id IS NULL", coverId, row.albumId) > 0) albums += row.albumId
+        }
+        return albums.size
     }
 
     private fun Connection.embeddedCover(file: File): String? = tools.embeddedPicture(file)?.let { storeArtwork(it, "embedded") }

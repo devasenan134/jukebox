@@ -1,0 +1,31 @@
+[package]
+name = "jukebox-desktop"
+version = "0.1.0"
+description = "Jukebox for macOS: the Jukebox website in its own window"
+edition = "2021"
+license = "Apache-2.0"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+# macOS Now Playing (Control Center, media keys, AirPods, apps like Boring Notch) and the audio output in use.
+souvlaki = "0.8"
+cpal = "0.15"
+
+# Repeat in Now Playing, which souvlaki doesn't do: macOS's remote command center, directly.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2-media-player = { version = "0.3", default-features = false, features = ["std", "block2", "MPRemoteCommandCenter", "MPRemoteCommand", "MPRemoteCommandEvent", "MPRemoteControlTypes"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

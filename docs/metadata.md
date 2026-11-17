@@ -66,6 +66,32 @@ uv run --no-project --with mutagen python retag.py --feed credits.jsonl --db juk
 # start Jukebox: its startup scan reads the changed files
 ```
 
+## Photos of people (`scripts/metadata/people_photos.py`)
+
+Jukebox shows a person's photo from `data/people-photos/<name>.jpg`, matched by name or any spelling merged into
+them, after each scan; without one, their newest album's cover. The script fills the folder from the artist pictures
+in tamil-catalog's cached JioSaavn replies (skipping JioSaavn's stand-ins and film posters), then Wikimedia Commons
+photos of the composers of Tamil films (Wikidata). It never replaces a file, so a photo put there by hand stays;
+delete a wrong one or overwrite it with the right picture.
+
+```
+python3 scripts/metadata/people_photos.py --cache ~/tamil-catalog/cache.db \
+    --db /mnt/ugreen/jukebox/data/jukebox.db --out /mnt/ugreen/jukebox/data/people-photos
+```
+
+## Background music in song albums (server: `library/ScoreSplitter.kt`)
+
+After each scan, tracks in a film's song album that are background music move to its Original Background Score:
+by title ("Title Music", "BGM", "End Credits"; never "Theme Song"), or by sound when nothing says they're sung (no
+lyrics, no singer but the composer, not karaoke; a small model learnt from the library's score albums against songs
+with lyrics). Files are not touched. `data/score-split.csv` lists every move and why; `data/score-overrides.txt`
+corrects it, one line per file, with the path as the list shows it:
+
+```
+song: Bigil (2019)/05 - Bigil Bigil Bigiluma.m4a
+score: Some Film (2020)/07 - Some Track.m4a
+```
+
 ## Later
 
 - A review page for admins (merge, split, set a film's music directors), replacing `people-overrides.txt`.

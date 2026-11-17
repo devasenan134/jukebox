@@ -1,0 +1,372 @@
+import { useEffect, useRef, useState } from 'react'
+import type { ImportItem, ImportPreview, ImportRow, MixSong } from '../api/types'
+import { catalog } from '../api/catalog'
+import { social } from '../api/social'
+import { pause as pausePlayer } from '../player/player'
+import { useMyPlaylists } from '../state/library'
+import { playlistChanged } from '../state/queries'
+import { Cover, formatDuration, ScreenHeader } from '../ui/components'
+import { Checkbox, Dialog, Icon, IconButton, Menu, Spinner, toast } from '../ui/kit'
+import { useNav } from '../ui/nav'
+
+// Importing a playlist (ui/library/ImportScreen.kt in the app): paste a link to a Spotify, Apple Music or YouTube
+// playlist, or choose an exported file (CSV, M3U, Apple Music XML) or paste a list. The server reads the songs and
+// finds them in the library; here you check the matches, pick where it wasn't sure, request what's missing, and
+// save it as a playlist of yours: without the missing songs, or with them greyed out in their place to request.
+
+const SOURCES: Record<string, string> = { spotify: 'Spotify', apple: 'Apple Music', youtube: 'YouTube', file: 'your file' }
+
+export function ImportScreen() {
+  const nav = useNav()
+  const [link, setLink] = useState('')
+  const [text, setText] = useState('')
+  const [fileName, setFileName] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [preview, setPreview] = useState<ImportPreview | null>(null)
+  const file = useRef<HTMLInputElement>(null)
+
+  const read = async (o: { url?: string; text?: string; name?: string }) => {
+    setBusy(true)
+    try {
+      setPreview(await social.importPreview(o))
+    } catch (e) {
+      toast((e as Error).message || "Couldn't read that playlist", true)
+    }
+    setBusy(false)
+  }
+  const pickFile = async (f: File | undefined) => {
+    if (!f) return
+    if (f.size > 12 * 1024 * 1024) return toast('That file is too big (12 MB at most)')
+    setFileName(f.name)
+    await read({ text: await f.text(), name: f.name.replace(/\.[^.]+$/, '') })
+  }
+
+  if (preview) return <ImportReview preview={preview} onBack={() => setPreview(null)} onSaved={(id) => nav.openPlaylist(id)} />
+
+  return (
+    <div className="page">
+      <ScreenHeader title="Import a playlist" onBack={nav.back} />
+      <div style={{ maxWidth: 680, padding: '0 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <section className="import-card">
+          <div className="title-medium">From a link</div>
+          <div className="body-medium muted">A public playlist on Spotify, Apple Music, YouTube or YouTube Music (Share › Copy link).</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div className="search-box" style={{ flex: 1 }}>
+              <Icon name="link" />
+              <input
+                value={link} placeholder="https://open.spotify.com/playlist/…" aria-label="Playlist link" inputMode="url"
+                onChange={(e) => setLink(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && link.trim() && !busy && void read({ url: link.trim() })}
+              />
+            </div>
+            <button className="btn" disabled={!link.trim() || busy} onClick={() => void read({ url: link.trim() })}>Find songs</button>
+          </div>
+        </section>
+
+        <section className="import-card">
+          <div className="title-medium">From a file</div>
+          <div className="body-medium muted">
+            A CSV from <a href="https://exportify.app" target="_blank" rel="noreferrer">Exportify</a> (all of a Spotify playlist), TuneMyMusic or Soundiiz, an M3U playlist, or an Apple Music export (Music app › File › Library › Export Playlist).
+          </div>
+          <div>
+            <button className="btn tonal" disabled={busy} onClick={() => file.current?.click()}><Icon name="upload_file" size={18} />Choose a file</button>
+            {fileName && <span className="body-small muted" style={{ marginLeft: 12 }}>{fileName}</span>}
+          </div>
+          <input ref={file} type="file" hidden accept=".csv,.tsv,.txt,.m3u,.m3u8,.xml" onChange={(e) => { void pickFile(e.target.files?.[0]); e.target.value = '' }} />
+        </section>
+
+        <section className="import-card">
+          <div className="title-medium">Or paste a list</div>
+          <div className="body-medium muted">One song a line, like "Kanave Kanave - Anirudh".</div>
+          <div className="field">
+            <textarea value={text} rows={5} placeholder={'Kanave Kanave - Anirudh\nMunbe Vaa - A.R. Rahman'} aria-label="Songs, one a line" onChange={(e) => setText(e.target.value)} />
+          </div>
+          <div><button className="btn tonal" disabled={!text.trim() || busy} onClick={() => void read({ text, name: 'Imported playlist' })}>Find songs</button></div>
+        </section>
+        {busy && <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} className="body-medium muted"><Spinner size={20} />Reading the playlist and finding its songs…</div>}
+      </div>
+    </div>
+  )
+}
+
+/** Checking the matches before saving. */
+function ImportReview({ preview, onBack, onSaved }: { preview: ImportPreview; onBack: () => void; onSaved: (playlistId: string) => void }) {
+  const [name, setName] = useState(preview.name)
+  // Per row: the song chosen for it (the match, a choice, or none), and whether it goes in.
+  const [chosen, setChosen] = useState<(MixSong | undefined)[]>(() => preview.rows.map((r) => r.match))
+  const [included, setIncluded] = useState<boolean[]>(() => preview.rows.map((r) => !!r.match))
+  // Per row: asking for it, or the request made.
+  // Per row: asking, or what the server said ("queued", "requested", "in_library").
+  const [requested, setRequested] = useState<Record<number, string>>({})
+  // Songs the library doesn't have: left out, kept in their place (greyed out, to request), or kept and all requested.
+  const [missingMode, setMissingMode] = useState<'leave' | 'keep' | 'request'>('leave')
+  const keepMissing = missingMode !== 'leave'
+  const [saving, setSaving] = useState(false)
+  // Going through the matches it wasn't sure of, one at a time.
+  // The unsure rows being gone through (kept as they were when it opened), and the rows already decided.
+  const [reviewing, setReviewing] = useState<number[] | null>(null)
+  const [checked, setChecked] = useState<Set<number>>(() => new Set())
+  const found = preview.rows.filter((r) => r.match).length
+  const unsure = preview.rows.flatMap((r, i) => (!checked.has(i) && ((r.match && !r.sure) || (!r.match && r.choices.length)) ? [i] : []))
+  const songs = chosen.filter((s, i) => s && included[i]) as MixSong[]
+  const missing = preview.rows.filter((_, i) => !chosen[i]).length
+  const items: ImportItem[] = preview.rows.flatMap((r, i): ImportItem[] => {
+    const s = chosen[i]
+    if (s) return included[i] ? [{ songId: s.id }] : []
+    return keepMissing ? [{ track: r.track }] : []
+  })
+
+  const choose = (i: number, s: MixSong | undefined) => {
+    setChosen((c) => c.map((x, j) => (j === i ? s : x)))
+    setIncluded((inc) => inc.map((x, j) => (j === i ? !!s : x)))
+    setChecked((c) => new Set(c).add(i))
+  }
+  const request = async (i: number) => {
+    setRequested({ ...requested, [i]: 'busy' })
+    try {
+      const asked = await social.importRequest(preview.rows[i].track)
+      if (asked.status === 'not_found') {
+        setRequested((r) => { const n = { ...r }; delete n[i]; return n })
+        toast(asked.note || "Couldn't find it in the catalog", true)
+      } else setRequested((r) => ({ ...r, [i]: asked.status }))
+    } catch (e) {
+      setRequested((r) => { const n = { ...r }; delete n[i]; return n })
+      toast((e as Error).message || "Couldn't request it", true)
+    }
+  }
+  const save = async () => {
+    setSaving(true)
+    try {
+      const r = await social.importCreate(name.trim() || preview.name, items, missingMode === 'request')
+      playlistChanged()
+      useMyPlaylists.getState().refresh()
+      toast(`Saved "${name.trim() || preview.name}" with ${r.songCount} songs${r.missingCount ? `, and ${r.missingCount} ${missingMode === 'request' ? 'being requested' : 'to request'}` : ''}`)
+      onSaved(r.playlistId)
+    } catch (e) {
+      toast((e as Error).message || "Couldn't save it", true)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="page">
+      <ScreenHeader title="Import a playlist" onBack={onBack} />
+      <div style={{ padding: '0 16px 12px', maxWidth: 900 }}>
+        <div className="field" style={{ marginBottom: 8 }}>
+          <label>Playlist name</label>
+          <input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="body-medium">
+          <b>{found} of {preview.rows.length}</b> songs from {SOURCES[preview.source] ?? preview.source} are in the library.
+          {found < preview.rows.length && ' The others can be requested.'}
+        </div>
+        {preview.note && <div className="body-small muted" style={{ marginTop: 4 }}>{preview.note}</div>}
+        {unsure.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <button className="btn tonal" onClick={() => setReviewing(unsure)}><Icon name="hearing" size={18} />Check {unsure.length} unsure {unsure.length === 1 ? 'match' : 'matches'}</button>
+          </div>
+        )}
+        {missing > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="body-medium">{missing === 1 ? 'The song that isn\'t in the library:' : `The ${missing} songs that aren't in the library:`}</div>
+            <div className="chips" style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+              <button className={`chip${missingMode === 'leave' ? ' selected' : ''}`} onClick={() => setMissingMode('leave')}>Leave out</button>
+              <button className={`chip${missingMode === 'keep' ? ' selected' : ''}`} onClick={() => setMissingMode('keep')}>Keep, greyed out</button>
+              <button className={`chip${missingMode === 'request' ? ' selected' : ''}`} onClick={() => setMissingMode('request')}><Icon name="library_add" size={16} />Keep and request all</button>
+            </div>
+            <div className="body-small muted" style={{ marginTop: 4 }}>
+              {missingMode === 'leave' ? 'The playlist has only the songs in the library.'
+                : missingMode === 'keep' ? 'They stay in their place in the playlist, greyed out, with Request. When one arrives in the library it plays like the rest.'
+                  : 'They stay in their place, greyed out, and are all requested after you save (songs of the same album as one album request). Each one plays like the rest once it arrives.'}
+            </div>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+          <button className="btn" disabled={!items.length || saving} onClick={() => void save()}>
+            {saving ? 'Saving…' : `Save playlist (${songs.length} songs${items.length > songs.length ? ` + ${items.length - songs.length} to request` : ''})`}
+          </button>
+          <button className="btn text" onClick={onBack}>Start over</button>
+        </div>
+      </div>
+      {reviewing && (
+        <UnsureReview
+          rows={preview.rows}
+          indices={reviewing}
+          source={SOURCES[preview.source] ?? preview.source}
+          onDecide={choose}
+          onClose={() => setReviewing(null)}
+        />
+      )}
+      <div style={{ padding: '0 8px 24px' }}>
+        {preview.rows.map((row, i) => (
+          <ImportRowView
+            key={i} row={row} chosen={chosen[i]} included={included[i]} request={requested[i]} checked={checked.has(i)}
+            onInclude={(v) => setIncluded(included.map((x, j) => (j === i ? v : x)))}
+            onChoose={(s) => choose(i, s)}
+            onRequest={() => void request(i)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ImportRowView({ row, chosen, included, request, checked, onInclude, onChoose, onRequest }: {
+  row: ImportRow
+  /** Decided by hand (in Check unsure matches, or picked): no longer "Is this the one?". */
+  checked?: boolean
+  chosen?: MixSong
+  included: boolean
+  request?: string
+  onInclude: (v: boolean) => void
+  onChoose: (s: MixSong | undefined) => void
+  onRequest: () => void
+}) {
+  const [menu, setMenu] = useState<DOMRect | null>(null)
+  const t = row.track
+  const unsure = !!chosen && !row.sure && !checked && chosen.id === row.match?.id
+  return (
+    <div className="import-row">
+      <div className="from">
+        <div className="body-medium ellipsis">{t.title}</div>
+        <div className="body-small muted ellipsis">{[t.artists.join(', '), t.durationMs ? formatDuration(t.durationMs / 1000) : null].filter(Boolean).join(' · ')}</div>
+      </div>
+      <Icon name="arrow_forward" size={18} className="muted arrow" />
+      <div className="to">
+        {chosen ? (
+          <>
+            <Checkbox checked={included} onChange={onInclude} />
+            <Cover coverArt={chosen.coverArt} size={150} corner={4} style={{ width: 40, height: 40, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="body-medium ellipsis">{chosen.title}</div>
+              <div className="body-small muted ellipsis">{[chosen.album, chosen.artist].filter(Boolean).join(' · ')}</div>
+              {unsure && <div className="body-small primary-text">Is this the one?</div>}
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, minWidth: 0 }} className="body-small muted">
+            {row.choices.length ? 'Not sure which song this is' : 'Not in the library'}
+          </div>
+        )}
+        {row.choices.length > (chosen ? 1 : 0) && (
+          <button className="btn text small" onClick={(e) => setMenu((e.currentTarget as HTMLElement).getBoundingClientRect())}>{chosen ? 'Change' : 'Pick'}</button>
+        )}
+        {!chosen && (
+          request && request !== 'busy' ? <span className="body-small primary-text" style={{ whiteSpace: 'nowrap' }}><Icon name="check" size={16} /> {request === 'queued' ? 'Queued' : request === 'in_library' ? 'In the library' : 'Requested'}</span>
+            : <button className="btn tonal small" disabled={request === 'busy'} onClick={onRequest}>Request</button>
+        )}
+      </div>
+      {menu && (
+        <Menu
+          anchor={menu}
+          onClose={() => setMenu(null)}
+          items={[
+            ...row.choices.map((c) => ({ label: `${c.title} · ${c.album ?? ''}${c.artist ? ` · ${c.artist}` : ''}`.slice(0, 80), onClick: () => onChoose(c) })),
+            { label: 'None of these', onClick: () => onChoose(undefined) },
+          ]}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The preview player, apart from the music player so the queue is left alone. */
+let previewAudio: HTMLAudioElement | null = null
+
+/**
+ * The matches it wasn't sure of, one at a time: the song as the other service has it next to the library's
+ * best guess, which can be played for a moment. Same song takes it; Not this one leaves it out at once and shows
+ * the next guess, if there is one; Skip keeps it as it is.
+ */
+function UnsureReview({ rows, indices, source, onDecide, onClose }: {
+  rows: ImportRow[]
+  indices: number[]
+  source: string
+  onDecide: (i: number, s: MixSong | undefined) => void
+  onClose: () => void
+}) {
+  const [at, setAt] = useState(0)
+  const [guess, setGuess] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  useEffect(() => () => previewAudio?.pause(), [])
+  const i = indices[at]
+  const row = rows[i]
+  // Its best guess first, then the others it could be (the same list however it's decided along the way).
+  const guesses = row ? [row.match, ...row.choices].filter((s, n, all): s is MixSong => !!s && all.findIndex((x) => x?.id === s.id) === n) : []
+  // What was decided in here so far, for the summary at the end.
+  const [decided, setDecided] = useState<Record<number, 'kept' | 'left'>>({})
+  const song = guesses[guess]
+
+  const stop = () => {
+    previewAudio?.pause()
+    setPlaying(false)
+  }
+  const next = () => {
+    stop()
+    setGuess(0)
+    if (at + 1 >= indices.length) {
+      const all = Object.values(decided)
+      toast(`All checked: ${all.filter((d) => d === 'kept').length} kept, ${all.filter((d) => d === 'left').length} left out`)
+      onClose()
+    } else setAt(at + 1)
+  }
+  const play = () => {
+    if (!song) return
+    if (!previewAudio) previewAudio = new Audio()
+    const a = previewAudio
+    if (playing) return stop()
+    pausePlayer()
+    a.src = catalog.streamUrl(song.id)
+    // A bit into the song, where it's more itself than its first notes.
+    a.onloadedmetadata = () => { if (a.duration > 60) a.currentTime = Math.min(a.duration * 0.3, 60) }
+    a.onended = () => setPlaying(false)
+    a.onerror = () => { setPlaying(false); toast("Couldn't play it") }
+    void a.play().then(() => setPlaying(true)).catch(() => setPlaying(false))
+  }
+  if (!row) return null
+  const t = row.track
+  const search = `https://www.youtube.com/results?search_query=${encodeURIComponent([t.title, ...t.artists.slice(0, 2)].join(' '))}`
+
+  return (
+    <Dialog
+      title={`Is it the same song? (${at + 1} of ${indices.length})`}
+      onClose={() => { stop(); onClose() }}
+      actions={
+        <>
+          <button className="btn text" onClick={next}>Skip</button>
+          <button className="btn tonal" onClick={() => {
+            stop()
+            // It isn't this one: out of the playlist now, whatever happens next.
+            onDecide(i, undefined)
+            setDecided({ ...decided, [i]: 'left' })
+            if (guess + 1 < guesses.length) setGuess(guess + 1)
+            else next()
+          }}>{guess + 1 < guesses.length ? 'Not this one' : 'None of these'}</button>
+          <button className="btn" disabled={!song} onClick={() => { onDecide(i, song); setDecided({ ...decided, [i]: 'kept' }); next() }}>Same song</button>
+        </>
+      }
+    >
+      <div style={{ color: 'var(--on-surface)', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 'min(420px, 80vw)' }}>
+        <div>
+          <div className="body-small muted">On {source}</div>
+          <div className="title-medium">{t.title}</div>
+          <div className="body-small muted">{[t.artists.join(', '), t.album, t.durationMs ? formatDuration(t.durationMs / 1000) : null].filter(Boolean).join(' · ')}</div>
+          <a className="body-small" href={search} target="_blank" rel="noreferrer">Hear it on YouTube</a>
+        </div>
+        {song && (
+          <div>
+            <div className="body-small muted">In the library{guesses.length > 1 ? ` (guess ${guess + 1} of ${guesses.length})` : ''}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
+              <Cover coverArt={song.coverArt} size={150} corner={6} style={{ width: 56, height: 56, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="title-medium ellipsis">{song.title}</div>
+                <div className="body-small muted ellipsis">{[song.album, song.artist, formatDuration(song.duration)].filter(Boolean).join(' · ')}</div>
+              </div>
+              <IconButton icon={playing ? 'pause' : 'play_arrow'} label={playing ? 'Pause' : 'Play a bit'} filled onClick={play} />
+            </div>
+          </div>
+        )}
+      </div>
+    </Dialog>
+  )
+}

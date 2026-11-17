@@ -15,6 +15,15 @@ import io.github.devasenan134.isaipetti.data.FriendRequestEvent
 import io.github.devasenan134.isaipetti.data.FriendRequests
 import io.github.devasenan134.isaipetti.data.ListenSessionEvent
 import io.github.devasenan134.isaipetti.data.ListenStateEvent
+import io.github.devasenan134.isaipetti.data.DeviceDto
+import io.github.devasenan134.isaipetti.data.DevicePlaybackState
+import io.github.devasenan134.isaipetti.data.DevicePlaybackUpdate
+import io.github.devasenan134.isaipetti.data.DevicesEvent
+import io.github.devasenan134.isaipetti.data.RemoteCommand
+import io.github.devasenan134.isaipetti.data.RemoteCommandEvent
+import io.github.devasenan134.isaipetti.data.SetActiveDevice
+import io.github.devasenan134.isaipetti.data.TransferPlayback
+import io.github.devasenan134.isaipetti.data.TransferPlaybackEvent
 import io.github.devasenan134.isaipetti.data.MessageEvent
 import io.github.devasenan134.isaipetti.data.ConversationUpdatedEvent
 import io.github.devasenan134.isaipetti.data.ReadEvent
@@ -24,6 +33,8 @@ import io.github.devasenan134.isaipetti.data.TypingUpdate
 import io.github.devasenan134.isaipetti.data.MessageUpdatedEvent
 import io.github.devasenan134.isaipetti.data.NowPlayingUpdate
 import io.github.devasenan134.isaipetti.data.PresenceEvent
+import io.github.devasenan134.isaipetti.data.RecentsChangedEvent
+import io.github.devasenan134.isaipetti.data.FeedsChangedEvent
 import io.github.devasenan134.isaipetti.data.SessionStore
 import io.github.devasenan134.isaipetti.data.SocialApi
 import io.github.devasenan134.isaipetti.data.SocialEvent
@@ -85,6 +96,41 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     private val _conversations = MutableStateFlow<List<Conversation>>(emptyList())
     val conversations: StateFlow<List<Conversation>> = _conversations
+
+    private val _devices = MutableStateFlow<List<DeviceDto>>(emptyList())
+    val devices: StateFlow<List<DeviceDto>> = _devices
+
+    private val _activeDeviceId = MutableStateFlow<String?>(null)
+    val activeDeviceId: StateFlow<String?> = _activeDeviceId
+
+    val myDeviceId: String = "android-${android.os.Build.MODEL.lowercase().replace(" ", "-")}"
+    val myDeviceName: String = "${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}"
+
+    var pendingRemoteCommand: RemoteCommandEvent? = null
+    var onRemoteCommand: ((RemoteCommandEvent) -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                pendingRemoteCommand?.let {
+                    pendingRemoteCommand = null
+                    value.invoke(it)
+                }
+            }
+        }
+
+    var pendingTransfer: TransferPlaybackEvent? = null
+    var onRequestPlayerConnect: (() -> Unit)? = null
+
+    var onTransferPlayback: ((TransferPlaybackEvent) -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) {
+                pendingTransfer?.let {
+                    pendingTransfer = null
+                    value.invoke(it)
+                }
+            }
+        }
 
     private val _messages = MutableSharedFlow<ChatMessage>(extraBufferCapacity = 64)
 
@@ -185,6 +231,50 @@ class Social(private val context: Context, private val session: SessionStore, pr
         sendEvent(NowPlayingUpdate(shown))
     }
 
+    /** Sends this device's current playback snapshot to the realtime gateway. */
+    fun onDevicePlayback(
+        song: SongRef?,
+        queue: List<SongRef>,
+        index: Int,
+        positionMs: Long,
+        isPlaying: Boolean,
+        volume: Float = 1f,
+    ) {
+        val state = DevicePlaybackState(
+            song = song,
+            queue = queue,
+            index = index,
+            positionMs = positionMs,
+            playing = isPlaying,
+            volume = volume,
+            updatedAt = System.currentTimeMillis(),
+        )
+        sendEvent(DevicePlaybackUpdate(state))
+    }
+
+    fun transferPlayback(toDeviceId: String) {
+        val song = nowPlaying
+        val queue = song?.let { listOf(it) } ?: emptyList()
+        val state = DevicePlaybackState(
+            song = song,
+            queue = queue,
+            index = 0,
+            positionMs = 0L,
+            playing = true,
+            volume = 1f,
+            updatedAt = System.currentTimeMillis(),
+        )
+        sendEvent(TransferPlayback(toDeviceId, state = if (song != null) state else null))
+    }
+
+    fun sendRemoteCommand(targetDeviceId: String, action: String, positionMs: Long? = null, volume: Float? = null) {
+        sendEvent(RemoteCommand(targetDeviceId = targetDeviceId, action = action, positionMs = positionMs, volume = volume))
+    }
+
+    fun setActiveDevice(deviceId: String) {
+        sendEvent(SetActiveDevice(deviceId))
+    }
+
     /** Reloads friends, requests and chats from the server. */
     fun refresh() {
         scope.launch { refreshFriends() }
@@ -274,12 +364,13 @@ class Social(private val context: Context, private val session: SessionStore, pr
 
     /** Opens the WebSocket and suspends until it closes. */
     private suspend fun runSocket() {
-        val url = api.eventsUrl() ?: return
+        val url = api.eventsUrl(deviceId = myDeviceId, deviceName = myDeviceName, clientType = "android") ?: return
         suspendCancellableCoroutine { continuation ->
             val ws = wsClient.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     scope.launch {
                         _status.value = Status.Online
+                        onRecentsChanged()
                         sendEvent(AppStateUpdate(foreground.value))
                         nowPlaying?.let { sendEvent(NowPlayingUpdate(it)) }
                         listen.onConnected()
@@ -305,6 +396,12 @@ class Social(private val context: Context, private val session: SessionStore, pr
         socket = null
     }
 
+    /** Fetches Recently played again (IsaipettiApp.syncRecents): on connecting, and when another device played something. */
+    var onRecentsChanged: () -> Unit = {}
+
+    /** Fetches Home's Trending and Latest again (Mixes.refreshFeeds): when the server says one changed. */
+    var onFeedsChanged: () -> Unit = {}
+
     private suspend fun handle(event: SocialEvent) {
         when (event) {
             is PresenceEvent -> _friends.update { list ->
@@ -318,6 +415,8 @@ class Social(private val context: Context, private val session: SessionStore, pr
                 refreshConversations()
             }
             is FriendRequestEvent -> refreshRequests()
+            is RecentsChangedEvent -> onRecentsChanged()
+            is FeedsChangedEvent -> onFeedsChanged()
             is ConversationUpdatedEvent -> refreshConversations()
             is TypingEvent -> _typing.update { all ->
                 all + (event.conversationId to (all[event.conversationId].orEmpty() + (event.userId to System.currentTimeMillis())))
@@ -343,6 +442,28 @@ class Social(private val context: Context, private val session: SessionStore, pr
             is FriendAddedEvent, is FriendRemovedEvent -> {
                 refreshFriends()
                 refreshRequests()
+            }
+            is DevicesEvent -> {
+                _devices.value = event.devices
+                _activeDeviceId.value = event.activeDeviceId
+            }
+            is RemoteCommandEvent -> {
+                val handler = onRemoteCommand
+                if (handler != null) {
+                    handler.invoke(event)
+                } else {
+                    pendingRemoteCommand = event
+                    onRequestPlayerConnect?.invoke()
+                }
+            }
+            is TransferPlaybackEvent -> {
+                val handler = onTransferPlayback
+                if (handler != null) {
+                    handler.invoke(event)
+                } else {
+                    pendingTransfer = event
+                    onRequestPlayerConnect?.invoke()
+                }
             }
         }
     }

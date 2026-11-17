@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query'
-import { subsonic } from '../api/subsonic'
+import { catalog } from '../api/catalog'
 
 /**
  * Everything the website has loaded, kept while you move around (like Cauldron's website): going back to a
@@ -20,7 +20,7 @@ export const keys = {
 }
 
 /** Starts loading an album before it's opened (on hover or touch), so the page is usually ready on click. */
-export const prefetchAlbum = (id: string) => void queryClient.prefetchQuery({ queryKey: keys.album(id), queryFn: () => subsonic.album(id) })
+export const prefetchAlbum = (id: string) => void queryClient.prefetchQuery({ queryKey: keys.album(id), queryFn: () => catalog.album(id) })
 
 /** After changing a playlist: its page and the lists of playlists load fresh. */
 export function playlistChanged(id?: string) {

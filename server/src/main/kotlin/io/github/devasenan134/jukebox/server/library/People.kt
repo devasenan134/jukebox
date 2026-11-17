@@ -95,6 +95,12 @@ class PeopleMerger(private val db: Db, private val overrides: File? = null) {
     }
 
     private fun Connection.merge(unmerged: () -> Unit): PeopleReport {
+        // Names the scanner no longer takes for people ("Instrumental" as a lyricist) lose the credits older scans gave them.
+        val notPeople = query("SELECT id, name FROM people") { it.getString(1) to it.getString(2) }.filter { !Names.isPerson(it.second) }.map { it.first }
+        for (id in notPeople) {
+            update("DELETE FROM recording_credits WHERE person_id = ?", id)
+            update("DELETE FROM album_credits WHERE person_id = ?", id)
+        }
         val (same, different) = readOverrides()
         // A "different" line undoes an earlier merge: the spelling stands alone again, and the songs credited
         // to the main spelling are read again on the next scan, so each name gets its own credits back.

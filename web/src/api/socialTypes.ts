@@ -123,7 +123,41 @@ export interface ListenState {
   updatedAt?: number
 }
 
+export interface DeviceInfo {
+  id: string
+  name: string
+  type: string
+  isCurrent: boolean
+  isActive: boolean
+  playing: boolean
+  song?: SongRef
+  positionMs: number
+  volume: number
+  lastSeen: number
+  source?: string | null
+}
+
+export interface DevicePlaybackState {
+  song?: SongRef | null
+  queue?: SongRef[] | null
+  queueId?: string | null
+  index?: number
+  positionMs?: number
+  playing?: boolean
+  volume?: number
+  updatedAt?: number
+  source?: string | null
+}
+
 /** Live events from the server's WebSocket ("type" tells which). */
+/** Where you left off in a playlist, movie or Liked songs, kept by the server for all your devices. */
+export interface ResumePoint {
+  source: string
+  songIds: string[]
+  currentId: string
+  savedAt: number
+}
+
 export type SocialEvent =
   | { type: 'presence'; userId: number; online: boolean; nowPlaying?: SongRef }
   | { type: 'message'; message: ChatMessage }
@@ -137,6 +171,22 @@ export type SocialEvent =
   | { type: 'listenSession'; conversationId: number; listeners: number[]; owner?: number }
   | { type: 'messageUpdated'; message: ChatMessage }
   | { type: 'listenState'; conversationId: number; state: ListenState; by: number; serverTime: number }
+  | { type: 'devices'; activeDeviceId: string | null; devices: DeviceInfo[] }
+  /** Something you played on another device (or this one): fetch Recently played again. */
+  | { type: 'recentsChanged' }
+  | { type: 'feedsChanged' }
+  | {
+      type: 'remoteCommand'
+      commandId: string
+      action: string
+      positionMs?: number
+      volume?: number
+      song?: SongRef
+      queue?: SongRef[]
+      index?: number
+      byDeviceId?: string
+    }
+  | { type: 'transferPlayback'; state: DevicePlaybackState; fromDeviceId: string }
 
 /** What the app sends over the WebSocket. */
 export type ClientEvent =
@@ -147,6 +197,19 @@ export type ClientEvent =
   | { type: 'listenJoin'; conversationId: number }
   | { type: 'listenLeave'; conversationId: number }
   | { type: 'listenUpdate'; conversationId: number; state: ListenState }
+  | { type: 'devicePlayback'; playback: DevicePlaybackState }
+  | {
+      type: 'remoteCommand'
+      targetDeviceId: string
+      action: string
+      positionMs?: number
+      volume?: number
+      song?: SongRef
+      queue?: SongRef[]
+      index?: number
+    }
+  | { type: 'transferPlayback'; toDeviceId: string; state?: DevicePlaybackState }
+  | { type: 'setActiveDevice'; deviceId: string }
 
 export interface AdminAccess {
   isAdmin: boolean
@@ -171,11 +234,19 @@ export interface UserStats {
   /** Keys: "today", "7d", "30d", "all". */
   ranges: Record<string, RangeStats>
 }
+/** One sort of mix over the last 30 days, everyone together: opened (a station: started), songs played and skipped. */
+export interface MixStats {
+  name: string
+  opened: number
+  played: number
+  skipped: number
+}
 export interface ListeningStats {
   generatedAt: number
   users: UserStats[]
   daily: { date: string; hours: number }[]
   hourOfDay: number[]
+  mixes?: MixStats[]
 }
 
 // ---- Helpers the chat screens share (same wording as the Android app) ----

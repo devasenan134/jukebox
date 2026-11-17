@@ -1,5 +1,7 @@
 package io.github.devasenan134.isaipetti.ui.library
 
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -74,7 +76,7 @@ import io.github.devasenan134.isaipetti.ui.components.songCount
 import io.github.devasenan134.isaipetti.ui.components.likeCount
 
 /** The sections of Your Library, in the order of the chips (swipe between them). */
-private enum class LibraryFilter(val label: String) { All("All"), Playlists("Playlists"), Movies("Movies"), Mine("My Playlists") }
+private enum class LibraryFilter(val label: String) { All("All"), Playlists("Playlists"), Albums("Albums"), Mine("My Playlists") }
 
 /** Your Library: liked songs, saved mixes, liked movies, liked playlists and playlists you created. */
 @Composable
@@ -92,6 +94,7 @@ fun LibraryScreen(nav: Nav) {
     // Playlists you created, next to the ones you liked.
     var reloadOwn by remember { mutableIntStateOf(0) }
     var creating by remember { mutableStateOf(false) }
+    var addMenu by remember { mutableStateOf(false) }
     val ownPlaylists by produceState(emptyList<Playlist>(), credentials?.username, reloadOwn) {
         value = runCatching { app.api.playlists().filter { it.owner == credentials?.username } }.getOrDefault(emptyList())
     }
@@ -119,7 +122,14 @@ fun LibraryScreen(nav: Nav) {
                 if (grid) Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Show as list")
                 else Icon(painterResource(R.drawable.ic_grid), contentDescription = "Show as grid")
             }
-            IconButton(onClick = { creating = true }) { Icon(Icons.Filled.Add, contentDescription = "New playlist") }
+            // + : a new playlist, or one imported from Spotify, Apple Music, YouTube or a file.
+            Box {
+                IconButton(onClick = { addMenu = true }) { Icon(Icons.Filled.Add, contentDescription = "New or import playlist") }
+                DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
+                    DropdownMenuItem(text = { Text("New playlist") }, onClick = { addMenu = false; creating = true })
+                    DropdownMenuItem(text = { Text("Import a playlist") }, onClick = { addMenu = false; nav.openImport() })
+                }
+            }
         }
         if (creating) {
             NameDialog(title = "New playlist", confirm = "Create", onDismiss = { creating = false }) { name ->
@@ -173,9 +183,9 @@ fun LibraryScreen(nav: Nav) {
                         Cover(playlist.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
                     })
                 }
-                if (filter == LibraryFilter.All || filter == LibraryFilter.Movies) {
+                if (filter == LibraryFilter.All || filter == LibraryFilter.Albums) {
                     likedAlbums.forEach { album ->
-                        add(LibraryEntry("album-${album.id}", album.name, listOfNotNull("Movie", album.artist).joinToString(" · "), { nav.openAlbum(album.id) }) {
+                        add(LibraryEntry("album-${album.id}", album.name, listOfNotNull("Album", album.artist).joinToString(" · "), { nav.openAlbum(album.id) }) {
                             Cover(album.coverArt, Modifier.size(it), size = 300, corner = 6.dp)
                         })
                     }
@@ -186,10 +196,10 @@ fun LibraryScreen(nav: Nav) {
             val emptyHint: @Composable () -> Unit = {
                 Text(
                     when (filter) {
-                        LibraryFilter.Movies -> "Tap ♡ on a movie to keep it here."
+                        LibraryFilter.Albums -> "Tap ♡ on an album to keep it here."
                         LibraryFilter.Playlists -> "Tap ♡ on playlists and mixes to keep them here."
                         LibraryFilter.Mine -> "Playlists you make show up here. Tap + to make one."
-                        LibraryFilter.All -> "Tap ♡ on songs, movies, playlists and mixes to keep them here."
+                        LibraryFilter.All -> "Tap ♡ on songs, albums, playlists and mixes to keep them here."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),

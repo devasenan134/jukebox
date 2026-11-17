@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { PlayEvent, Song, SongRef } from '../api/types'
 import { MIX_SOURCE_PREFIX, songToRef } from '../api/types'
 import { subsonic } from '../api/subsonic'
+import { catalog } from '../api/catalog'
 import { social } from '../api/social'
 import { session } from '../state/session'
 import { queueMemory, useRecentSongs } from '../state/history'
@@ -70,14 +71,27 @@ export const currentItem = (s: PlayerState = st()): QueueItem | undefined => s.i
 let nextUid = 1
 const toItems = (songs: Song[], source?: string): QueueItem[] => songs.map((song) => ({ uid: nextUid++, song, source }))
 
-const audio = new Audio()
-audio.preload = 'auto'
-audio.volume = st().volume
+// Two audio elements: the one playing, and a standby that loads the next song during the last 30 seconds of
+// this one, so the switch is instant. Without it, the page goes quiet while the next song loads, and a browser
+// (or macOS) may freeze a hidden page that's quiet: music stopped after a song or two in a background tab.
+// Events from the standby are ignored until it becomes the playing one.
+function makeAudio(): HTMLAudioElement {
+  const a = new Audio()
+  a.preload = 'auto'
+  a.volume = st().volume
+  return a
+}
+let audio = makeAudio()
+let standby = makeAudio()
+/** The queue entry the standby holds (-1: none). */
+let standbyUid = -1
+const PRELOAD_LAST_MS = 30_000
 
 /** Sets the volume (0 to 1) and remembers it. */
 export function setVolume(v: number) {
   const volume = Math.min(1, Math.max(0, v))
   audio.volume = volume
+  standby.volume = volume
   setSt({ volume })
   try {
     localStorage.setItem('player.volume', String(volume))
@@ -120,7 +134,18 @@ function load_(index: number, startMs = 0, autoplay = true) {
   setSt({ current: index, durationMs: item.song.duration * 1000 })
   if (loadedUid !== item.uid) {
     loadedUid = item.uid
-    audio.src = subsonic.streamUrl(item.song.id)
+    if (standbyUid === item.uid) {
+      // Already loaded in the standby: it becomes the playing one, the old one is emptied.
+      const old = audio
+      audio = standby
+      standby = old
+      old.pause()
+      old.removeAttribute('src')
+      old.load()
+    } else {
+      audio.src = catalog.streamUrl(item.song.id)
+    }
+    standbyUid = -1
     onTransition(item)
   }
   audio.currentTime = startMs / 1000
@@ -269,6 +294,9 @@ export function stop() {
   audio.pause()
   audio.removeAttribute('src')
   audio.load()
+  standby.removeAttribute('src')
+  standby.load()
+  standbyUid = -1
   loadedUid = -1
   setSt({ items: [], order: [], current: -1, isPlaying: false, durationMs: 0 })
   remove('player.queue')
@@ -353,7 +381,12 @@ export function toggleShuffle() {
 /** off -> repeat all -> repeat one -> off */
 export function cycleRepeat() {
   if (locked()) return
-  const repeat: RepeatMode = st().repeat === 'off' ? 'all' : st().repeat === 'all' ? 'one' : 'off'
+  setRepeat(st().repeat === 'off' ? 'all' : st().repeat === 'all' ? 'one' : 'off')
+}
+
+/** Sets repeat to [repeat] (the Mac's Now Playing repeat button asks for a mode, not the next one). */
+export function setRepeat(repeat: RepeatMode) {
+  if (locked()) return
   setSt({ repeat })
   persist()
 }
@@ -374,49 +407,72 @@ export function followState(songs: Song[], index: number, positionMsAt: number, 
   }
 }
 
-// ---- Audio events ----
+// ---- Audio events (from the playing element only) ----
 
-audio.addEventListener('playing', () => setSt({ isPlaying: true, isBuffering: false }))
-audio.addEventListener('play', () => {
-  setSt({ isPlaying: true })
-  const item = currentItem()
-  // Remember songs that actually play, for "recently played" when sharing in a chat.
-  if (item) useRecentSongs.getState().played(songToRef(item.song))
-  notifyPlayback()
-})
-audio.addEventListener('pause', () => {
-  setSt({ isPlaying: false })
-  persist()
-  notifyPlayback()
-})
-audio.addEventListener('waiting', () => setSt({ isBuffering: true }))
-audio.addEventListener('canplay', () => setSt({ isBuffering: false }))
-audio.addEventListener('durationchange', () => {
-  if (Number.isFinite(audio.duration) && audio.duration > 0) setSt({ durationMs: Math.round(audio.duration * 1000) })
-  updatePositionState()
-})
-audio.addEventListener('ended', () => {
+function listen(a: HTMLAudioElement) {
+  a.addEventListener('playing', () => a === audio && setSt({ isPlaying: true, isBuffering: false }))
+  a.addEventListener('play', () => {
+    if (a !== audio) return
+    setSt({ isPlaying: true })
+    const item = currentItem()
+    // Remember songs that actually play, for "recently played" when sharing in a chat.
+    if (item) useRecentSongs.getState().played(songToRef(item.song))
+    notifyPlayback()
+  })
+  a.addEventListener('pause', () => {
+    if (a !== audio) return
+    setSt({ isPlaying: false })
+    persist()
+    notifyPlayback()
+  })
+  a.addEventListener('waiting', () => a === audio && setSt({ isBuffering: true }))
+  a.addEventListener('canplay', () => a === audio && setSt({ isBuffering: false }))
+  a.addEventListener('durationchange', () => {
+    if (a !== audio) return
+    if (Number.isFinite(audio.duration) && audio.duration > 0) setSt({ durationMs: Math.round(audio.duration * 1000) })
+    updatePositionState()
+  })
+  a.addEventListener('ended', () => {
+    if (a !== audio) return
+    const s = st()
+    const item = currentItem()
+    if (s.repeat === 'one') {
+      audio.currentTime = 0
+      void audio.play()
+      return
+    }
+    if (item) reportTransition(item, true)
+    const i = step(1, s.repeat === 'all')
+    if (i != null) load_(i)
+    else setSt({ isPlaying: false })
+  })
+  a.addEventListener('timeupdate', () => {
+    if (a !== audio) return
+    const item = currentItem()
+    // A shared clip pauses once at its end point; pressing play afterwards carries on with the rest.
+    if (item?.clipEndMs && item.uid !== clipStoppedUid && positionMs() >= item.clipEndMs) {
+      clipStoppedUid = item.uid
+      audio.pause()
+    }
+    scrobbleCheck()
+    prepareNext()
+  })
+}
+listen(audio)
+listen(standby)
+
+/** During the last 30 seconds of a song, the standby loads the next one (not for repeat one or a clip). */
+function prepareNext() {
   const s = st()
-  const item = currentItem()
-  if (s.repeat === 'one') {
-    audio.currentTime = 0
-    void audio.play()
-    return
-  }
-  if (item) reportTransition(item, true)
+  const item = currentItem(s)
+  if (!item || item.clipEndMs || s.repeat === 'one' || !s.durationMs || s.durationMs - positionMs() > PRELOAD_LAST_MS) return
   const i = step(1, s.repeat === 'all')
-  if (i != null) load_(i)
-  else setSt({ isPlaying: false })
-})
-audio.addEventListener('timeupdate', () => {
-  const item = currentItem()
-  // A shared clip pauses once at its end point; pressing play afterwards carries on with the rest.
-  if (item?.clipEndMs && item.uid !== clipStoppedUid && positionMs() >= item.clipEndMs) {
-    clipStoppedUid = item.uid
-    audio.pause()
-  }
-  scrobbleCheck()
-})
+  const next = i != null ? s.items[i] : undefined
+  if (!next || next.uid === standbyUid || next.uid === item.uid) return
+  standbyUid = next.uid
+  standby.src = catalog.streamUrl(next.song.id)
+  standby.load()
+}
 
 // ---- Things that happen when the song changes ----
 
@@ -469,6 +525,7 @@ function reportTransition(item: QueueItem, finished: boolean) {
   })
   if (pending.length > 300) pending = pending.slice(-300)
   if (pending.length >= 10) void flushPlays()
+  if (!finished && playedMs < 30_000 && item.source?.startsWith(MIX_SOURCE_PREFIX + 'radio-')) steerStation(item.source, item.song.id)
 }
 
 async function flushPlays() {
@@ -483,6 +540,26 @@ async function flushPlays() {
 }
 setInterval(() => void flushPlays(), 60_000)
 addEventListener('pagehide', () => void flushPlays())
+
+/** Songs skipped in the station that's playing, so its next songs are less like them. */
+let stationSkips: { source: string; ids: string[] } = { source: '', ids: [] }
+
+/**
+ * A song of a station was skipped: the station keeps its next 2 songs and drops the rest, then asks for new
+ * ones that are less like what was skipped (the way a station steers as you listen).
+ */
+function steerStation(source: string, songId: string) {
+  if (stationSkips.source !== source) stationSkips = { source, ids: [] }
+  stationSkips.ids = [...stationSkips.ids, songId].slice(-50)
+  const s = st()
+  if (currentItem(s)?.source !== source) return
+  const pos = s.order.indexOf(s.current)
+  let kept = 0
+  const after = s.order.slice(pos + 1).filter((i) => s.items[i].source !== source || kept++ < 2)
+  if (after.length === s.order.length - pos - 1) return
+  setSt({ order: [...s.order.slice(0, pos + 1), ...after] })
+  afterChange()
+}
 
 /**
  * Keeps a station (a mix whose endless is set) playing forever: when fewer than 5 of its songs are
@@ -500,8 +577,9 @@ function topUpStation() {
   fetchingStation = true
   const stationId = source.slice(MIX_SOURCE_PREFIX.length)
   const queued = s.items.map((i) => i.song.id)
+  const skipped = stationSkips.source === source ? stationSkips.ids : []
   social
-    .radio(stationId, queued.slice(-500), 20)
+    .radio(stationId, queued.slice(-500), 20, skipped)
     .then((more) => {
       // Still the same station? (You may have started something else meanwhile.)
       if (currentItem()?.source === source) insert(toItems(more.songs.map((m) => ({ ...m })), source), false)
@@ -623,6 +701,73 @@ if (ms) {
   } catch {
     // Not every browser has these.
   }
+}
+
+// ---- The Mac app: macOS Now Playing, and pausing when the headphones go ----
+//
+// The Mac app's web view doesn't tell macOS what's playing (Control Center, media keys, AirPods, Boring Notch
+// read Now Playing), so the app does it (desktop/src-tauri/src/main.rs): the page sends the song and its state,
+// and Now Playing's buttons, and "the output went away", come back as window.__jukeboxMedia(action, value).
+
+type TauriInternals = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> }
+const macApp = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__
+
+function tellMacApp() {
+  if (!macApp) return
+  const s = st()
+  const item = currentItem(s)
+  if (!item) {
+    void macApp.invoke('media_clear').catch(() => {})
+    return
+  }
+  const cover = subsonic.coverUrl(item.song.coverArt, 600)
+  void macApp.invoke('media_update', {
+    title: item.song.title,
+    artist: item.song.artist ?? '',
+    album: item.song.album ?? '',
+    cover: cover ? new URL(cover, location.href).href : null,
+    durationMs: Math.round(s.durationMs || item.song.duration * 1000),
+    positionMs: Math.round(audio.currentTime * 1000),
+    playing: s.isPlaying,
+    repeat: s.repeat,
+  }).catch(() => {})
+}
+
+if (macApp) {
+  // A new song, playing or paused, its length known: tell macOS (it moves the time along by itself while playing).
+  usePlayer.subscribe((s, before) => {
+    if (s.current !== before.current || s.isPlaying !== before.isPlaying || s.durationMs !== before.durationMs || s.items !== before.items || s.repeat !== before.repeat) tellMacApp()
+  })
+  onSeek(tellMacApp)
+  ;(window as unknown as { __jukeboxMedia?: (action: string, value?: number) => void }).__jukeboxMedia = (action, value) => {
+    switch (action) {
+      case 'play': if (!st().isPlaying) togglePlay(); break
+      case 'pause': if (st().isPlaying) togglePlay(); break
+      case 'toggle': togglePlay(); break
+      case 'next': next(); break
+      case 'previous': previous(); break
+      case 'seekto': if (value != null) seekTo(value * 1000); break
+      case 'seekby': if (value != null) seekTo(Math.max(0, positionMs() + value * 1000)); break
+      // The headphones or speaker it was playing through went away.
+      case 'outputgone': if (st().isPlaying) pause(); break
+      // Now Playing's repeat button: 0 off, 1 this song, 2 the queue.
+      case 'repeat': setRepeat(value === 1 ? 'one' : value === 2 ? 'all' : 'off'); break
+    }
+  }
+}
+
+// In a browser: like a phone, pause when the headphones or speaker it was playing through go away (Bluetooth
+// out of range, unplugged): an audio output disappears while playing. Connecting one doesn't pause.
+if (!macApp && navigator.mediaDevices?.enumerateDevices) {
+  const outputs = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput').length
+  let known = -1
+  void outputs().then((n) => (known = n)).catch(() => {})
+  navigator.mediaDevices.addEventListener?.('devicechange', () => {
+    void outputs().then((n) => {
+      if (known >= 0 && n < known && st().isPlaying) pause()
+      known = n
+    }).catch(() => {})
+  })
 }
 
 /** The queue in play order, with each entry's position, and the current position. */

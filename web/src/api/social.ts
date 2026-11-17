@@ -1,11 +1,21 @@
 import type {
-  CatalogResults, HomeMixes, LibrarySearchResults, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist,
+  CatalogResults, HomeMixes, ImportedTrack, ImportItem, ImportPreview, LibrarySearchResults, MissingSong, Mix, MixSong, MusicRequest, PersonPage, PlayEvent, Playlist, PlaylistMissing, QueuedRequest,
   SessionResponse, SocialUser, SongRef,
 } from './types'
 import type {
   AddFriendResponse, AdminAccess, BugReport, ChatMessage, Conversation, Friend, FriendRequests, Invite,
-  ListeningStats, PushConfig,
+  ListeningStats, PushConfig, ResumePoint,
 } from './socialTypes'
+import type { ActivityItem } from '../state/history'
+import type { Album } from './types'
+
+/** A list of albums from the music site (Feeds.kt), in the site's order. */
+export interface Feed {
+  id: string
+  title: string
+  changedAt: number
+  albums: Album[]
+}
 import { session, type Credentials } from '../state/session'
 
 // HTTP calls to the server's friends API: accounts, invites, friends, chat, mixes and search, at the
@@ -80,6 +90,16 @@ export const social = {
   /** Sets your profile picture (a JPEG already cropped and shrunk). Returns you, with its new version. */
   setAvatar: (jpeg: Blob) => send<SocialUser>('PUT', '/me/avatar', undefined, { bytes: jpeg }),
   removeAvatar: () => send<SocialUser>('DELETE', '/me/avatar'),
+  /** Home's lists from the music site the library is kept up to date from (Trending, Latest): the albums of them the library has. */
+  feeds: () => get<Feed[]>('/feeds'),
+  // Recently played and Resume, the same on all your devices (Recents.kt).
+  recents: () => get<ActivityItem[]>('/me/recents'),
+  recentPlayed: (item: Omit<ActivityItem, 'playedAt'>) => post<void>('/me/recents', item),
+  forgetRecent: (kind: string, id: string) => send<void>('DELETE', `/me/recents/${enc(kind)}/${enc(id)}`),
+  clearRecents: () => send<void>('DELETE', '/me/recents'),
+  /** Every place you can resume from, on any of your devices, newest first. */
+  resumePoints: () => get<ResumePoint[]>('/me/resume'),
+  saveResumePoint: (point: Omit<ResumePoint, 'savedAt'>) => send<void>('PUT', '/me/resume', point),
   avatarPath: (u: SocialUser) => (u.avatar != null ? `/users/${u.id}/avatar?v=${u.avatar}` : undefined),
 
   setGroupPicture: (conversationId: number, jpeg: Blob) =>
@@ -108,17 +128,32 @@ export const social = {
     ids.length ? get<Record<string, number>>(`/likes/playlists/counts?ids=${ids.map(enc).join(',')}`) : Promise.resolve({}),
 
   // Mixes, playlists and stations by Jukebox.
-  mixes: () => get<HomeMixes>('/mixes'),
+  mixes: () => get<HomeMixes>(`/mixes?tz=${enc(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
   mix: (id: string) => get<Mix>(`/mixes/${enc(id)}`),
   followedMixes: () => get<Mix[]>('/mixes/followed'),
   followMix: (id: string) => send<void>('PUT', `/mixes/${enc(id)}/follow`, ''),
   unfollowMix: (id: string) => send<void>('DELETE', `/mixes/${enc(id)}/follow`),
   /** The next songs of a station, leaving out exclude (what it already played). */
-  radio: (id: string, exclude: string[], count = 25) => post<Mix>('/mixes/radio', { id, exclude, count }),
+  /** The next songs of a station: none of [exclude] (played or queued), and less like [skipped] (skipped while it played). */
+  radio: (id: string, exclude: string[], count = 25, skipped: string[] = []) => post<Mix>('/mixes/radio', { id, exclude, count, skipped }),
   /** Songs that would fit a playlist made of songIds; page 1, 2... for more. */
   recommend: (songIds: string[], count = 10, page = 0) => post<MixSong[]>('/mixes/recommend', { songIds, count, page }),
   /** What was played and skipped, so mixes can learn. */
   recordPlays: (events: PlayEvent[]) => post<void>('/plays', { events }),
+
+  // Importing playlists from other services or files.
+  importPreview: (o: { url?: string; text?: string; name?: string }) => post<ImportPreview>('/imports/preview', o),
+  importCreate: (name: string, items: ImportItem[], requestAll = false) =>
+    post<{ playlistId: string; songCount: number; missingCount: number }>('/imports', { name, items, requestAll }),
+  /** Asks for a song of an import being checked: it waits in the server's request queue. */
+  importRequest: (t: ImportedTrack) => post<QueuedRequest>('/imports/request', { ...t, artist: t.artists[0] }),
+
+  /** A playlist's songs the library doesn't have (kept from an import); ones that arrived are filled in first. */
+  playlistMissing: (id: string) => get<PlaylistMissing>(`/playlists/${enc(id)}/missing`),
+  requestMissing: (id: string, missingId: number) => post<MissingSong>(`/playlists/${enc(id)}/missing/${missingId}/request`),
+  /** Queues every missing song not requested yet; the server requests them at the pace the catalog allows. */
+  requestAllMissing: (id: string) => post<PlaylistMissing>(`/playlists/${enc(id)}/missing/request-all`),
+  removeMissing: (id: string, missingId: number) => send<void>('DELETE', `/playlists/${enc(id)}/missing/${missingId}`),
 
   /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
   search: (q: string) => get<LibrarySearchResults>(`/search?q=${enc(q)}`),
@@ -129,8 +164,18 @@ export const social = {
   requestMusic: (catalogId: string) => post<MusicRequest>('/requests', { id: catalogId }),
   cancelMusicRequest: (id: number) => send<void>('DELETE', `/requests/${id}`),
   allMusicRequests: () => get<MusicRequest[]>('/admin/requests'),
-  completeMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/done`),
+  /** "Added": with an album (and song), closes it with that one, or points a closed request at the right album. */
+  completeMusicRequest: (id: number, albumId?: string, songId?: string) =>
+    post<MusicRequest>(`/admin/requests/${id}/done`, albumId ? { albumId, songId } : undefined),
+  /** Where a download waiting for a check goes: an album in the library, or (null) a new album. */
+  setReviewDestination: (id: number, albumId: string | null) => post<MusicRequest>(`/admin/requests/${id}/destination`, { albumId }),
+  /** A wrongly closed request waits again (nobody is told). */
+  reopenMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/reopen`),
   declineMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/decline`, { note }),
+  approveMusicRequest: (id: number) => post<MusicRequest>(`/admin/requests/${id}/approve`),
+  rejectMusicRequest: (id: number, note: string | null) => post<MusicRequest>(`/admin/requests/${id}/reject`, { note }),
+  /** A downloaded track to listen to before approving (an <audio> can't send headers, so the token rides along). */
+  reviewStreamUrl: (id: number, n: number) => `${SOCIAL_BASE}/admin/requests/${id}/review/${n}/stream?token=${enc(session().social?.token ?? '')}`,
 
   /** Sends a bug report or a feature request; the server turns it into a public GitHub issue. */
   sendFeedback: (kind: 'bug' | 'feature', title: string, description: string, deviceInfo: string | null) =>
@@ -213,11 +258,15 @@ export const social = {
     post<ChatMessage>(`/conversations/${conversationId}/listen/requests/${messageId}`, { accept }),
 
   /** WebSocket address for live events. */
-  eventsUrl: () => {
+  eventsUrl: (deviceId?: string, deviceName?: string, clientType?: string) => {
     const token = session().social?.token
     if (!token) return undefined
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${location.host}${SOCIAL_BASE}/ws?token=${enc(token)}`
+    let url = `${proto}//${location.host}${SOCIAL_BASE}/ws?token=${enc(token)}`
+    if (deviceId) url += `&device_id=${enc(deviceId)}`
+    if (deviceName) url += `&device_name=${enc(deviceName)}`
+    if (clientType) url += `&client_type=${enc(clientType)}`
+    return url
   },
 
   /** This server's Firebase settings for push notifications, or null if it has none. */

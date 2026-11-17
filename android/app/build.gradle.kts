@@ -18,8 +18,8 @@ android {
         applicationId = "io.github.devasenan134.isaipetti"
         minSdk = 26
         targetSdk = 36
-        versionCode = 45
-        versionName = "0.12.1"
+        versionCode = 80
+        versionName = "2.7.0"
 
         // Where the app looks for new versions (GitHub Releases).
         buildConfigField("String", "GITHUB_REPO", "\"${privateSetting("ISAIPETTI_GITHUB_REPO") ?: "devasenan134/jukebox"}\"")
@@ -45,6 +45,8 @@ android {
         release {
             manifestPlaceholders["cleartext"] = "false"
             // Every release must be signed with the same key, or phones refuse the update.
+            // Never fall back to the debug key: an APK signed with it can't update installed apps (Android refuses
+            // a different signature), and the in-app updater would offer it to everyone. No keystore, no signed release.
             signingConfig = signingConfigs.findByName("release")
         }
     }

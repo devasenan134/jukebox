@@ -71,27 +71,110 @@ class SocialApi(
     suspend fun unlikePlaylist(id: String) = send<Unit>("DELETE", "/likes/playlists/${java.net.URLEncoder.encode(id, "UTF-8")}", null)
 
     // Mixes, playlists and stations by Isai Pettai.
-    suspend fun mixes(): HomeMixes = get("/mixes")
+    /** Sends the phone's time zone, for the daylist and the days mixes change on. */
+    /** Home's lists from the music site (Trending, Latest): the albums of them the library has. */
+    suspend fun feeds(): List<Feed> = get("/feeds")
+
+    suspend fun mixes(): HomeMixes = get("/mixes?tz=${enc(java.time.ZoneId.systemDefault().id)}")
     suspend fun mix(id: String): Mix = get("/mixes/${enc(id)}")
 
     /** Search that forgives spelling, over songs, movies, artists, composers, lyricists and actors. */
     suspend fun search(query: String): LibrarySearchResults = get("/search?q=${enc(query)}")
     suspend fun person(id: String): PersonPage = get("/search/people/${enc(id)}")
+
+    // Jukebox API v2: Native Catalog Endpoints
+    suspend fun albumsV2(
+        sort: String = "name",
+        kind: String? = null,
+        fromYear: Int? = null,
+        toYear: Int? = null,
+        offset: Int = 0,
+        limit: Int = 50,
+    ): AlbumsResponse {
+        val q = buildString {
+            append("?sort=${enc(sort)}")
+            if (kind != null) append("&kind=${enc(kind)}")
+            if (fromYear != null) append("&fromYear=$fromYear")
+            if (toYear != null) append("&toYear=$toYear")
+            append("&offset=$offset&limit=$limit")
+        }
+        return get("/api/v2/albums$q")
+    }
+
+    suspend fun albumV2(id: String): AlbumDetailDto = get("/api/v2/albums/${enc(id)}")
+
+    suspend fun peopleV2(
+        role: String = "all",
+        query: String? = null,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): PeopleResponse {
+        val q = buildString {
+            append("?role=${enc(role)}")
+            if (query != null) append("&q=${enc(query)}")
+            append("&offset=$offset&limit=$limit")
+        }
+        return get("/api/v2/people$q")
+    }
+
+    suspend fun personV2(id: String): PersonDetailDto = get("/api/v2/people/${enc(id)}")
+
+    suspend fun songV2(id: String): SongDetailDto = get("/api/v2/songs/${enc(id)}")
+
+    suspend fun searchLyricsV2(query: String, limit: Int = 30): LyricsSearchResponse =
+        get("/api/v2/search/lyrics?q=${enc(query)}&limit=$limit")
+
+    suspend fun searchUnifiedV2(query: String): UnifiedSearchResponse =
+        get("/api/v2/search?q=${enc(query)}")
     /** Songs and movies from the music catalog that aren't in the library, to ask for. */
     suspend fun catalog(query: String): CatalogResults = get("/search/catalog?q=${enc(query)}")
     /** Your requests for music, waiting ones first. */
     suspend fun musicRequests(): List<MusicRequest> = get("/requests")
     suspend fun requestMusic(catalogId: String): MusicRequest = post("/requests", CatalogIdBody(catalogId))
+
+    /** Reads a playlist link (Spotify, Apple Music, YouTube) or an exported file's text, and finds its songs in the library. */
+    suspend fun importPreview(url: String? = null, text: String? = null, name: String? = null): ImportPreview =
+        post("/imports/preview", ImportPreviewBody(url, text, name))
+    /** Saves an imported playlist with these songs (in this order): the library's, and ones it doesn't have to keep greyed out. */
+    suspend fun importCreate(name: String, items: List<ImportItem>, requestAll: Boolean = false): ImportCreated =
+        post("/imports", ImportCreateBody(name, items, requestAll))
+    /** A playlist's songs the library doesn't have (kept from an import); ones that arrived are filled in first. */
+    suspend fun playlistMissing(id: String): PlaylistMissing = get("/playlists/${enc(id)}/missing")
+    suspend fun requestMissing(id: String, missingId: Long): MissingSong = post("/playlists/${enc(id)}/missing/$missingId/request", Unit)
+    /** Queues every missing song not requested yet; the server requests them shortly (an album's songs as the album). */
+    suspend fun requestAllMissing(id: String): PlaylistMissing = post("/playlists/${enc(id)}/missing/request-all", Unit)
+    suspend fun removeMissing(id: String, missingId: Long) = send<Unit>("DELETE", "/playlists/${enc(id)}/missing/$missingId", null)
+    /** Requests a song of an imported playlist that isn't in the library. */
+    suspend fun importRequest(track: ImportedTrack): QueuedRequest =
+        post("/imports/request", ImportRequestBody(track.title, track.artists.firstOrNull(), track.album, track.catalogId, track.artists, track.durationMs, track.isrc))
     suspend fun cancelMusicRequest(id: Long) = send<Unit>("DELETE", "/requests/$id", null)
     /** Admins: everyone's requests, and answering them (done means it's in the library now). */
     suspend fun allMusicRequests(): List<MusicRequest> = get("/admin/requests")
-    suspend fun completeMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/done", Unit)
+    /** "Added": with an album (and song), closes it with that one, or points a closed request at the right album. */
+    suspend fun completeMusicRequest(id: Long, albumId: String? = null, songId: String? = null): MusicRequest =
+        if (albumId == null) post("/admin/requests/$id/done", Unit) else post("/admin/requests/$id/done", AlbumBody(albumId, songId))
+
+    /** Where a download waiting for a check goes: an album in the library, or (null) a new album. */
+    suspend fun setReviewDestination(id: Long, albumId: String?): MusicRequest = post("/admin/requests/$id/destination", DestinationBody(albumId))
+    /** A wrongly closed request waits again (nobody is told). */
+    suspend fun reopenMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/reopen", Unit)
     suspend fun declineMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/decline", NoteBody(note))
+    suspend fun approveMusicRequest(id: Long): MusicRequest = post("/admin/requests/$id/approve", Unit)
+    suspend fun rejectMusicRequest(id: Long, note: String?): MusicRequest = post("/admin/requests/$id/reject", NoteBody(note))
+
+    /** A downloaded track to listen to before approving: its address and the sign-in header. */
+    fun reviewStream(id: Long, n: Int): Pair<String, Map<String, String>>? {
+        val base = baseUrl() ?: return null
+        val token = token() ?: return null
+        return "$base/admin/requests/$id/review/$n/stream" to mapOf("Authorization" to "Bearer $token")
+    }
     suspend fun followedMixes(): List<Mix> = get("/mixes/followed")
     suspend fun followMix(id: String) = send<Unit>("PUT", "/mixes/${enc(id)}/follow", "")
     suspend fun unfollowMix(id: String) = send<Unit>("DELETE", "/mixes/${enc(id)}/follow", null)
     /** The next songs of a station, leaving out [exclude] (what it already played). */
-    suspend fun radio(id: String, exclude: List<String>, count: Int = 25): Mix = post("/mixes/radio", RadioBody(id, exclude, count))
+    /** The next songs of a station: none of [exclude] (played or queued), and less like [skipped] (skipped while it played). */
+    suspend fun radio(id: String, exclude: List<String>, count: Int = 25, skipped: List<String> = emptyList()): Mix =
+        post("/mixes/radio", RadioBody(id, exclude, count, skipped))
     /** Songs that would fit a playlist made of [songIds]; [page] 1, 2... for more. */
     suspend fun recommend(songIds: List<String>, count: Int = 10, page: Int = 0): List<MixSong> =
         post("/mixes/recommend", RecommendBody(songIds, count, page))
@@ -218,7 +301,29 @@ class SocialApi(
         post<ReadBody, Unit>("/conversations/$conversationId/read", ReadBody(messageId))
 
     /** WebSocket address for live events. */
-    fun eventsUrl(): String? = token()?.let { t -> baseUrl()?.let { it.replaceFirst("http", "ws") + "/ws?token=$t" } }
+    fun eventsUrl(deviceId: String? = null, deviceName: String? = null, clientType: String? = "android"): String? =
+        token()?.let { t ->
+            baseUrl()?.let { base ->
+                val ws = base.replaceFirst("http", "ws") + "/ws?token=$t"
+                val extra = buildString {
+                    if (deviceId != null) append("&device_id=${enc(deviceId)}")
+                    if (deviceName != null) append("&device_name=${enc(deviceName)}")
+                    if (clientType != null) append("&client_type=${enc(clientType)}")
+                }
+                ws + extra
+            }
+        }
+
+    // Recently played and Resume, the same on all your devices (Recents.kt on the server).
+    suspend fun recents(): List<RecentActivity.Item> = get("/me/recents")
+    suspend fun recentPlayed(item: RecentActivity.Item) =
+        send<Unit>("POST", "/me/recents", json.encodeToString(RecentActivity.Item.serializer(), item))
+    suspend fun forgetRecent(kind: String, id: String) = send<Unit>("DELETE", "/me/recents/${enc(kind)}/${enc(id)}", null)
+    suspend fun clearRecents() = send<Unit>("DELETE", "/me/recents", null)
+    /** Every place you can resume from, on any of your devices, newest first. */
+    suspend fun resumePoints(): List<QueueMemory.Saved> = get("/me/resume")
+    suspend fun saveResumePoint(source: String, songIds: List<String>, currentId: String) =
+        send<Unit>("PUT", "/me/resume", json.encodeToString(ResumeBody.serializer(), ResumeBody(source, songIds, currentId)))
 
     /** This server's Firebase settings for push notifications, or null if it has none. */
     suspend fun pushConfig(): PushConfig? = try {
@@ -280,13 +385,22 @@ class SocialApi(
     @Serializable private data class RenameBody(val displayName: String)
     @Serializable private data class DeviceBody(val token: String)
     @Serializable private data class PlaylistBody(val id: String, val name: String = "", val coverArt: String? = null, val songCount: Int = 0)
-    @Serializable private data class RadioBody(val id: String, val exclude: List<String>, val count: Int)
+    @Serializable private data class ResumeBody(val source: String, val songIds: List<String>, val currentId: String)
+    @Serializable private data class RadioBody(val id: String, val exclude: List<String>, val count: Int, val skipped: List<String> = emptyList())
     @Serializable private data class RecommendBody(val songIds: List<String>, val count: Int, val page: Int)
     @Serializable private data class PlaysBody(val events: List<PlayEvent>)
     @Serializable private data class FeedbackBody(val title: String, val description: String, val deviceInfo: String?, val kind: String)
 
     @Serializable private data class CatalogIdBody(val id: String)
+    @Serializable private data class ImportPreviewBody(val url: String?, val text: String?, val name: String?)
+    @Serializable private data class ImportCreateBody(val name: String, val items: List<ImportItem>, val requestAll: Boolean)
+    @Serializable private data class ImportRequestBody(
+        val title: String, val artist: String?, val album: String?, val catalogId: String?,
+        val artists: List<String>, val durationMs: Long?, val isrc: String?,
+    )
     @Serializable private data class NoteBody(val note: String?)
+    @Serializable private data class AlbumBody(val albumId: String, val songId: String? = null)
+    @Serializable private data class DestinationBody(val albumId: String?)
     @Serializable private data class SongRequestBody(val song: SongRef, val mode: String)
     @Serializable private data class SongRequestAnswer(val accept: Boolean)
 }

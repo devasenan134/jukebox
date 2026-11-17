@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import type { Playlist, Song } from '../api/types'
+import type { MissingSong, Playlist, PlaylistMissing, Song } from '../api/types'
 import { mixSongToSong, mixSource, MIX_AUTHOR } from '../api/types'
 import { social } from '../api/social'
 import { subsonic } from '../api/subsonic'
@@ -9,9 +9,10 @@ import { activity, useRecentPlaylists } from '../state/history'
 import { useMixes, useMyPlaylists } from '../state/library'
 import { likes, useLikes } from '../state/likes'
 import { useSession } from '../state/session'
-import { Cover, formatTotalDuration, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { Cover, formatDuration, formatTotalDuration, likeCount, LikeButton, PlayShuffleRow, songCount, SongRow, useLoad } from '../ui/components'
+import { usePhotoPicker } from '../ui/PhotoPicker'
 import { Collection, Meta, PageSkeleton, TrackHead } from '../ui/collection'
-import { Dialog, ErrorBox, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
+import { Dialog, ErrorBox, Icon, IconButton, MoreMenu, NameDialog, toast } from '../ui/kit'
 import { LikedTile, madeForName, MixCover, mixTint, updatedText } from '../ui/mixes'
 import { useNav } from '../ui/nav'
 import { keys, playlistChanged } from '../state/queries'
@@ -34,12 +35,12 @@ export function LikedSongsScreen() {
   return (
     <Collection
       art={<div className="art"><LikedTile size={240} fill /></div>}
-      tint="hsl(250 45% 38%)"
+      tint="hsl(30 70% 34%)"
       kind="Playlist"
       title="Liked songs"
       meta={<Meta parts={[name && <b>{name}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />}
     >
-      {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} />}
+      {songs.length > 0 && <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)} resume={{ source: 'liked', songs, onResume: () => activity.liked() }} />}
       {songs.length === 0 && <div className="muted" style={{ padding: 24 }}>Songs you like show up here. Tap ♡ in the player, or Like in a song's menu.</div>}
       <div className="tracks">
         {songs.length > 0 && <TrackHead />}
@@ -61,6 +62,47 @@ export function PlaylistScreen() {
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [editing, setEditing] = useState<Song[] | null>(null)
+  // Songs it should have that the library doesn't (kept from an import), greyed out in their place.
+  const missing = useLoad<PlaylistMissing>(['playlist-missing', id], () => social.playlistMissing(id).catch(() => ({ songs: [], filled: 0 })))
+  const gaps = missing.data?.songs ?? []
+  // Some arrived and became songs of the playlist: show them.
+  const filled = missing.data?.filled ?? 0
+  useEffect(() => {
+    if (!filled) return
+    void subsonic.playlist(id).then((p) => {
+      data.set(p)
+      playlistChanged()
+      useMyPlaylists.getState().refresh()
+    })
+    toast(filled === 1 ? 'A song you were waiting for is in this playlist now' : `${filled} songs you were waiting for are in this playlist now`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filled, id])
+  const mineNow = data.data != null && data.data.owner === username
+  const [requestingAll, setRequestingAll] = useState(false)
+  // While some wait in the server's queue to be requested, look again now and then.
+  const waiting = (missing.data?.songs ?? []).some((m) => m.queued)
+  useEffect(() => {
+    if (!waiting) return
+    const t = setInterval(() => missing.retry(), 10_000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting, id])
+  // How many friends liked a playlist you made (your own like doesn't count).
+  const likeTotal = useLoad<Record<string, number>>(['playlist-likes', id, mineNow], () => (mineNow ? social.playlistLikeCounts([id]) : Promise.resolve({})), 30_000).data?.[id] ?? 0
+  const cover = usePhotoPicker({
+    title: 'Playlist cover',
+    onPicked: async (jpeg) => {
+      try {
+        await social.setPlaylistCover(id, jpeg)
+        data.set(await subsonic.playlist(id))
+        playlistChanged()
+        useMyPlaylists.getState().refresh()
+        toast('Cover changed')
+      } catch (e) {
+        toast((e as Error).message || "Couldn't change the cover")
+      }
+    },
+  })
 
   if (data.loading && !data.data) return <PageSkeleton />
   if (data.error) return <ErrorBox message={data.error} onRetry={data.retry} />
@@ -78,6 +120,7 @@ export function PlaylistScreen() {
     try {
       await what()
       data.set(await subsonic.playlist(id))
+      missing.retry()
       playlistChanged()
       useMyPlaylists.getState().refresh()
       if (done) toast(done)
@@ -86,6 +129,30 @@ export function PlaylistScreen() {
     }
   }
   const remove = (index: number) => change(() => subsonic.updatePlaylist(id, { removeIndexes: [index] }), 'Removed from this playlist')
+  const requestMissing = async (m: MissingSong) => {
+    try {
+      const asked = await social.requestMissing(id, m.id)
+      missing.set({ songs: gaps.map((g) => (g.id === m.id ? asked : g)), filled: 0 })
+      toast(asked.queued || asked.request ? 'Requested. It joins the playlist when it arrives' : asked.note || 'Done')
+    } catch (e) {
+      toast((e as Error).message || "Couldn't request it", true)
+    }
+  }
+  const toRequest = gaps.filter((m) => !m.queued && (!m.request || m.request.status === 'declined'))
+  const requestAll = async () => {
+    setRequestingAll(true)
+    try {
+      missing.set(await social.requestAllMissing(id))
+      toast(`Requested ${toRequest.length === 1 ? 'it' : `${toRequest.length} songs`}. They join the playlist when they arrive`)
+    } catch (e) {
+      toast((e as Error).message || "Couldn't request them", true)
+    }
+    setRequestingAll(false)
+  }
+  const removeMissing = (m: MissingSong) => change(() => social.removeMissing(id, m.id), 'Removed from this playlist')
+  const missingRow = (m: MissingSong) => (
+    <MissingRow key={`missing-${m.id}`} song={m} onRequest={() => requestMissing(m)} onRemove={mine ? () => void removeMissing(m) : undefined} />
+  )
   const saveOrder = (list: Song[]) => {
     setEditing(null)
     void change(() => subsonic.replacePlaylist(id, list.map((s) => s.id)), 'Saved')
@@ -96,6 +163,11 @@ export function PlaylistScreen() {
       items={[
         { label: 'Edit songs', onClick: () => setEditing(songs), hidden: songs.length === 0 },
         { label: 'Rename', onClick: () => setRenaming(true) },
+        { label: 'Change cover', onClick: () => cover.open() },
+        {
+          label: 'Use the automatic cover', hidden: !playlist.coverArt?.startsWith('pl-'),
+          onClick: () => void change(() => social.removePlaylistCover(id), 'Back to the automatic cover'),
+        },
         {
           label: playlist.public ? 'Make private' : 'Make public',
           onClick: () => void change(() => subsonic.updatePlaylist(id, { public: !playlist.public }), playlist.public ? 'Only you can see it now' : 'Your friends can find it now'),
@@ -112,7 +184,7 @@ export function PlaylistScreen() {
       meta={
         <>
           {playlist.comment && <div style={{ width: '100%', marginBottom: 4 }}>{playlist.comment}</div>}
-          <Meta parts={[playlist.owner && <b>{playlist.owner}</b>, songCount(songs.length), songs.length > 0 && total(songs)]} />
+          <Meta parts={[mine ? <b>By you</b> : playlist.owner && <b>{playlist.owner}</b>, mine && likeCount(likeTotal), songCount(songs.length), songs.length > 0 && total(songs), gaps.length > 0 && `${gaps.length} not in the library`]} />
         </>
       }
     >
@@ -121,19 +193,30 @@ export function PlaylistScreen() {
       ) : (
         <>
           {songs.length > 0 ? (
-            <PlayShuffleRow onPlay={() => play(0)} onShuffle={() => play(0, true)}>
+            <PlayShuffleRow
+              onPlay={() => play(0)}
+              onShuffle={() => play(0, true)}
+              resume={{ source: `playlist:${playlist.id}`, songs, onResume: () => { activity.playlist(playlist); useRecentPlaylists.getState().played(playlist) } }}
+            >
               {!mine && <LikeButton liked={liked} onToggle={() => likes().togglePlaylist(playlist)} big />}
               {menu}
             </PlayShuffleRow>
           ) : (
             <div className="hero-bar">
               {menu}
-              <span className="muted">{mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
+              <span className="muted">{gaps.length ? 'None of its songs are in the library yet.' : mine ? 'Nothing here yet. Add songs with "Add to playlist" in any song\'s menu.' : 'This playlist is empty.'}</span>
+            </div>
+          )}
+          {toRequest.length > 0 && (
+            <div className="body-medium muted" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px 12px', flexWrap: 'wrap' }}>
+              {toRequest.length === 1 ? "1 song isn't requested yet." : `${toRequest.length} songs aren't requested yet.`}
+              <button className="btn tonal small" disabled={requestingAll} onClick={() => void requestAll()}>Request all</button>
             </div>
           )}
           <div className="tracks">
-            {songs.length > 0 && <TrackHead />}
-            {songs.map((s, i) => (
+            {(songs.length > 0 || gaps.length > 0) && <TrackHead />}
+            {songs.map((s, i) => [
+              ...gaps.filter((m) => m.before === i).map(missingRow),
               <SongRow
                 key={`${s.id}-${i}`}
                 song={s}
@@ -143,11 +226,14 @@ export function PlaylistScreen() {
                 onClick={() => play(i)}
                 onRemoveFromPlaylist={mine ? () => void remove(i) : undefined}
                 inOwnPlaylist={mine ? playlist.name : undefined}
-              />
-            ))}
+              />,
+            ])}
+            {gaps.filter((m) => m.before >= songs.length).map(missingRow)}
           </div>
+          {mine && <RecommendedSongs playlist={playlist} onAdded={() => void change(async () => {})} />}
         </>
       )}
+      {cover.element}
       {renaming && (
         <NameDialog
           title="Rename playlist"
@@ -162,6 +248,41 @@ export function PlaylistScreen() {
       )}
       {deleting && <DeleteDialog playlist={playlist} onClose={() => setDeleting(false)} onDeleted={() => nav.back()} />}
     </Collection>
+  )
+}
+
+/** A song of the playlist the library doesn't have: greyed out, with Request (and Remove, on your own playlist). */
+function MissingRow({ song, onRequest, onRemove }: { song: MissingSong; onRequest: () => Promise<void>; onRemove?: () => void }) {
+  const t = song.track
+  const r = song.request
+  const [busy, setBusy] = useState(false)
+  const status = song.queued ? 'Queued'
+    : !r ? null
+    : r.status === 'open' ? (r.stage === 'review' || r.stage === 'approved' ? 'On its way' : 'Requested')
+      : r.status === 'done' ? 'Arriving soon'
+        : null // declined: it can be asked for again
+  return (
+    <div className="song-row missing" title="Not in the library">
+      <div className="num body-medium"><Icon name="music_off" size={18} /></div>
+      <div className="text">
+        <div className="title body-large ellipsis">{t.title}</div>
+        <div className="body-small muted ellipsis">
+          {r?.status === 'declined' ? `Couldn't be found${r.note ? `: ${r.note}` : ''}` : song.note ?? [t.artists.join(', '), 'Not in the library'].filter(Boolean).join(' · ')}
+        </div>
+      </div>
+      <div className="album-col ellipsis">{t.album}</div>
+      <span className="missing-action">
+        {status ? (
+          <span className="body-small primary-text" style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="check" size={16} />{status}</span>
+        ) : (
+          <button className="btn tonal small" disabled={busy} onClick={async () => { setBusy(true); await onRequest(); setBusy(false) }}>
+            {r?.status === 'declined' ? 'Ask again' : 'Request'}
+          </button>
+        )}
+      </span>
+      <span className="dur body-small">{t.durationMs ? formatDuration(t.durationMs / 1000) : ''}</span>
+      {onRemove ? <IconButton icon="close" label="Remove from this playlist" className="row-more missing-action" onClick={onRemove} /> : <span style={{ width: 40 }} />}
+    </div>
   )
 }
 
@@ -228,6 +349,56 @@ function DeleteDialog({ playlist, onClose, onDeleted }: { playlist: Playlist; on
   )
 }
 
+/** Today's songs of a mix as a normal playlist of yours ("By Jukebox" in its description), then opens it. */
+async function saveCopy(title: string, songIds: string[], nav: ReturnType<typeof useNav>) {
+  try {
+    const playlist = await subsonic.createPlaylist(title)
+    const today = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    await subsonic.updatePlaylist(playlist.id, { add: songIds, comment: `By ${MIX_AUTHOR}. ${title} as it was on ${today}.` })
+    playlistChanged()
+    useMyPlaylists.getState().refresh()
+    toast('Saved as a playlist')
+    nav.openPlaylist(playlist.id)
+  } catch (e) {
+    toast((e as Error).message || "Couldn't save it")
+  }
+}
+
+/** Under a playlist you made: songs that would fit it, each with + to add it (Recommendations.kt). */
+function RecommendedSongs({ playlist, onAdded }: { playlist: Playlist; onAdded: () => void }) {
+  const ids = (playlist.entry ?? []).map((s) => s.id)
+  const [page, setPage] = useState(0)
+  const [added, setAdded] = useState<string[]>([])
+  // Nothing shows when the server has no suggestions (or no mixes).
+  const songs = useLoad(['recommend', playlist.id, ids.length, page], () => social.recommend(ids, 10, page)).data?.map(mixSongToSong)
+  if (!songs) return null
+  const add = (s: Song) =>
+    subsonic.updatePlaylist(playlist.id, { add: [s.id] })
+      .then(() => { setAdded((a) => [...a, s.id]); onAdded(); toast(`Added to ${playlist.name}`) })
+      .catch((e) => toast((e as Error).message || "Couldn't add it"))
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="section-title-row" style={{ display: 'flex', alignItems: 'center', padding: '0 8px 0 16px' }}>
+        <h2 className="section-title" style={{ flex: 1, margin: '12px 0 4px' }}>Recommended songs</h2>
+        {ids.length > 0 && <button className="btn text" onClick={() => setPage((p) => (p + 1) % 10)}>Refresh</button>}
+      </div>
+      <div className="body-small muted" style={{ padding: '0 16px 8px' }}>
+        {ids.length ? `By ${MIX_AUTHOR}, based on the songs in this playlist` : `Add a few songs, and ${MIX_AUTHOR} will suggest more like them.`}
+      </div>
+      <div className="tracks">
+        {songs.filter((s) => !added.includes(s.id)).map((s) => (
+          <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SongRow song={s} showCover onClick={() => { activity.song(s); player.play([s]) }} note={[s.artist, s.album].filter(Boolean).join(' · ')} />
+            </div>
+            <IconButton icon="add_circle" label={`Add to ${playlist.name}`} onClick={() => void add(s)} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /** A mix by Jukebox: its cover, what it is, Save to Your Library, and its songs. */
 export function MixScreen() {
   const { id = '' } = useParams()
@@ -260,8 +431,14 @@ export function MixScreen() {
         </>
       }
     >
-      <PlayShuffleRow onPlay={() => play(0)} onShuffle={mix.endless ? undefined : () => play(0, true)}>
+      <PlayShuffleRow
+        onPlay={() => play(0)}
+        onShuffle={mix.endless ? undefined : () => play(0, true)}
+        // Stations go on endlessly, so there's nowhere to resume.
+        resume={mix.endless ? undefined : { source: mixSource(mix), songs, onResume: () => activity.mix(mix) }}
+      >
         <LikeButton liked={followed} onToggle={() => void toggle()} big />
+        {songs.length > 0 && <MoreMenu items={[{ label: 'Save a copy as a playlist', onClick: () => void saveCopy(mix.title, songs.map((s) => s.id), nav) }]} />}
       </PlayShuffleRow>
       <div className="tracks">
         <TrackHead />

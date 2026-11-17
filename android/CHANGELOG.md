@@ -8,12 +8,416 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
-## Unreleased
+## On the Road (2.7.0)
+
+### New
+- **Android Auto.** Jukebox shows up in the car with four tabs: **Home** (Made for you and Your top mixes), **Recent** (what you played, carrying on where you left off), **Stations** (yours, then composer and artist stations) and **Library** (Liked songs, your playlists, saved mixes). A playlist opens its songs with Shuffle on top; search finds songs and albums; and "Hey Google, play Daily Mix 1 on Jukebox" plays that mix (or a playlist by that name, or the songs a search finds).
+  Android Auto only lists apps from the Play Store unless you allow others: in Android Auto's settings, tap **Version** ten times to turn on developer mode, then in the ⋮ menu open **Developer settings** and turn on **Unknown sources**.
+
+## Pick Up Where You Left Off (2.6.1)
+
+### Fixed
+- **Resume is back where you play.** Mixes (Made for you, Your top mixes) now have Resume too, on the phone, the website and the Mac app, so a mix you were halfway through can be picked up again. Stations go on endlessly, so they don't.
 
 ### Improved
+- **Resume on your last 3.** Resume shows on the last three playlists, mixes, movies or Liked songs you played from, on any of your devices (not the one playing now), instead of on everything you ever started.
+
+### Server
+- `GET /me/resume` without `?source=` lists every resume point, newest first (the apps pick the last three).
+
+## Everywhere You Listen (2.6.0)
+
+### New
+- **Recently played, Jump back in and Resume follow you.** What you play on your phone shows on the website and the Mac app (and the other way round), live; Resume on a playlist, movie or Liked songs picks up where you left off on any of your devices; and the turning record in Jump back in shows whatever is playing on whichever device.
+- **Repeat in more places:** the Android mini player, the notification and lock screen, the website's mini player, and on the Mac in Now Playing (Control Center, Boring Notch).
+
+### Improved
+- **Better mixes and stations** (server): songs JioSaavn's listeners play together, how well known each song is, and moods and themes for every song from what's known of it and its lyrics. Mood mixes hold together (no dance numbers in Chill or Sleep), the time-of-day mix fits the hour, and seasons find their songs by theme.
+- **Mac: Check for Updates** also looks where the last good update is always kept, so it no longer fails while a new release is still being made.
+
+### Server
+- Schema 34: `recent_items` and `resume_points` with `GET/POST/DELETE /me/recents`, `GET/PUT /me/resume`, and a `recentsChanged` live event. Schemas 32–33 (JioSaavn links and play counts, song labels) came with the mixes update.
+
+## Lined Up (2.5.4)
+
+### Fixed
+- **Song lists line up.** A song saved in your library or a playlist (the tick) no longer pushes its album and length out of line with the songs around it.
+- **Mac: Check for Updates no longer fails** while a new release's Mac build is still being made (or if one fails): the app now also looks where the last good Mac update is always kept.
+
+## Now Playing on the Mac (2.5.3)
+
+### New
+- **The Mac app shows in macOS Now Playing.** What's playing, with its cover, now appears in Control Center, on the media keys and AirPods, and in apps that read Now Playing like Boring Notch; their play, pause, next, previous and seeking control Jukebox.
+
+### Fixed
+- **Music pauses when your headphones go.** On the Mac app (and the website in a browser), when the Bluetooth headphones or speaker you're listening on disconnect or are unplugged, Jukebox pauses instead of carrying on through the speakers. Switching to another output that's still connected doesn't pause.
+
+## Every Song, Shuffled (2.5.2)
+
+### Fixed
+- **Shuffle plays the whole playlist.** Shuffle on a playlist (or turning shuffle on while one plays) started part-way through the shuffled order, so the songs shuffled before it never played. It now starts with the first song and plays every other song once, in a random order.
+
+## Bigger Labels (2.5.1)
+
+### Improved
+- **The song's cover in the middle of a record is bigger**, so you can tell what's playing at a glance: the spinning record (On Repeat, Top 50, background scores), the turntable (Party, Kuthu, Kollywood Mass, Workout) and Deep Cuts.
+
+## Covers and Stations (2.5.0)
+
+### New
+- **Designed covers for every mix and station.** Each kind of mix has its own look, drawn from what's in it now: Daily Mixes are a record sleeve with the vinyl sliding out and their main artist in two tones; Discover Weekly is a mixtape; the time-of-day mix, seasons and calm moods are a sky with the cover as the sun or moon; Fresh for You pulls covers out of a crate; On Repeat spins; Rewind is a faded polaroid; composer mixes are an LP; Because you played is a 7" single; old decades a reel-to-reel, newer ones a CD; Deep Cuts a record in its paper sleeve; energetic moods a turntable. Stations are an old radio, the artist in the speaker, each on its own frequency.
+- **Stations that follow you.** Your stations come from what you played this week, with your composer of the moment, a Discovery station (songs you haven't heard) and your favourite mood. New mood and decade stations too.
+- **Stations listen to your skips.** Skip a song on a station and it drops what it had queued after the next two and finds songs less like the one you skipped.
+- **"New" on mixes** that just arrived on your Home (or came back after a week away), and on weekly mixes in their first two days.
+- **Admins: how each kind of mix does** in Listening stats: opened, songs played and how many were skipped, over 30 days.
+
+### Improved
+- **Made for you and Your top mixes** are pages of big and wide tiles to swipe through.
+- **The player shows the previous and next covers** peeking in beside the current one.
+- **Composer and artist stations** change every day, and the "This is" rows are gone from Home (composer and singer pages still open them).
+
+### Server
+- `MixArt` on every mix (design, picture, colours, words), `POST /mixes/radio` takes `skipped`, `isNew` on mixes (schema 31: `mix_state.seen_at`, `appeared_at`), `StatsDto.mixes`.
+
+## Fresh Every Day (0.24.0)
+
+### New
+- **Your top mixes.** A new row of 10 mixes made from your listening, a different handful every day: Because you played…, a composer's or singer's mix (theirs and music like theirs), a composer's melodies or mass songs, "2020s A.R. Rahman", a composer with a singer, Deep Cuts (songs you've never played from albums you love), Hidden Gems (albums nobody here has played), and the moods and decades you play most.
+- **A mix for the time of day.** Made for you starts with one named for the moment, like "Tuesday night melodies": what you play around this time and new songs with the same feeling. It changes through the day, by your phone's clock.
+- **Fresh for You.** Songs added to the library that suit you, every Friday.
+- **Seasons.** Rain Songs, Deepavali, Pongal, Christmas and more turn up while it's their time, songs named for the season first.
+
+### Improved
+- **Home is tidier.** Made for you, then what you played lately, then Your top mixes, then Your stations; the rest follows, and no mix shows twice.
+- **Mixes stop repeating themselves.** Songs you were shown and passed over make way for others (and come back after a few weeks, or as soon as you play them). Discover Weekly never repeats the last 8 weeks, and Daily Mixes follow what you've played in the last two weeks.
+
+### Server
+- `GET /mixes?tz=<time zone>`: the app's time zone, remembered per person (until then `MIX_TIMEZONE`). What each person was shown (`suggestion_lists`) now feeds the mixes.
+
+## Requested, Quietly (0.23.0)
+
+### Improved
+- **Request is done when you tap it.** Request and Request all mark the songs Requested right away, with no progress to wait on; the server does the rest in the background.
+- **Admins hear once.** Requests the server makes from the queue stay out of Requests (and away from the fulfil script) until it has gone through everything waiting; then every admin gets one notification ("Alice asked for 18 songs and 2 albums") and they show in Requests.
+
+### Fixed
+- **Check unsure matches** now changes the playlist the way you decide: Not this one takes the song out at once (Skip after it keeps it out), Same song keeps it, decided songs stop saying "Is this the one?", the button counts only the songs still unsure, and a summary says how many were kept and left out.
+
+### Server
+- `music_requests.held` (schema 30): the queue's new requests are held and released together with one `requestsReady` notification to every admin.
+
+## The Request Queue (0.22.0)
+
+### New
+- **Every Request goes to a queue.** Request on a song, Request all, and "Keep and request all" only put songs in the server's queue and answer at once; rows show Queued. The server then takes them one at a time: a song that's in the library now is filled in, a song someone already asked for joins that request, and only the rest are looked up in the music catalog.
+- **Album requests.** When two or more queued songs are from the same album, the album is requested once for all of them, and each song fills in when it arrives.
+- **No limit on requests.** The limit of 20 open requests per person is gone.
+
+### Server
+- `request_queue` (schema 29): each person's songs once (duplicates dropped), worked through in order, waiting quietly when Apple's catalog is out of calls for the minute. `POST /imports/request` answers `{status, note}` and takes the whole song (`artists`, `durationMs`, `isrc`).
+
+## Request All, Queued (0.21.1)
+
+### Improved
+- **Request all goes through a queue.** The music catalog answers only about 20 searches a minute, so requesting many songs at once failed after the first few. Now Request all hands them to the server, which requests them a few a minute; rows show Queued until each is requested, and the playlist updates as it goes. It also waits (instead of failing) when you have too many requests open.
+- **Importing:** a third choice, **Keep and request all**, keeps the missing songs and queues them all when you save.
+- **A busy catalog isn't "not found".** A single Request while the catalog is busy is queued instead, and the reason a song couldn't be requested shows under it.
+
+### Server
+- `POST /playlists/{id}/missing/request-all`, `requestAll` on `POST /imports`, and a background queue for missing songs (schema 28). Catalog searches skipped for the minute's limit answer 503 ("busy") instead of 404.
+
+## Sure Matches (0.21.0)
+
+### New
+- **Check unsure matches.** Importing a playlist, "Check N unsure matches" goes through the songs it wasn't sure of one at a time: the song as Spotify (or Apple Music, YouTube) has it next to the library's guess, which plays for a moment on its own player (your queue is left alone), with a link to hear the original on YouTube. Same song, Not this one (the next guess), or Skip.
+- **Request all.** One button requests every missing song, on the import screen and on a playlist with missing songs; it stops when you have too many requests waiting.
+
+### Fixed
+- **Website:** the icon of a playlist's missing songs showed as text.
+
+## Missing Songs, Kept (0.20.0)
+
+### New
+- **Keep the songs the library doesn't have.** When importing a playlist, the songs that aren't in the library can be left out (as before) or kept in their place, greyed out.
+- **Request from the playlist.** A greyed-out song has Request (Ask again if it couldn't be found) and shows Requested, then On its way. On your own playlist it can be removed.
+- **They fill in by themselves.** When a requested song arrives, or a new song is surely the same one, it becomes a song of the playlist in the place it had. A song you turned down at import is never used for it.
+
+### Server
+- Missing songs are kept apart from a playlist's songs (other players see only real songs), stay before the same song when songs are removed or reordered, and have their own endpoints: `GET /playlists/{id}/missing`, `POST …/missing/{missingId}/request`, `DELETE …/missing/{missingId}`.
+- `POST /imports` takes the songs in order (`items`: a library song, or a missing one with its request); `songIds` still works.
+
+## Songs or Score (0.19.2)
+
+### New
+- **Reopen (admins).** A request closed with the wrong album can be opened again from its Closed row; nobody is told.
+
+### Fixed
+- **Search's "Not in the library"** no longer offers albums that are already there under another name: a background score album filed as its film's score, a re-release with a later year, or a request that was already filled. It still offers a film's songs when the library has only its background score.
+
+### Server
+- Requests filled from masstamilan go to their own folder per language (`tamil/masstamilan`, `malayalam/masstamilan`, …), and a song for an album JioSaavn already has still joins that album.
+- Background score and songs are told apart when filling and matching requests, and a songs request matched to a score page (or the other way round) is flagged on the review card.
+
+## Requests, Sorted (0.19.1)
+
+### New
+- **Requests in sections.** Mine and Everyone's each have All, Open, Closed and Not found, with counts.
+- **Request again.** Anything that couldn't be found can be asked for again with one tap.
+- **Fix a request's album (admins).** "Match album" closes a request with any album from the library, "Change album" points a closed one at the right album, and "Change" on a download waiting for a check picks the album it joins.
+
+### Fixed
+- Old requests (closed before the switch from Navidrome) open their album again when tapped.
+
+### Server
+- Fulfilled requests are filed by language (Malayalam, Telugu and Hindi get their own libraries beside Tamil), background score goes beside its album the way the rest of the library has it, and songs an album already has aren't downloaded again.
+
+## Requests, Filled (0.19.0)
+
+### New
+- **Requests get filled for you.** When a requested album or song is found, admins see it under Requests → Everyone's → **Ready to check**: the cover, who composed and wrote it, where it will go in the library, and every song with a play button, its length, quality and whether it has lyrics. Approve and it's in the library a minute later, with the people who asked told it's ready; reject and the download is thrown away. A song joins its album if the album is already in the library (app, website and Mac app).
+- **Lyrics come with new music.** Songs added from requests bring synced lyrics where they can be found, plain lyrics otherwise.
+
+### Improved
+- **Album or Song on every request**, so you can tell at a glance what was asked for.
+- While a request is being added, the people who asked see "Found · being added".
+
+### Server
+- Request fulfilment: admin review stage (schema 26), review endpoints, an admin-only stream of downloads waiting for a check, `jukebox user token` for scripts, and `scripts/requests/fulfil.py` (see docs/request-fulfilment.md). The analyzer checks for new songs at once when signalled.
+
+## Saffron (0.18.1)
+
+### Improved
+- **Saffron colours everywhere.** The icon is now gold through saffron to deep orange, with a bigger harmonium, and the app, the website and the Mac app take their colours from it: saffron highlights, the logo's gradient on the play buttons, warm greys.
+- **Light mode.** Settings → Appearance → Light now gives a light Saffron app, and Auto follows your phone's dark mode. Wallpaper colours still work in both.
+
+## New Icon & Mixes That Know Your Playlists (0.18.0)
+
+### New
+- **New icon.** A harmonium, pumped open, in sunset colours, on the phone, the Mac app and the website. Where the launcher follows dark mode the icon turns dark, and Android 13's themed icons take your wallpaper's colour.
+
+### Improved
+- **Mixes learn from your playlists.** Songs in your own playlists, and in playlists you've liked, now count towards your taste (recently added songs a bit more), and Discover leaves out songs you already have in a playlist.
+
+### Server
+- The Docker image builds the web app and server jars natively and only the runtime per platform, so multi-platform builds no longer stall.
+
+## Composer Albums, Artist Photos & Background Score Split (0.17.0)
+
+### New
+- **Photos of composers and artists.** Lists and person pages show each person's photo (from JioSaavn, else Wikimedia Commons), or their newest album's cover when there's no photo.
+
+### Improved
+- **Artists list counts songs.** Artists show how many songs they sing or write (it said "0 albums"), most first, and the whole list loads at once.
+- **Composers list from the catalog.** Only composers are listed (singers were mixed in), with their albums counted.
+- **An artist's page shows all their songs** from the server, not the first 500 search results.
+
+### Fixed
+- **A composer's albums are the ones they composed.** A film where they only sang a song (A.R. Rahman in Thaai Kizhavi) or where one of their songs turns up on another album no longer appears under them.
+- **Background music separated from songs.** Score tracks inside song albums (title music, BGM cues, themes) move to the film's Original Background Score album.
+- Release APKs are never signed with the debug key (the store-style update would fail); CI stops without the signing key.
+
+### Server
+- After each scan: background music in song albums goes to the score (by title, or by how it sounds when nothing says it's sung), listed in `data/score-split.csv`; `data/score-overrides.txt` corrects it. People's photos come from `data/people-photos/` (filled by `scripts/metadata/people_photos.py`).
+- `/api/v2/people`: `hasPhoto`; artists sorted and counted by songs sung or written; up to 10,000 per page. Person songs carry their singers, composers and lyricists.
+- Streaming "auto" plays the original file (as Android's Auto does); the Opus copy only for "mobile". The transcoder now works through the whole library (it stopped after the 200 most played) and evicts the least recently used copies.
+- A session token in the address (`?token=`) is only accepted on `/stream` routes.
+- Schema 25: `score_moves`, `people.photo_id`.
+
+, Unified Terminology & Search Refinements (0.16.2)
+
+### New
+- **Separate BGM & Theme Music Mixes.** Dedicated score mixes ("Smell the Romantic rose", "Feel the Mass elevation", etc.) featuring only Original Background Scores and theme music.
+- **Pure Song Mixes.** Standard mixes (Romance Mix, Daily Mixes, Discover Weekly) strictly contain vocal songs without instrumental BGMs or score cues.
+- **Segregated Radio & Playlist Recommendations.** Radio stations and playlist recommendations preserve song vs score separation.
+
+### Improved
+- **Unified Terminology.** Aligned terminology consistently across Backend, Web, and Android to **Album**, **Composer**, and **Artist**.
+- **Artists & Composers Panels.** Removed avatar/placeholder photos of people and sorted artists/composers by most albums descending.
+- **Refined Search Results.** Removed the people section, prioritizing top matched songs or albums directly followed by library results and requests.
+
+---
+
+## Streaming & Offline Download Quality Controls (0.16.1)
+
+App.
+
+### New
+- **Streaming quality options.** Added setting to select streaming quality (Auto, High / Original, Data Saver / Opus 128 kbps) in Settings.
+- **Offline downloading quality options.** Added setting to choose quality for downloaded music (Auto, High / Original, Data Saver / Opus 128 kbps).
+- **Offline album and playlist downloads.** Added one-tap download button on albums and playlists to download entire collections for offline listening.
+- **Song offline download actions.** Added download and remove download options to song menus, with downloaded checkmark indicator.
+- **Offline storage management.** Shows downloaded song count and total disk usage in Settings, with one-tap option to clear downloaded music.
+
+---
+
+## Milestone 5: The Data Plane (0.16.0)
+
+App, website, Mac app and server.
+
+### New
+- **Ahead-of-time mobile audio copies.** Background worker generates mobile-quality Opus copies (128 kbps VBR) for efficient streaming and low battery consumption without modifying the read-only music library.
+- **Native audio streaming endpoint.** `GET /api/v2/songs/{id}/stream` with HTTP Range request support (`206 Partial Content`) and quality negotiation (`auto`, `mobile`, `original`).
+- **Android media caching & offline playback.** Integrated Media3 `CacheDataSource` with a 250 MB LRU disk cache for instant scrubbing and gapless pre-buffered playback, and added offline download manager for local offline playback with automatic media source switching.
+- **Web streaming quality controls.** Streaming quality preference setting (Auto, High, Data Saver) in Settings with standby prefetch optimization.
+
+### Improved
+- **Subsonic streaming transcoding.** Seamlessly serves ahead-of-time Opus mobile copies when `maxBitRate <= 192` or Opus format is requested.
+
+---
+
+## Movie Title Prefix on Background Scores (0.15.2)
+
+App, website, Mac app and server.
+
+### Fixed
+- **Score album titles.** Format background score albums as `{Movie title} (Original Background Score)` across catalog, artist discographies, and song views instead of just "Background Score".
+
+---
+
+## Separate Movie Albums and Scores (0.15.1)
+
+App, website, Mac app and server.
+
+### Fixed
+- **Album separation.** Restored separate album listings for movie albums and Original Background Scores instead of merging them together.
+
+---
+
+## Jukebox API v2 & Redesign (0.15.0)
+
+App, website, Mac app and server.
+
+### New
+- **Jukebox API v2.** Native film-first catalog API (`/api/v2/albums`, `/api/v2/people`, `/api/v2/songs`, `/api/v2/search`).
+- **Films with full details.** Albums present releases (Soundtrack, Background Score, Singles) with director credits and cast chips.
+- **People profiles.** Composers, singers, lyricists, and actors with discographies and filmographies.
+- **Lyrics search.** Search inside synced and plain text lyrics across the entire library with direct timestamp seek.
+- **Version tracking.** Songs show versions (karaoke, instrumental, remixes) and link to alternative recordings.
+
+### Improved
+- **Dark theme & rebranding.** Redesigned the Android app with the dark theme matching the web app, and rebranded user-facing name to Jukebox.
+- **Web & Android migrated.** Web app and Android app now talk directly to Jukebox API v2 while preserving Subsonic playback fallback.
+
+---
+
+## Web Jump Back In Parity (0.14.5)
+
+**Fixed**
+*   Fixed the Web app hiding the "Jump back in" section when fewer than 8 collections are in history.
+*   Added live playback and remote device playback indicators (with spinning disc animation) to the "Jump back in" row on Web, matching the Android app.
+
+---
+
+## Remote Playback Fixes (0.14.4)
+
+**Fixed**
+*   Fixed the Web app showing "Recently played albums" unconditionally.
+*   Fixed the Phone app not showing remote playback correctly in the "Jump back in" section. Playback source (like playlists) is now synced properly across devices.
+
+---
+## 0.14.3 (2026-10-07): Fix Jump back in showing albums for playlists
+
+App, website, Mac app and server.
+
+### Fixed
+- **Jump back in.** When playing from a playlist (especially across devices via remote control), the "Jump back in" section on Home correctly shows the playlist instead of falling back to the current song's movie/album.
+
+---
+
+## 0.14.2 (2026-10-07): Fix Android crash on launch
+
+App.
+
+### Fixed
+- **Crash on startup.** Fixed an uninitialized property crash during application startup that caused the app to close immediately upon opening.
+
+---
+
+## 0.14.1 (2026-10-07): Android device picker and seamless playback transfer
+
+App, website, Mac app and server.
+
+### Fixed & Improved
+- **Device picker on Android.** Added device picker bottom sheet and device icon button to player screen and mini player, matching web and desktop.
+- **Playback transfer and remote control.** Transferred queues and playback state are reliably synchronized between phone, web, and desktop; incoming remote commands start and control the player service seamlessly.
+- **Remote player bar on Web.** Web player bar and mini-player display currently playing songs and remote controls when listening on another active device.
+
+### Server
+- Enhanced playback transfer resolving to reliably forward source states, pause source playback, and activate target devices.
+
+---
+
+## 0.14.0 (2026-10-07): Realtime gateway and playback across devices (Milestone 3)
+
+App, website, Mac app and server.
+
+### New
+- **Playback across devices and remote control.** Tap the new devices icon in the player bar on the web or desktop to see all your connected devices (phone, laptop, desktop). Transfer playback to another device with one tap ("Play here"), or remotely pause, skip, and resume from another screen.
+- **Realtime gateway.** Every connected device now carries its own identity (device name, model, platform) over the WebSocket, keeping presence and playback in sync across devices while preserving friend presence.
+- **Standalone music server mode.** For private self-hosting without friends or social tools, set `JUKEBOX_SOCIAL=off` in `.env`. The realtime gateway still synchronizes playback across all your personal devices.
+
+### Server
+- Device handshake metadata on `/ws`, device session tracking in `Hub`, `DevicesEvent`, `RemoteCommandEvent`, and `TransferPlaybackEvent`. Added `JUKEBOX_SOCIAL` setting in `Config`.
+
+---
+
+## 0.13.0 (2026-10-07): Import playlists from Spotify, Apple Music, YouTube or a file
+
+App, website, Mac app and server.
+
+### New
+- **Import playlists from Spotify, Apple Music, YouTube or a file.** Your Library › **+** › **Import a playlist**:
+  paste a playlist link, or share it to Isaipetti straight from the Spotify, Apple Music or YouTube app. Exported
+  files work too (CSV from Exportify, TuneMyMusic or Soundiiz; M3U; Apple Music exports; or a list of "Title -
+  Artist" lines). Jukebox finds each song in the library, spelling forgiven, and shows what it found: tick or
+  untick songs, pick the right one where it isn't sure, and **Request** the ones it doesn't have. Then **Save
+  playlist**. Also on the website and the Mac app.
+
+### Fixed
+- **Website and Mac app:** music no longer stops after a song or two when the tab or app is in the background.
+
+### Server
+- `POST /imports/preview` (a link, or a file's text), `POST /imports` (save) and `POST /imports/request`. Optional
+  `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` for whole Spotify playlists.
+
+---
+
+## 0.12.3 (2026-10-06): The Mac app and the website catch up
+
+Mac app and website; the Android app has no changes of its own (same features as 0.12.2).
+
+### New
+- **Mac app: notifications.** Turn on **Settings → Notifications** and new messages, friend requests and friends
+  starting to listen together show as macOS notifications while Jukebox is open.
+- **Mac app: voice messages, saved pictures and links.** The microphone records voice messages (macOS asks once),
+  **Save** on a chat picture puts it in Downloads, and links that open a new tab open in your browser.
+- **The website (and so the Mac app) now does what the Android app does:** the queue, Resume, About this song,
+  requesting music that isn't in the library, search history, group settings, Seen, @mentions, pins, forwarding,
+  search in a chat, voice messages, reactions your way, GIFs and captions, sharing music from a chat, recommended
+  songs and covers for your playlists, Save a copy for mixes, all singers and playlists, listening stats and
+  feedback. The full list is in [docs/web-parity.md](../docs/web-parity.md).
+
+### Fixed
+- **Jams:** songs the host added with **Play next**, or moved in the queue, now play in the same place for everyone
+  listening on the website or the Mac app.
+
+### Server
+- Reloading the Friends or Requests page on the website shows the page again (it showed an error).
+
+---
+
+## 0.12.2 (2026-10-06): Password change through Jukebox
+
+App and server. The Mac app gets the same version (no changes of its own).
+
+### Fixed
 - **Changing your password** works again: it goes to Jukebox's own password change, which checks your
   current password and signs your other devices out. (0.12.1 and older used Navidrome's way, which the
   server no longer answers.)
+
+### Server
+- **Listening stats** (admins) count everything again: they had stopped at 2026-10-04.
+- **Feedback** from the app now goes to the jukebox repository's issues.
 
 ---
 

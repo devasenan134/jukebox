@@ -42,14 +42,16 @@ export interface Artist {
   id: string
   name: string
   albumCount?: number
+  /** Songs they're credited on (singers and lyricists are listed by this). */
+  songCount?: number
   coverArt?: string
   /** What they do in the library: "albumartist" (a composer here), "artist" (a singer), "composer", ... */
   roles?: string[]
   album?: Album[]
 }
 
-/** Composers have movies of their own; singers only appear on songs. */
-export const isComposer = (a: Artist) => !a.roles?.length || a.roles.includes('albumartist')
+/** Composers have movies of their own; singers only appear on songs. ("albumartist" from Subsonic, "composer" from /api/v2.) */
+export const isComposer = (a: Artist) => !a.roles?.length || a.roles.includes('albumartist') || a.roles.includes('composer')
 
 export interface Playlist {
   id: string
@@ -193,7 +195,7 @@ export const mixSongToSong = (m: MixSong): Song => ({ ...m })
 
 export interface Mix {
   id: string
-  /** "daily", "discover", "repeat", "rewind", "new", "friends", "popular", "mood", "decade", "composer", "singer" or "radio". */
+  /** "daily", "daylist", "discover", "fresh", "because", "artistmix", "topic", "season", "mood", "decade", "composer", "singer", "radio"... */
   kind: string
   title: string
   subtitle: string
@@ -211,7 +213,27 @@ export interface Mix {
   endless: boolean
   /** Picked for your taste: shown as "Made for <your name>". */
   personal: boolean
+  /** Shows "New": back on your Home after a week or more away, or a weekly mix in its new week. */
+  isNew?: boolean
+  /** How to draw its cover (ui/mixArt.tsx); none: the old way, from covers and color. */
+  art?: MixArt
   songs: MixSong[]
+}
+
+/** A mix cover's design, worked out by the server (MixArt in MixMaker.kt). */
+export interface MixArt {
+  /** sleeve, cassette, sky, crate, spin, polaroid, photos, lp, single, reel, cd, diecut, paper, turntable or tuner. */
+  style: string
+  kicker: string
+  headline: string
+  /** A person's (ar-…) or a cover (al-…); none: the mix's covers. */
+  picture?: string
+  ground: string
+  ink: string
+  /** For sky: dawn, day, dusk, night or rain. */
+  variant?: string
+  /** A sticker or dial reading: "FRI 31 OCT", "96.4 FM". */
+  stamp?: string
 }
 
 export const MIX_SOURCE_PREFIX = 'mix:'
@@ -300,6 +322,47 @@ export interface MusicRequest {
   songId?: string
   mine: boolean
   askedBy: string[]
+  /** While it's being filled: "review" (downloaded, waiting for an admin), "approved" or "rejected". */
+  stage?: string | null
+  /** What was downloaded (admins). */
+  review?: RequestReview | null
+  /** Why the last check was rejected (admins). */
+  reviewNote?: string | null
+}
+
+/** A fulfilled request's download, waiting for an admin to listen and approve (docs/request-fulfilment.md). */
+export interface RequestReview {
+  album: string
+  year?: number | null
+  composer?: string | null
+  lyricists?: string | null
+  coverUrl?: string | null
+  source?: string | null
+  score?: number | null
+  /** "existing": joins an album in the library; "new": a new album folder. */
+  destination: string
+  destinationAlbumId?: string | null
+  destinationFolder?: string | null
+  suggestedFolder?: string | null
+  destinationChosen?: boolean
+  scoreFolder?: string | null
+  tracks: ReviewTrack[]
+  skipped?: string[]
+  coveredBy?: number | null
+  notes: string[]
+}
+
+export interface ReviewTrack {
+  n: number
+  file: string
+  title: string
+  singers?: string | null
+  durationMs?: number | null
+  bitrate?: number | null
+  /** "synced", "plain" or "none". */
+  lyrics: string
+  /** Background score: filed under the album's background score. */
+  score?: boolean
 }
 
 export interface CatalogHit {
@@ -310,4 +373,62 @@ export interface CatalogHit {
 export interface CatalogResults {
   movies: CatalogHit[]
   songs: CatalogHit[]
+}
+
+// ---- Importing playlists ----
+
+export interface ImportedTrack {
+  title: string
+  artists: string[]
+  album?: string
+  durationMs?: number
+  isrc?: string
+  catalogId?: string
+}
+
+/** A song of the playlist being imported, and what it is in the library: match if found (sure when no doubt), choices to pick from. */
+export interface ImportRow {
+  track: ImportedTrack
+  match?: MixSong
+  sure: boolean
+  choices: MixSong[]
+}
+
+/** A song of a saved playlist: one of the library's (songId), or one it doesn't have (track), kept greyed out to request. */
+export interface ImportItem {
+  songId?: string
+  track?: ImportedTrack
+}
+
+/** A song of a playlist the library doesn't have: before the song at `before` (the end if past it), and its request. */
+export interface MissingSong {
+  id: number
+  before: number
+  track: ImportedTrack
+  request?: MusicRequest | null
+  /** Waiting in the server's queue to be requested (it goes at the pace the music catalog allows). */
+  queued?: boolean
+  /** Why it couldn't be requested, or why it's still waiting. */
+  note?: string | null
+}
+
+/** What became of a song asked for: "queued", "requested", "in_library" or "not_found" (see note). */
+export interface QueuedRequest {
+  status: string
+  note?: string | null
+}
+
+/** A playlist's missing songs; filled: how many just arrived in the library and became songs of it (reload them). */
+export interface PlaylistMissing {
+  songs: MissingSong[]
+  filled: number
+}
+
+export interface ImportPreview {
+  name: string
+  /** "spotify", "apple", "youtube" or "file". */
+  source: string
+  rows: ImportRow[]
+  truncated: boolean
+  note?: string
 }

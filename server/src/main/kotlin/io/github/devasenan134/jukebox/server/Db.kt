@@ -76,7 +76,7 @@ class Db(private val path: String) {
 
     private fun migrate() {
         val version = connection.createStatement().use { it.executeQuery("PRAGMA user_version").run { next(); getInt(1) } }
-        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24)
+        val migrations = listOf(SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14, SCHEMA_V15, SCHEMA_V16, SCHEMA_V17, SCHEMA_V18, SCHEMA_V19, SCHEMA_V20, SCHEMA_V21, SCHEMA_V22, SCHEMA_V23, SCHEMA_V24, SCHEMA_V25, SCHEMA_V26, SCHEMA_V27, SCHEMA_V28, SCHEMA_V29, SCHEMA_V30, SCHEMA_V31, SCHEMA_V32, SCHEMA_V33, SCHEMA_V34, SCHEMA_V35)
         migrations.drop(version).forEachIndexed { i, sql ->
             connection.createStatement().use { st -> sql.split(";").filter { it.isNotBlank() }.forEach(st::execute) }
             connection.createStatement().use { it.execute("PRAGMA user_version = ${version + i + 1}") }
@@ -487,6 +487,164 @@ class Db(private val path: String) {
         // A playlist's own cover (uploaded by its owner), kept with the rest of the artwork.
         val SCHEMA_V24 = """
             ALTER TABLE playlists ADD COLUMN cover_id TEXT REFERENCES artwork(id)
+        """.trimIndent()
+
+        // Tracks ScoreSplitter moved from a soundtrack to its album's background score (so the move can be undone),
+        // and a person's own photo (people-photos/ in the data folder).
+        // Fulfilled requests waiting for an admin's check (docs/request-fulfilment.md).
+        // Songs of an imported playlist that the library didn't have, kept in their place (before the song at
+        // [slot]) to show greyed out and request; each becomes a real entry when the song arrives.
+        // not_ids: the library's songs offered for it at import and turned down, never matched to it later.
+        // Missing songs someone asked to request in bulk wait in a queue (queued_by: who asked), made into requests
+        // at the pace the catalog allows; request_note says why one couldn't be requested, or why it waits.
+        // Songs people asked to request (RequestQueue.kt): each person's once (by key), worked through one at a
+        // time; album_key groups songs of one album into an album request.
+        // Requests the queue makes are held (held = 1) until it has gone through everything waiting: then admins
+        // are told once, and the requests show (and are filled) from then on.
+        // Lists of albums from the music site (Feeds.kt: "Trending", "Latest"), as the masstamilan sync last sent
+        // them, in the site's order; Home shows the ones in the library.
+        val SCHEMA_V35 = """
+            CREATE TABLE feeds (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                changed_at INTEGER NOT NULL,
+                checked_at INTEGER NOT NULL
+            );
+            CREATE TABLE feed_entries (
+                feed_id TEXT NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                year INTEGER,
+                composer TEXT,
+                url TEXT,
+                poster TEXT,
+                album_id TEXT,
+                PRIMARY KEY (feed_id, position)
+            )
+        """.trimIndent()
+
+        // What each person played recently and where they left off (Recents.kt), the same on all their devices.
+        val SCHEMA_V34 = """
+            CREATE TABLE recent_items (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                cover_art TEXT,
+                song_json TEXT,
+                played_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, kind, item_id)
+            );
+            CREATE INDEX recent_items_by_time ON recent_items(user_id, played_at);
+            CREATE TABLE resume_points (
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                source TEXT NOT NULL,
+                song_ids TEXT NOT NULL,
+                current_id TEXT NOT NULL,
+                saved_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, source)
+            )
+        """.trimIndent()
+
+        // Moods, energy, positivity and themes a language model gave each song from what it knows of it and its
+        // lyrics (scripts/labels/label_songs.py, imported by SongSignals.importLabels). Lists are comma separated.
+        val SCHEMA_V33 = """
+            CREATE TABLE song_labels (
+                recording_id TEXT PRIMARY KEY,
+                moods TEXT NOT NULL,
+                energy INTEGER NOT NULL,
+                valence INTEGER NOT NULL,
+                themes TEXT NOT NULL,
+                instrumental INTEGER NOT NULL,
+                sure INTEGER NOT NULL,
+                source TEXT NOT NULL
+            )
+        """.trimIndent()
+
+        // What other services know about songs (library/SongSignals.kt): songs their listeners play together
+        // (song_links, best first) and how often each song is played there (song_fame). Imported, not scanned.
+        val SCHEMA_V32 = """
+            CREATE TABLE song_links (
+                recording_id TEXT NOT NULL,
+                other_id TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                PRIMARY KEY (recording_id, other_id, source)
+            );
+            CREATE TABLE song_fame (
+                recording_id TEXT NOT NULL,
+                plays INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                PRIMARY KEY (recording_id, source)
+            )
+        """.trimIndent()
+
+        // When a mix was last on someone's Home, and when it came (back) to it, for its "New" badge. Mixes on
+        // Home before this count as seen now, and not new.
+        val SCHEMA_V31 = """
+            ALTER TABLE mix_state ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE mix_state ADD COLUMN appeared_at INTEGER NOT NULL DEFAULT 0;
+            UPDATE mix_state SET seen_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000
+        """.trimIndent()
+
+        val SCHEMA_V30 = """
+            ALTER TABLE music_requests ADD COLUMN held INTEGER NOT NULL DEFAULT 0
+        """.trimIndent()
+
+        val SCHEMA_V29 = """
+            CREATE TABLE request_queue (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                key TEXT NOT NULL,
+                album_key TEXT,
+                track_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                request_id INTEGER,
+                album_checked INTEGER NOT NULL DEFAULT 0,
+                note TEXT,
+                created_at INTEGER NOT NULL,
+                done_at INTEGER,
+                UNIQUE (user_id, key)
+            );
+            CREATE INDEX request_queue_waiting ON request_queue(status, id);
+            CREATE INDEX request_queue_by_key ON request_queue(key)
+        """.trimIndent()
+
+        val SCHEMA_V28 = """
+            ALTER TABLE playlist_missing ADD COLUMN queued_by INTEGER;
+            ALTER TABLE playlist_missing ADD COLUMN request_note TEXT
+        """.trimIndent()
+
+        val SCHEMA_V27 = """
+            CREATE TABLE playlist_missing (
+                id INTEGER PRIMARY KEY,
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                slot INTEGER NOT NULL,
+                track_json TEXT NOT NULL,
+                not_ids TEXT NOT NULL DEFAULT '[]',
+                request_id INTEGER,
+                checked_version TEXT
+            );
+            CREATE INDEX playlist_missing_by_playlist ON playlist_missing(playlist_id)
+        """.trimIndent()
+
+        val SCHEMA_V26 = """
+            ALTER TABLE music_requests ADD COLUMN stage TEXT;
+            ALTER TABLE music_requests ADD COLUMN review_json TEXT;
+            ALTER TABLE music_requests ADD COLUMN review_note TEXT;
+            ALTER TABLE music_requests ADD COLUMN staged_at INTEGER
+        """.trimIndent()
+
+        val SCHEMA_V25 = """
+            CREATE TABLE score_moves (
+                track_id TEXT PRIMARY KEY,
+                from_release_id TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                moved_at INTEGER NOT NULL
+            );
+            ALTER TABLE people ADD COLUMN photo_id TEXT REFERENCES artwork(id)
         """.trimIndent()
 
         val SCHEMA_V23 = """

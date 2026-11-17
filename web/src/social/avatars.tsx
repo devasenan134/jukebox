@@ -8,7 +8,7 @@ import { Icon } from '../ui/kit'
 // Profile and group pictures, as ui/social/SocialComponents.kt: a coloured circle with the
 // person's first letter (or their picture), and a green dot when they're online.
 
-const AVATAR_COLORS = ['#F5B942', '#E8643C', '#7FB8A4', '#8C7BD8', '#E38FB0', '#6FA8DC', '#C9A26B']
+const AVATAR_COLORS = ['#FFD25E', '#FF9F1C', '#F07A3A', '#E8B07A', '#D9824A', '#FFC48A', '#C9A26B']
 
 /** Java's String.hashCode, so a person gets the same colour as in the Android app. */
 function hashCode(s: string) {
@@ -45,7 +45,7 @@ export function Avatar({ name, userKey, size = 44, online, user }: { name: strin
           setEnlarged(true)
         }}
         style={{
-          width: size, height: size, borderRadius: '50%', background: colorFor(userKey), color: '#1B1726', display: 'flex',
+          width: size, height: size, borderRadius: '50%', background: colorFor(userKey), color: '#2B1300', display: 'flex',
           alignItems: 'center', justifyContent: 'center', overflow: 'hidden', fontFamily: 'var(--display)', fontWeight: 600,
           fontSize: size > 40 ? 22 : 14,
         }}
@@ -72,7 +72,7 @@ export function GroupAvatar({ groupKey, size = 44, conversation }: { groupKey: s
         setEnlarged(true)
       }}
       style={{
-        width: size, height: size, borderRadius: '50%', background: colorFor(groupKey), color: '#1B1726', display: 'flex',
+        width: size, height: size, borderRadius: '50%', background: colorFor(groupKey), color: '#2B1300', display: 'flex',
         alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0,
       }}
     >

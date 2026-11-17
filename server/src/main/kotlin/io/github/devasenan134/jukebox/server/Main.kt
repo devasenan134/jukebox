@@ -24,8 +24,12 @@ import io.ktor.server.plugins.compression.gzip
 import io.ktor.server.plugins.compression.matchContentType
 import io.ktor.server.plugins.compression.minimumSize
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.github.devasenan134.jukebox.server.library.Transcoder
+import io.ktor.http.auth.HttpAuthHeader
+import io.ktor.server.plugins.partialcontent.PartialContent
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveText
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
@@ -87,6 +91,19 @@ fun main(args: Array<String>) {
         println(eventJson.encodeToString(ImportReport.serializer(), report))
         return
     }
+    // JioSaavn's "similar songs" and play counts for the library (library/SongSignals.kt): jukebox import-saavn <saavn_reco.jsonl>
+    if (args.firstOrNull() == "import-saavn") {
+        val file = File(args.getOrNull(1) ?: error("import-saavn <saavn_reco.jsonl> is needed"))
+        val report = kotlinx.coroutines.runBlocking { io.github.devasenan134.jukebox.server.library.SongSignals(Db(config.dbPath)).importSaavn(file) }
+        println(report)
+        return
+    }
+    // Songs' moods and themes from a language model (scripts/labels/label_songs.py): jukebox import-labels <labels.jsonl>
+    if (args.firstOrNull() == "import-labels") {
+        val file = File(args.getOrNull(1) ?: error("import-labels <labels.jsonl> is needed"))
+        println(kotlinx.coroutines.runBlocking { io.github.devasenan134.jukebox.server.library.SongSignals(Db(config.dbPath)).importLabels(file) })
+        return
+    }
     embeddedServer(Netty, port = config.port) { jukeboxServer(config) }.start(wait = true)
 }
 
@@ -99,10 +116,12 @@ fun Application.jukeboxServer(
     /** Where mixes, search, requests and stats get their music; by default the library in [Config.libraries]. */
     music: MusicSource? = null,
     catalog: Catalog = ITunesCatalog(),
+    playlistReader: PlaylistReader = WebPlaylistReader(spotifyClientId = config.spotifyClientId, spotifyClientSecret = config.spotifyClientSecret),
 ) {
     val db = Db(config.dbPath)
     val friends = Friends(db)
     val hub = Hub(friends::friendIds)
+    val recents = Recents(db, hub)
     friends.hub = hub
     // Passwords are kept encrypted with a key that lives next to the database (docs/milestone-2.md).
     val signIn = SignIn(db, Passwords(File(File(config.dbPath).absoluteFile.parentFile, "secret.key")))
@@ -127,21 +146,55 @@ fun Application.jukeboxServer(
     val stats = Stats(db, music, defaultZone = config.timeZone)
     val mixes = music?.let { MixService(db, it, java.time.ZoneId.of(config.timeZone)) }?.also { it.warm() }
     // Without a cast file next to the database, search just has no actors.
-    val search = music?.let { LibrarySearch(it, File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)) }
-    // Asking for music the library doesn't have (it needs the library, to know what's missing).
-    val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds) }
+    val castFile = File(config.castFile ?: File(File(config.dbPath).absoluteFile.parentFile, "movie-cast.jsonl").path)
+    val search = music?.let { LibrarySearch(it, castFile) }
     // Jukebox's own library (docs/milestone-1.md): scanned in the background, served through the Subsonic API.
     val musicLibrary = MusicLibrary.parse(config.libraries).takeIf { it.isNotEmpty() }?.let { defs ->
         MusicLibrary(
             db, defs, AudioTools(lowPriority = true),
             File(config.artworkDir ?: File(File(config.dbPath).absoluteFile.parentFile, "artwork").path),
-            config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes,
+            config.saavnIdMap?.let(::File), config.fingerprints, config.rescanEveryMinutes, config.featuresDb,
         ).also { it.start(this) }
     }
+    // Milestone 5: Ahead-of-time mobile audio copies (Opus 128 kbps)
+    val transcodeDir = File(config.transcodeDir ?: File(File(config.dbPath).absoluteFile.parentFile, "transcoded").path)
+    val transcoder = if (config.transcodeEnabled && musicLibrary != null) {
+        Transcoder(
+            db = db,
+            audioTools = AudioTools(lowPriority = true),
+            transcodeDir = transcodeDir,
+            roots = { musicLibrary.roots().mapValues { File(it.value) } },
+        ).also { it.start(this) }
+    } else null
+    val catalogService = CatalogService(
+        db = db,
+        castFile = castFile,
+        transcoder = transcoder,
+        roots = { musicLibrary?.roots().orEmpty() },
+    )
+    // Asking for music the library doesn't have (it needs the library, to know what's missing).
+    val requests = music?.let { MusicRequests(db, it, catalog, push, stats::isAdmin, stats::adminIds, config.requestsDir?.let(::File)) }
     val listening = Listening(db)
+    // Playlists from Spotify, Apple Music, YouTube or a file, matched to the library.
+    val imports = music?.let { PlaylistImports(db, it, listening, requests, playlistReader) }
     val pictures = Pictures(db, config.dbPath, listening.takeIf { musicLibrary != null }, musicLibrary?.artworkDir)
-    val subsonic = musicLibrary?.let { lib -> SubsonicApi(SubsonicLibrary(db, lib.covers, lib::roots), signIn::checkToken, signIn::userId, listening) }
+    val subsonicLibrary = musicLibrary?.let { lib -> SubsonicLibrary(db, lib.covers, lib::roots, transcoder = transcoder) }
+    val subsonic = subsonicLibrary?.let { library ->
+        SubsonicApi(
+            library,
+            signIn::checkToken,
+            signIn::userId,
+            listening
+        )
+    }
+    // Home's lists of albums from the music site the library is kept up to date from (Feeds.kt).
+    val feeds = if (requests != null && subsonicLibrary != null) {
+        Feeds(db, hub, stats::isAdmin, requests::findAlbumId, requests::hasAlbum, { subsonicLibrary.albumsById(it) })
+    } else null
+    fun feedsOn() = feeds ?: throw ApiError(HttpStatusCode.NotFound, "Home's lists are off on this server")
     val limiter = RateLimiter(maxPerMinute = 10)
+    // Missing songs of playlists queued to be requested, made into requests at the pace the catalog allows.
+    imports?.queue?.let { launch { it.run() } }
     // Every 10 minutes, forget chat pictures nobody can see any more.
     launch {
         delay(30.seconds)
@@ -186,6 +239,8 @@ fun Application.jukeboxServer(
     install(StatusPages) {
         exception<ApiError> { call, e -> call.respond(e.status, ErrorResponse(e.message)) }
         exception<SerializationException> { call, _ -> call.respond(HttpStatusCode.BadRequest, ErrorResponse("Malformed request")) }
+        // A body that doesn't fit the request (a field missing, the wrong type) is the caller's mistake.
+        exception<io.ktor.server.plugins.BadRequestException> { call, _ -> call.respond(HttpStatusCode.BadRequest, ErrorResponse("Malformed request")) }
         exception<Throwable> { call, e ->
             log.error("Unhandled error", e)
             call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Something went wrong on the server"))
@@ -197,12 +252,31 @@ fun Application.jukeboxServer(
             val length = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
             // Chat pictures can be bigger (a GIF from the keyboard); ChatImage checks them.
             val path = call.request.local.uri.substringBefore('?')
-            val limit = if (path.endsWith("/images") || path.endsWith("/voice")) ChatImage.MAX_BYTES + 1024L else MAX_BODY_BYTES
+            // An exported playlist file (an Apple Music library export can be several MB) is sent as text to preview.
+            val limit = when {
+                path.endsWith("/images") || path.endsWith("/voice") -> ChatImage.MAX_BYTES + 1024L
+                path == "/imports/preview" -> 12 * 1024 * 1024L
+                else -> MAX_BODY_BYTES
+            }
             if (length != null && length > limit) call.respond(HttpStatusCode.PayloadTooLarge, ErrorResponse("Request is too large"))
         }
     })
+    // HTTP byte-range requests for seamless seeking, scrubbing, and pause-resume (Milestone 5).
+    install(PartialContent)
     install(Authentication) {
         bearer("session") {
+            authHeader { call ->
+                val header = call.request.headers[HttpHeaders.Authorization]
+                if (header != null && header.startsWith("Bearer ", ignoreCase = true)) {
+                    HttpAuthHeader.Single("Bearer", header.substring(7).trim())
+                } else if (call.request.path().endsWith("/stream")) {
+                    // An <audio> element can't send headers, so a song's stream may carry the token in its address.
+                    // Nowhere else: addresses end up in proxy and tunnel logs.
+                    val qToken = call.request.queryParameters["token"]?.trim()
+                    if (!qToken.isNullOrBlank()) HttpAuthHeader.Single("Bearer", qToken)
+                    else null
+                } else null
+            }
             authenticate { credential -> accounts.userForToken(credential.token) }
         }
     }
@@ -235,7 +309,12 @@ fun Application.jukeboxServer(
                 close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Not logged in"))
                 return@webSocket
             }
-            hub.connected(user.id, this)
+            val explicitDeviceId = call.request.queryParameters["device_id"]?.takeIf { it.isNotBlank() }
+            val deviceId = explicitDeviceId ?: "legacy-${System.identityHashCode(this)}"
+            val deviceName = call.request.queryParameters["device_name"]?.takeIf { it.isNotBlank() } ?: "Web Browser"
+            val clientType = call.request.queryParameters["client_type"]?.takeIf { it.isNotBlank() } ?: "web"
+
+            hub.connected(user.id, this, deviceId, deviceName, clientType, isExplicitDevice = explicitDeviceId != null)
             try {
                 for (frame in incoming) {
                     if (frame !is Frame.Text) continue
@@ -244,11 +323,11 @@ fun Application.jukeboxServer(
                         null -> Unit
                         is ListenStart, is ListenJoin, is ListenLeave, is ListenUpdate -> listen.handle(user.id, event)
                         is TypingUpdate -> runCatching { chat.typing(user.id, event.conversationId) }
-                        else -> hub.handle(user.id, this, event)
+                        else -> hub.handle(user.id, this, event, deviceId)
                     }
                 }
             } finally {
-                hub.disconnected(user.id, this)
+                hub.disconnected(user.id, this, deviceId)
                 // Offline on every device: leave any listen-together session.
                 if (!hub.isOnline(user.id)) listen.wentOffline(user.id)
             }
@@ -264,6 +343,22 @@ fun Application.jukeboxServer(
                 accounts.changePassword(call.me(), body.current, body.new, token)
                 call.respond(HttpStatusCode.NoContent)
             }
+            // Lists of albums from the music site, as rows on Home (Feeds.kt).
+            get("/feeds") { call.respond(feeds?.list(call.me()).orEmpty()) }
+            // Recently played and Resume, the same on every device (Recents.kt).
+            get("/me/recents") { call.respond(recents.list(call.me())) }
+            post("/me/recents") { recents.played(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }
+            delete("/me/recents") { recents.clear(call.me()); call.respond(HttpStatusCode.NoContent) }
+            delete("/me/recents/{kind}/{id}") {
+                recents.forget(call.me(), call.parameters["kind"].orEmpty(), call.parameters["id"].orEmpty())
+                call.respond(HttpStatusCode.NoContent)
+            }
+            get("/me/resume") {
+                // ?source=: that one place; without it, all of them, newest first.
+                val source = call.request.queryParameters["source"] ?: return@get call.respond(recents.resumePoints(call.me()))
+                call.respond(recents.resumePoint(call.me(), source) ?: throw ApiError(HttpStatusCode.NotFound, "Nothing to resume"))
+            }
+            put("/me/resume") { recents.saveResumePoint(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }
             // Profile pictures: the body is the image itself.
             put("/me/avatar") { call.respond(pictures.setAvatar(call.me().id, Picture(call.receive<ByteArray>()))) }
             delete("/me/avatar") { call.respond(pictures.removeAvatar(call.me().id)) }
@@ -272,6 +367,17 @@ fun Application.jukeboxServer(
                 // The app asks with ?v=<when it was set>, so a new picture has a new address and this can be cached.
                 call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=2592000")
                 call.respondFile(file)
+            }
+            // Songs of a playlist the library doesn't have (kept from an import), to show greyed out and request.
+            route("/playlists/{id}/missing") {
+                fun importsOn() = imports ?: throw ApiError(HttpStatusCode.NotFound, "Importing is off on this server")
+                get { call.respond(importsOn().missing(call.me(), call.parameters["id"].orEmpty())) }
+                post("/request-all") { call.respond(importsOn().requestAll(call.me(), call.parameters["id"].orEmpty())) }
+                post("/{missingId}/request") { call.respond(importsOn().requestMissing(call.me(), call.parameters["id"].orEmpty(), call.longParam("missingId"))) }
+                delete("/{missingId}") {
+                    listening.removeMissing(call.me().id, call.parameters["id"].orEmpty(), call.longParam("missingId"))
+                    call.respond(HttpStatusCode.NoContent)
+                }
             }
             // A cover for a playlist you made (kept with the rest of the artwork).
             put("/playlists/{id}/cover") {
@@ -334,6 +440,15 @@ fun Application.jukeboxServer(
                 get("/catalog") { call.respond(requestsOn().search(call.me(), call.request.queryParameters["q"].orEmpty().take(100))) }
             }
 
+            // Importing a playlist from another service or a file: preview the matches, then save it.
+            route("/imports") {
+                fun importsOn() = imports ?: throw ApiError(HttpStatusCode.NotFound, "Importing is off on this server")
+                post("/preview") { call.respond(importsOn().preview(call.receive())) }
+                post { call.respond(importsOn().create(call.me(), call.receive())) }
+                // Asking for a song while checking an import: it waits in the request queue.
+                post("/request") { call.respond(importsOn().requestTrack(call.me(), call.receive())) }
+            }
+
             // Requests for music that isn't in the library; admins answer them.
             route("/requests") {
                 get { call.respond(requestsOn().mine(call.me())) }
@@ -347,7 +462,8 @@ fun Application.jukeboxServer(
             // Mixes, playlists and stations by Jukebox.
             route("/mixes") {
                 fun mixesOn() = mixes ?: throw ApiError(HttpStatusCode.NotFound, "Mixes are off on this server")
-                get { call.respond(mixesOn().home(call.me())) }
+                // ?tz=America/Toronto: the app's time zone, for the daylist and the days mixes change on.
+                get { call.respond(mixesOn().home(call.me(), call.request.queryParameters["tz"])) }
                 get("/followed") { call.respond(mixesOn().followed(call.me())) }
                 post("/radio") { call.respond(mixesOn().radio(call.me(), call.receive())) }
                 post("/recommend") { call.respond(mixesOn().recommend(call.me(), call.receive())) }
@@ -388,6 +504,7 @@ fun Application.jukeboxServer(
                 post("/scan") {
                     call.admin()
                     val lib = libraryOn()
+                    lib.queueScan()
                     call.application.launch { lib.scanAll() }
                     call.respond(HttpStatusCode.Accepted, mapOf("status" to "scanning"))
                 }
@@ -398,7 +515,37 @@ fun Application.jukeboxServer(
                 get("/access") { call.respond(AdminAccessDto(stats.isAdmin(call.me()))) }
                 get("/stats") { call.respond(stats.report(call.me(), call.request.queryParameters["tz"])) }
                 get("/requests") { call.respond(requestsOn().all(call.me())) }
-                post("/requests/{id}/done") { call.respond(requestsOn().complete(call.me(), call.longParam("id"))) }
+                // The masstamilan sync: is this album in the library, and where (like a request's place).
+                get("/library/place") {
+                    val q = call.request.queryParameters
+                    call.respond(requestsOn().placeAlbum(call.me(), q["movie"].orEmpty().take(200).ifBlank { throw ApiError(HttpStatusCode.BadRequest, "Which album?") },
+                        q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["score"] == "true"))
+                }
+                put("/feeds/{id}") { feedsOn().update(call.me(), call.parameters["id"].orEmpty(), call.receive()); call.respond(HttpStatusCode.NoContent) }
+                delete("/feeds/{id}") { feedsOn().remove(call.me(), call.parameters["id"].orEmpty()); call.respond(HttpStatusCode.NoContent) }
+                get("/requests/{id}/place") {
+                    val q = call.request.queryParameters
+                    call.respond(requestsOn().place(call.me(), call.longParam("id"), q["year"]?.toIntOrNull(), q["composer"]?.take(200), q["title"]?.take(200), q["albumId"]?.take(64), q["movie"]?.take(200), q["score"] == "true"))
+                }
+                post("/requests/{id}/done") {
+                    // The body is optional: the apps send none, the fulfil script says which album it filled.
+                    val where = call.receiveText().takeIf { it.isNotBlank() }?.let { eventJson.decodeFromString(CompleteMusicRequest.serializer(), it) }
+                    call.respond(requestsOn().complete(call.me(), call.longParam("id"), where))
+                }
+                // Fulfilled requests waiting for a check: the fulfil script hands them in, admins listen and decide.
+                post("/requests/reviews-ready") { requestsOn().reviewsReady(call.me(), call.receive<ReviewsReady>().ids); call.respond(HttpStatusCode.NoContent) }
+                post("/requests/{id}/review") { call.respond(requestsOn().submitReview(call.me(), call.longParam("id"), call.receive<RequestReview>())) }
+                delete("/requests/{id}/review") { call.respond(requestsOn().clearReview(call.me(), call.longParam("id"))) }
+                post("/requests/{id}/destination") {
+                    call.respond(requestsOn().setDestination(call.me(), call.longParam("id"), call.receive<ReviewDestination>().albumId?.take(64)))
+                }
+                post("/requests/{id}/approve") { call.respond(requestsOn().approve(call.me(), call.longParam("id"))) }
+                post("/requests/{id}/reject") { call.respond(requestsOn().reject(call.me(), call.longParam("id"), call.receive<RejectReview>().note)) }
+                // Ends in /stream so the web's <audio> can sign in with ?token.
+                get("/requests/{id}/review/{n}/stream") {
+                    call.respondFile(requestsOn().reviewFile(call.me(), call.longParam("id"), call.parameters["n"]?.toIntOrNull() ?: 0))
+                }
+                post("/requests/{id}/reopen") { call.respond(requestsOn().reopen(call.me(), call.longParam("id"))) }
                 post("/requests/{id}/decline") {
                     call.respond(requestsOn().decline(call.me(), call.longParam("id"), call.receive<DeclineMusicRequest>().note))
                 }
@@ -539,6 +686,9 @@ fun Application.jukeboxServer(
                     call.respond(HttpStatusCode.NoContent)
                 }
             }
+
+            // Milestone 4: Jukebox API v2 (albums with releases & cast, people, songs, lyrics search)
+            catalogService.routes(this, search)
         }
     }
     log.info("jukebox ready on port ${config.port}, library ${if (musicLibrary == null) "off" else "on"}, push ${if (pushSender is NoPush || pushConfig == null) "off" else "on"}, feedback ${if (issueTracker == null) "off" else "on"}, mixes ${if (mixes == null) "off" else "on"}")
@@ -571,4 +721,4 @@ class RateLimiter(private val maxPerMinute: Int) {
 }
 
 /** Pages of the web app whose address is also an API route (the API answers when a session token is sent). */
-private val WEB_PAGES_SHARED_WITH_API = listOf("/search")
+private val WEB_PAGES_SHARED_WITH_API = listOf("/search", "/friends", "/requests")

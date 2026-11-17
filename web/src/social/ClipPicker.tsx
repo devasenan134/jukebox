@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SongRef } from '../api/types'
-import { subsonic } from '../api/subsonic'
+import { catalog } from '../api/catalog'
 import { clockTime } from '../api/socialTypes'
 import * as player from '../player/player'
 import { usePlayer, currentItem } from '../player/player'
@@ -56,7 +56,7 @@ function ClipPicker({ song, durationMs, clip, onChange }: { song: SongRef; durat
 
   const preview = useRef<HTMLAudioElement | null>(null)
   if (!preview.current) {
-    preview.current = new Audio(subsonic.streamUrl(song.id))
+    preview.current = new Audio(catalog.streamUrl(song.id))
     preview.current.preload = 'auto'
   }
   const [previewPlaying, setPreviewPlaying] = useState(false)

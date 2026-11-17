@@ -8,12 +8,17 @@ It listens to every song in Jukebox's catalog once and saves what the song sound
   numbers with a description's tells how well the description fits, which is how mood mixes are made
   without anyone tagging moods by hand.
 - tempo, energy, brightness and rhythm, measured from the audio.
+- learned labels: once Jukebox has song labels from a language model (song_labels, see docs/song-labels.md), it
+  learns from the songs labelled with confidence how each mood, energy, valence and "instrumental" sound, and
+  predicts them for every song from its embedding. That's far closer to the labels than the descriptions are
+  (docs/song-labels.md has the numbers), and it covers songs the language model didn't label, like new ones.
 
 Songs are Jukebox's recordings (one file each: the best copy), keyed by the recording's id. It only reads
 the music and Jukebox's database; it writes nothing but its own features.db, which Jukebox reads.
 
 Commands:
     python analyze.py watch            analyze new and changed songs, then check again every few minutes
+                                       (or at once on SIGUSR1: docker kill -s USR1 jukebox-analyzer)
     python analyze.py once             analyze new and changed songs, then stop
     python analyze.py sample 60        analyze 60 random songs (for trying it out)
     python analyze.py report           show which songs fit each description best
@@ -71,6 +76,8 @@ PROMPTS = {
 }
 
 stopping = False
+# SIGUSR1 (the request fulfil script, after new songs are scanned): check now instead of at the next interval.
+check_now = False
 
 
 def on_stop(*_):
@@ -97,6 +104,10 @@ def open_features():
             error TEXT                    -- why it couldn't be analyzed (then embedding is NULL)
         );
         CREATE TABLE IF NOT EXISTS prompts (key TEXT PRIMARY KEY, embedding BLOB NOT NULL);
+        -- Learned labels per song: float32 numbers in the order of meta 'learned_keys' (see learn()).
+        CREATE TABLE IF NOT EXISTS learned (id TEXT PRIMARY KEY, scores BLOB NOT NULL);
+        -- What was learned: per key, the weights over the embedding and the bias.
+        CREATE TABLE IF NOT EXISTS learned_models (key TEXT PRIMARY KEY, weights BLOB NOT NULL, bias REAL NOT NULL);
     """)
     # A different model gives numbers that can't be compared with the old ones: start over.
     row = db.execute("SELECT value FROM meta WHERE key = 'model'").fetchone()
@@ -104,6 +115,9 @@ def open_features():
         print(f"Model changed from {row[0]} to {MODEL}; analyzing everything again")
         db.execute("DELETE FROM songs")
         db.execute("DELETE FROM prompts")
+        db.execute("DELETE FROM learned")
+        db.execute("DELETE FROM learned_models")
+        db.execute("DELETE FROM meta WHERE key = 'learned_from'")
     db.execute("INSERT OR REPLACE INTO meta VALUES ('model', ?)", (MODEL,))
     # Tells Jukebox the ids are its recordings' (the analyzer this one replaced used Navidrome's).
     db.execute("INSERT OR REPLACE INTO meta VALUES ('ids', 'recording')")
@@ -124,19 +138,21 @@ def jukebox_songs():
     db = catalog()
     try:
         rows = db.execute(
-            "SELECT f.recording_id, f.path, f.size, f.mtime, f.duration_ms FROM files f "
-            "JOIN recordings r ON r.id = f.recording_id "
+            "SELECT f.recording_id, f.path, f.size, f.mtime, f.duration_ms, l.path FROM files f "
+            "JOIN recordings r ON r.id = f.recording_id JOIN libraries l ON l.id = f.library_id "
             "WHERE f.missing_since IS NULL AND r.merged_into IS NULL "
             "ORDER BY f.recording_id, coalesce(f.bitrate, 0) DESC, f.id"
         ).fetchall()
     finally:
         db.close()
     songs = {}
-    for recording, path, size, mtime, duration_ms in rows:
+    for recording, path, size, mtime, duration_ms, library in rows:
         if recording in songs:
             continue
-        # Jukebox keeps paths relative to its music folder, which is MUSIC_DIR here.
-        songs[recording] = (os.path.join(MUSIC_DIR, path), f"{size}-{mtime}", (duration_ms or 0) / 1000)
+        # Jukebox keeps paths relative to each library's folder, as Jukebox sees it (/music, /library/malayalam…);
+        # this container mounts them at the same places. The main library is MUSIC_DIR here.
+        root = MUSIC_DIR if library in ("/music", MUSIC_DIR) or not os.path.isdir(library) else library
+        songs[recording] = (os.path.join(root, path), f"{size}-{mtime}", (duration_ms or 0) / 1000)
     return songs
 
 
@@ -304,7 +320,104 @@ def sync(db, lazy):
         run(db, lazy.get(), todo)
         db.execute("INSERT OR REPLACE INTO meta VALUES ('updated_at', ?)", (str(int(time.time() * 1000)),))
         db.commit()
+    learn(db)
     return len(todo)
+
+
+# ---------- learned labels ----------
+
+# What's learned, in this order: the chance of each mood and of being instrumental (0–1), then energy and
+# valence on the labels' own 1–5 scale. The moods are the labeller's (scripts/labels/label_songs.py).
+LEARNED_MOODS = ["chill", "romance", "happy", "party", "kuthu", "mass", "sad", "melody", "devotional", "classical", "sleep", "workout"]
+LEARNED_KEYS = LEARNED_MOODS + ["instrumental", "energy", "valence"]
+MIN_LABELS = 500
+
+
+def confident_labels():
+    """The songs the language model labelled with confidence: {recording id: (moods, energy, valence, instrumental)}."""
+    db = catalog()
+    try:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name = 'song_labels'").fetchone():
+            return {}
+        rows = db.execute("SELECT recording_id, moods, energy, valence, instrumental FROM song_labels WHERE sure = 1").fetchall()
+    finally:
+        db.close()
+    return {r: (set((m or "").split(",")), e, v, bool(i)) for r, m, e, v, i in rows}
+
+
+def learn(db):
+    """Keeps the learned labels current: learns again when the labels change, and predicts for songs without them."""
+    import hashlib
+
+    labels = confident_labels()
+    if len(labels) < MIN_LABELS:
+        return
+    fingerprint = hashlib.md5(repr(sorted((k, sorted(v[0]), v[1], v[2], v[3]) for k, v in labels.items())).encode()).hexdigest()
+    fingerprint += "/" + ",".join(LEARNED_KEYS)
+    rows = db.execute("SELECT id, embedding FROM songs WHERE embedding IS NOT NULL").fetchall()
+    if not rows:
+        return
+    learned_from = db.execute("SELECT value FROM meta WHERE key = 'learned_from'").fetchone()
+    models = db.execute("SELECT COUNT(*) FROM learned_models").fetchone()[0]
+    if learned_from and learned_from[0] == fingerprint and models == len(LEARNED_KEYS):
+        have = {r for (r,) in db.execute("SELECT id FROM learned")}
+        rows = [r for r in rows if r[0] not in have]
+        if not rows:
+            return
+        weights = {k: (np.frombuffer(w, dtype=np.float32), b) for k, w, b in db.execute("SELECT key, weights, bias FROM learned_models")}
+    else:
+        weights = train(db, rows, labels)
+        db.execute("DELETE FROM learned")
+        db.execute("INSERT OR REPLACE INTO meta VALUES ('learned_from', ?)", (fingerprint,))
+        db.execute("INSERT OR REPLACE INTO meta VALUES ('learned_keys', ?)", (",".join(LEARNED_KEYS),))
+    ids = [r[0] for r in rows]
+    x = np.stack([np.frombuffer(r[1], dtype=np.float32) for r in rows])
+    x = x / np.linalg.norm(x, axis=1, keepdims=True).clip(min=1e-9)
+    out = np.zeros((len(ids), len(LEARNED_KEYS)), dtype=np.float32)
+    for j, key in enumerate(LEARNED_KEYS):
+        w, b = weights[key]
+        raw = x @ w + b
+        out[:, j] = raw if key in ("energy", "valence") else 1 / (1 + np.exp(-raw))
+    db.executemany("INSERT OR REPLACE INTO learned VALUES (?, ?)", [(i, out[n].tobytes()) for n, i in enumerate(ids)])
+    db.execute("INSERT OR REPLACE INTO meta VALUES ('updated_at', ?)", (str(int(time.time() * 1000)),))
+    db.commit()
+    print(f"Learned labels for {len(ids)} songs", flush=True)
+
+
+def train(db, rows, labels):
+    """Learns each key from the confidently labelled songs (a logistic regression per mood and for instrumental, a
+    ridge regression for energy and valence), checking each on songs it didn't learn from first."""
+    from sklearn.linear_model import LogisticRegression, Ridge
+    from sklearn.metrics import roc_auc_score
+    from sklearn.model_selection import KFold, cross_val_predict
+
+    known = [(r[0], np.frombuffer(r[1], dtype=np.float32)) for r in rows if r[0] in labels]
+    x = np.stack([e for _, e in known])
+    x = x / np.linalg.norm(x, axis=1, keepdims=True).clip(min=1e-9)
+    lab = [labels[r] for r, _ in known]
+    print(f"Learning labels from {len(known)} confidently labelled songs", flush=True)
+    folds = KFold(5, shuffle=True, random_state=0)
+    weights, quality = {}, []
+    for key in LEARNED_KEYS:
+        if key in ("energy", "valence"):
+            y = np.array([l[1] if key == "energy" else l[2] for l in lab], dtype=np.float32)
+            model = Ridge(alpha=1.0)
+            check = cross_val_predict(model, x, y, cv=folds)
+            quality.append(f"{key} ±{np.abs(check - y).mean():.2f}")
+        else:
+            y = np.array([l[3] if key == "instrumental" else key in l[0] for l in lab])
+            if y.sum() < 20:
+                weights[key] = (np.zeros(x.shape[1], dtype=np.float32), -10.0)  # too few to learn: never predicted
+                continue
+            model = LogisticRegression(C=1.0, max_iter=3000)
+            check = cross_val_predict(model, x, y, cv=folds, method="predict_proba")[:, 1]
+            quality.append(f"{key} {roc_auc_score(y, check):.2f}")
+        model.fit(x, y)
+        weights[key] = (np.asarray(model.coef_, dtype=np.float32).reshape(-1), float(np.asarray(model.intercept_).reshape(-1)[0]))
+    print("  how well it matches labels it didn't learn from (AUC; energy and valence: mean error on 1–5): " + ", ".join(quality), flush=True)
+    db.execute("DELETE FROM learned_models")
+    db.executemany("INSERT INTO learned_models VALUES (?, ?, ?)", [(k, w.tobytes(), b) for k, (w, b) in weights.items()])
+    return weights
 
 
 # ---------- trying it out ----------
@@ -339,8 +452,15 @@ def report(db):
 
 
 def main():
+    global check_now
     signal.signal(signal.SIGTERM, on_stop)
     signal.signal(signal.SIGINT, on_stop)
+
+    def on_check_now(*_):
+        global check_now
+        check_now = True
+
+    signal.signal(signal.SIGUSR1, on_check_now)
     command = sys.argv[1] if len(sys.argv) > 1 else "watch"
     db = open_features()
     if command == "report":
@@ -366,9 +486,10 @@ def main():
             except Exception as e:
                 print(f"Check failed, trying again later: {e}", flush=True)
             for _ in range(CHECK_MINUTES * 60):
-                if stopping:
+                if stopping or check_now:
                     break
                 time.sleep(1)
+            check_now = False
 
 
 if __name__ == "__main__":

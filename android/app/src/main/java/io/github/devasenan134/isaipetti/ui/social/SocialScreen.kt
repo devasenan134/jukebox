@@ -240,7 +240,7 @@ private fun FriendList(
         if (friends.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    EmptyHint("Invite friends with a code, or add people who already use Isaipetti by their username.")
+                    EmptyHint("Invite friends with a code, or add people who already use Jukebox by their username.")
                     Button(onClick = onInvite, modifier = Modifier.padding(top = 12.dp)) { Text("Invite a friend") }
                 }
             }

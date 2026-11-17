@@ -13,10 +13,23 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import io.github.devasenan134.isaipetti.data.QueueMemory
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import io.github.devasenan134.isaipetti.data.MissingSong
 import androidx.compose.material.icons.filled.PlayArrow
+import io.github.devasenan134.isaipetti.data.toAlbum
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -64,16 +77,33 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-/** A movie: its songs with Play and Shuffle. */
+/** A movie/album: its releases and songs with Play and Shuffle. */
 @Composable
 fun AlbumScreen(id: String, nav: Nav) {
     val app = LocalApp.current
-    val loader = rememberLoader("album-$id") { app.api.album(id) }
+    val loader = rememberLoader("album-$id") {
+        try {
+            val detail = app.social.api.albumV2(id)
+            detail to detail.toAlbum()
+        } catch (_: Exception) {
+            val alb = app.api.album(id)
+            null to alb
+        }
+    }
     val likedAlbums by app.likes.albums.collectAsStateWithLifecycle()
-    val tint = rememberPageTint((loader.state as? Loadable.Ready)?.value?.coverArt)
+    val tint = rememberPageTint((loader.state as? Loadable.Ready)?.value?.second?.coverArt)
     Column {
         ScreenHeader("", onBack = nav.back, color = tint)
-        LoadableContent(loader) { album ->
+        LoadableContent(loader) { (detail, album) ->
+            val details = mutableListOf<String>()
+            if (detail != null) {
+                if (detail.directors.isNotEmpty()) {
+                    details.add("Directed by ${detail.directors.joinToString(", ")}")
+                }
+                if (detail.releases.size > 1) {
+                    details.add("${detail.releases.size} releases (OST & Score)")
+                }
+            }
             SongList(
                 tint = tint,
                 liked = likedAlbums.any { it.id == album.id },
@@ -89,10 +119,42 @@ fun AlbumScreen(id: String, nav: Nav) {
                 coverArt = album.coverArt,
                 title = album.name,
                 subtitle = listOfNotNull(album.artist, album.year?.toString()).joinToString(" · "),
+                details = details,
                 songs = album.song,
                 onSubtitleClick = album.artistId?.let { artistId -> { nav.openArtist(artistId) } },
                 showCovers = false,
                 nav = nav,
+                aboveSongs = if (detail?.cast?.isNotEmpty() == true) {
+                    {
+                        item {
+                            Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                Text(
+                                    "Starring",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                androidx.compose.foundation.lazy.LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
+                                ) {
+                                    items(detail.cast) { actor ->
+                                        androidx.compose.material3.AssistChip(
+                                            onClick = { nav.openArtist(actor.id) },
+                                            label = { Text(actor.name) },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Filled.Person,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else null,
             )
         }
     }
@@ -114,9 +176,32 @@ fun PlaylistScreen(id: String, nav: Nav) {
         if (mine) value = runCatching { app.social.api.playlistLikeCounts(listOf(id))[id] }.getOrNull()
     }
     val tint = rememberPageTint(playlist?.coverArt)
+    // Songs it should have that the library doesn't (kept from an import), greyed out in their place.
+    var missing by remember(id) { mutableStateOf<List<MissingSong>>(emptyList()) }
+    var missingRound by remember { mutableStateOf(0) }
+    var requestingAll by remember { mutableStateOf(false) }
+    // While some wait in the server's queue to be requested, look again now and then.
+    val waiting = missing.any { it.queued }
+    LaunchedEffect(id, waiting) {
+        while (waiting) {
+            kotlinx.coroutines.delay(10_000)
+            missingRound++
+        }
+    }
+    LaunchedEffect(id, missingRound) {
+        val found = runCatching { app.social.api.playlistMissing(id) }.getOrNull() ?: return@LaunchedEffect
+        missing = found.songs
+        // Some arrived and became songs of the playlist: show them.
+        if (found.filled > 0) {
+            loader.reload(quietly = true)
+            app.myPlaylists.refresh()
+            val text = if (found.filled == 1) "A song you were waiting for is in this playlist now" else "${found.filled} songs you were waiting for are in this playlist now"
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        }
+    }
     Column {
         ScreenHeader("", onBack = nav.back, color = tint) {
-            if (mine) PlaylistOwnerMenu(playlist!!, onChanged = { loader.reload(quietly = true) }, onDeleted = nav.back)
+            if (mine) PlaylistOwnerMenu(playlist!!, onChanged = { loader.reload(quietly = true); missingRound++ }, onDeleted = nav.back)
         }
         LoadableContent(loader) { playlist ->
             SongList(
@@ -135,9 +220,65 @@ fun PlaylistScreen(id: String, nav: Nav) {
                 onRemoveSong = if (!mine || playlist.readonly) null else { index ->
                     scope.launch {
                         runCatching { app.api.updatePlaylist(playlist.id, removeIndexes = listOf(index)) }
-                            .onSuccess { loader.reload(quietly = true); app.myPlaylists.refresh() }
+                            .onSuccess { loader.reload(quietly = true); app.myPlaylists.refresh(); missingRound++ }
                             .onFailure { Toast.makeText(context, it.message ?: "Couldn't remove it", Toast.LENGTH_SHORT).show() }
                     }
+                },
+                missing = missing,
+                aboveSongs = {
+                    val toRequest = missing.filter { !it.queued && (it.request == null || it.request.status == "declined") }
+                    if (toRequest.isNotEmpty()) item(key = "request-all") {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            run {
+                                Text(
+                                    if (toRequest.size == 1) "1 song isn't requested yet." else "${toRequest.size} songs aren't requested yet.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                FilledTonalButton(onClick = {
+                                    requestingAll = true
+                                    scope.launch {
+                                        runCatching { app.social.api.requestAllMissing(playlist.id) }
+                                            .onSuccess {
+                                                missing = it.songs
+                                                val n = toRequest.size
+                                                Toast.makeText(context, "Requested ${if (n == 1) "it" else "$n songs"}. They join the playlist when they arrive", Toast.LENGTH_LONG).show()
+                                            }
+                                            .onFailure { Toast.makeText(context, it.message ?: "Couldn't request them", Toast.LENGTH_LONG).show() }
+                                        requestingAll = false
+                                    }
+                                }, enabled = !requestingAll, contentPadding = PaddingValues(horizontal = 14.dp)) { Text("Request all") }
+                            }
+                        }
+                    }
+                },
+                missingRow = { m ->
+                    MissingSongRow(
+                        m,
+                        onRequest = {
+                            runCatching { app.social.api.requestMissing(playlist.id, m.id) }
+                                .onSuccess { asked ->
+                                    missing = missing.map { if (it.id == m.id) asked else it }
+                                    val text = if (asked.queued || asked.request != null) "Requested. It joins the playlist when it arrives" else asked.note ?: "Done"
+                                    Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+                                }
+                                .onFailure { Toast.makeText(context, it.message ?: "Couldn't request it", Toast.LENGTH_LONG).show() }
+                        },
+                        onRemove = if (!mine) null else {
+                            {
+                                scope.launch {
+                                    runCatching { app.social.api.removeMissing(playlist.id, m.id) }
+                                        .onSuccess { missing = missing.filter { it.id != m.id } }
+                                        .onFailure { Toast.makeText(context, it.message ?: "Couldn't remove it", Toast.LENGTH_SHORT).show() }
+                                }
+                            }
+                        },
+                    )
                 },
                 coverArt = playlist.coverArt,
                 title = playlist.name,
@@ -150,6 +291,7 @@ fun PlaylistScreen(id: String, nav: Nav) {
                         playlist.changed?.let { "Updated ${shortDate(it)}" },
                     ).joinToString(" · "),
                     if (mine && playlist.readonly) "Its songs can't be changed here: it's a smart playlist or comes from a playlist file on the server." else null,
+                    if (missing.isNotEmpty()) "${missing.size} not in the library yet" else null,
                 ),
                 songs = playlist.entry,
                 onSubtitleClick = null,
@@ -184,7 +326,7 @@ fun ArtistScreen(id: String, nav: Nav) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${albums.size} movies",
+                            "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
                             modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -250,6 +392,9 @@ internal fun SongList(
     tint: androidx.compose.ui.graphics.Color? = null,
     /** Set on a playlist you made (its name), so its songs' ✓ doesn't just say they're in it. */
     ownPlaylist: String? = null,
+    /** Songs of a playlist the library doesn't have, shown with [missingRow] in their place among the songs. */
+    missing: List<MissingSong> = emptyList(),
+    missingRow: @Composable (MissingSong) -> Unit = {},
 ) {
     val app = LocalApp.current
     val player = app.player
@@ -285,7 +430,7 @@ internal fun SongList(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
                 )
-                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { onPlay(); player.play(songs, source = source) }, enabled = songs.isNotEmpty()) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Text("Play", Modifier.padding(start = 8.dp))
@@ -295,24 +440,80 @@ internal fun SongList(
                         Text("Shuffle", Modifier.padding(start = 8.dp))
                     }
                     liked?.let { LikeButton(it, onToggleLike) }
+                    DownloadButton(songs = songs)
                 }
                 extraAction?.let { Box(Modifier.padding(top = 8.dp)) { it() } }
             }
         }
         aboveSongs?.invoke(this)
-        itemsIndexed(songs, key = { index, song -> "$index-${song.id}" }) { index, song ->
-            SongRow(
-                song = song,
-                // A song you tap goes in Recent songs; Play, Shuffle and Resume put the whole page in Recently played.
-                onClick = { app.activity.song(song); player.play(songs, index, source = source) },
-                isCurrent = song.id == nowPlaying.songId,
-                showCover = showCovers,
-                onOpenAlbum = if (showCovers) nav.openAlbum else null,
-                onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
-                inOwnPlaylist = ownPlaylist,
-            )
+        val gaps = missing.groupBy { it.before.coerceAtMost(songs.size) }
+        fun gapsAt(index: Int) = gaps[index]?.forEach { m -> item(key = "missing-${m.id}") { missingRow(m) } }
+        songs.forEachIndexed { index, song ->
+            gapsAt(index)
+            item(key = "$index-${song.id}") {
+                SongRow(
+                    song = song,
+                    // A song you tap goes in Recent songs; Play, Shuffle and Resume put the whole page in Recently played.
+                    onClick = { app.activity.song(song); player.play(songs, index, source = source) },
+                    isCurrent = song.id == nowPlaying.songId,
+                    showCover = showCovers,
+                    onOpenAlbum = if (showCovers) nav.openAlbum else null,
+                    onRemoveFromPlaylist = onRemoveSong?.let { remove -> { remove(index) } },
+                    inOwnPlaylist = ownPlaylist,
+                )
+            }
         }
+        gapsAt(songs.size)
         footer?.invoke(this)
+    }
+}
+
+/** A song of a playlist the library doesn't have: greyed out, with Request (and Remove, on your own playlist). */
+@Composable
+private fun MissingSongRow(song: MissingSong, onRequest: suspend () -> Unit, onRemove: (() -> Unit)?) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    val t = song.track
+    val r = song.request
+    val status = when {
+        song.queued -> "Queued"
+        r == null -> null
+        r.status == "open" -> if (r.stage == "review" || r.stage == "approved") "On its way" else "Requested"
+        r.status == "done" -> "Arriving soon"
+        else -> null // declined: it can be asked for again
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).alpha(0.38f), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(UiSize.SongThumb).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) { Icon(painterResource(R.drawable.ic_music_note), contentDescription = "Not in the library", modifier = Modifier.size(20.dp)) }
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(t.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (r?.status == "declined") "Couldn't be found" + (r.note?.let { ": $it" } ?: "")
+                    else song.note ?: listOfNotNull(t.artists.joinToString().ifEmpty { null }, "Not in the library").joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (status != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = if (onRemove == null) 16.dp else 0.dp)) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
+        } else {
+            FilledTonalButton(
+                onClick = { busy = true; scope.launch { onRequest(); busy = false } },
+                enabled = !busy,
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                modifier = Modifier.padding(end = if (onRemove == null) 16.dp else 0.dp),
+            ) { Text(if (r?.status == "declined") "Ask again" else "Request") }
+        }
+        onRemove?.let { IconButton(onClick = it) { Icon(Icons.Filled.Close, contentDescription = "Remove from this playlist") } }
     }
 }
 
@@ -331,15 +532,23 @@ private fun shortDate(iso: String): String = runCatching {
 }.getOrDefault(iso.take(10))
 
 /**
- * "Resume · Song name": continue a playlist, movie or Liked songs from the song you were on last
+ * "Resume · Song name": continue a playlist, movie, mix or Liked songs from the song you were on last
  * time, in the same order as then (a shuffled order stays as it was). Songs added since join at the end.
+ * Only on the last few places you played from (QueueMemory.resumable), on any of your devices.
  */
 @Composable
 internal fun ResumeButton(source: String, songs: List<Song>, onResume: () -> Unit = {}) {
     val app = LocalApp.current
     val now by app.player.nowPlaying.collectAsStateWithLifecycle()
+    // Where you left off on all your devices (the server's), read again when something else starts playing.
+    val fromServer by produceState(emptyList<QueueMemory.Saved>(), source, now.source) {
+        value = runCatching { app.social.api.resumePoints() }.getOrDefault(emptyList())
+    }
     if (now.source == source) return // already playing from here
-    val saved = remember(source, songs, now.source) { app.queueMemory.get(source) } ?: return
+    if (source !in remember(fromServer, now.source) { app.queueMemory.resumable(fromServer, now.source) }) return
+    val local = remember(source, songs, now.source) { app.queueMemory.get(source) }
+    // The newer of the server's and this phone's.
+    val saved = fromServer.find { it.source == source }?.takeIf { server -> local == null || server.savedAt > local.savedAt } ?: local ?: return
     val byId = songs.associateBy { it.id }
     val current = byId[saved.currentId] ?: return
     OutlinedButton(onClick = {
@@ -351,5 +560,54 @@ internal fun ResumeButton(source: String, songs: List<Song>, onResume: () -> Uni
     }) {
         Icon(Icons.Filled.PlayArrow, contentDescription = null)
         Text("Resume · ${current.title}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp))
+    }
+}
+
+/** Downloads all songs in this album or playlist for offline listening. */
+@Composable
+private fun DownloadButton(songs: List<Song>) {
+    if (songs.isEmpty()) return
+    val app = LocalApp.current
+    val offline = app.offlineDownloads
+    val downloadedIds by offline.downloadedIds.collectAsStateWithLifecycle()
+    val downloadingIds by offline.downloadingIds.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val songIds = remember(songs) { songs.map { it.id }.toSet() }
+    val allDownloaded = remember(downloadedIds, songIds) { songIds.isNotEmpty() && songIds.all { it in downloadedIds } }
+    val isDownloading = remember(downloadingIds, songIds) { songIds.any { it in downloadingIds } }
+
+    IconButton(
+        onClick = {
+            if (isDownloading) return@IconButton
+            if (allDownloaded) {
+                songIds.forEach { offline.removeSong(it) }
+                Toast.makeText(context, "Downloads removed", Toast.LENGTH_SHORT).show()
+            } else {
+                scope.launch {
+                    val count = songs.count { it.id !in downloadedIds }
+                    Toast.makeText(context, "Downloading $count songs…", Toast.LENGTH_SHORT).show()
+                    val completed = offline.downloadSongs(songs, app.api, app.audioQuality.downloadQuality.value)
+                    Toast.makeText(context, "Downloaded $completed songs", Toast.LENGTH_SHORT).show()
+                }
+            }
+        },
+    ) {
+        if (isDownloading) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else if (allDownloaded) {
+            Icon(
+                painterResource(R.drawable.ic_download_done),
+                contentDescription = "Downloaded. Tap to remove",
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        } else {
+            Icon(
+                painterResource(R.drawable.ic_download),
+                contentDescription = "Download for offline listening",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

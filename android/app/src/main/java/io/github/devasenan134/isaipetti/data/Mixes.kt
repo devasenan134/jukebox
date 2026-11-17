@@ -32,7 +32,7 @@ data class MixSong(
 @Serializable
 data class Mix(
     val id: String,
-    /** "daily", "discover", "repeat", "rewind", "new", "friends", "popular", "mood", "decade", "composer", "singer" or "radio". */
+    /** "daily", "daylist", "discover", "fresh", "because", "artistmix", "topic", "season", "mood", "decade", "composer", "singer", "radio"... */
     val kind: String = "",
     val title: String = "",
     val subtitle: String = "",
@@ -50,6 +50,10 @@ data class Mix(
     val endless: Boolean = false,
     /** Picked for your taste: shown as "Made for <your name>". */
     val personal: Boolean = false,
+    /** Shows "New": back on your Home after a week or more away, or a weekly mix in its new week. */
+    val isNew: Boolean = false,
+    /** How to draw its cover (ui/mixes/MixArt.kt); null: the old way, from [covers] and [color]. */
+    val art: MixArt? = null,
     val songs: List<MixSong> = emptyList(),
 ) {
     /** What the player remembers a queue was started from. Stations keep growing while this is playing. */
@@ -59,6 +63,23 @@ data class Mix(
         const val SOURCE_PREFIX = "mix:"
     }
 }
+
+/** A mix cover's design, worked out by the server (MixArt in MixMaker.kt). */
+@Serializable
+data class MixArt(
+    /** sleeve, cassette, sky, crate, spin, polaroid, photos, lp, single, reel, cd, diecut, paper, turntable or tuner. */
+    val style: String,
+    val kicker: String = "",
+    val headline: String = "",
+    /** A person's ("ar-…") or a cover ("al-…"); null: the mix's covers. */
+    val picture: String? = null,
+    val ground: String = "#121212",
+    val ink: String = "#ffffff",
+    /** For sky: dawn, day, dusk, night or rain. */
+    val variant: String? = null,
+    /** A sticker or dial reading: "FRI 31 OCT", "96.4 FM". */
+    val stamp: String? = null,
+)
 
 @Serializable data class MixSection(val id: String, val title: String, val mixes: List<Mix> = emptyList())
 
@@ -79,6 +100,10 @@ data class PlayEvent(
  * The mixes on Home and the ones you saved to Your Library. They're worked out on the friends server,
  * which keeps them up to date; the app just asks again when a screen opens.
  */
+/** A list of albums from the music site the library is kept up to date from (Trending, Latest), in the site's order. */
+@Serializable
+data class Feed(val id: String, val title: String, val changedAt: Long = 0, val albums: List<Album> = emptyList())
+
 class Mixes(private val api: () -> SocialApi, private val scope: CoroutineScope) {
     private val _home = MutableStateFlow<HomeMixes?>(null)
     /** Null until loaded, or if the friends server has no mixes. */
@@ -87,12 +112,22 @@ class Mixes(private val api: () -> SocialApi, private val scope: CoroutineScope)
     private val _followed = MutableStateFlow<List<Mix>>(emptyList())
     val followed: StateFlow<List<Mix>> = _followed
 
+    private val _feeds = MutableStateFlow<List<Feed>>(emptyList())
+    /** Trending and Latest on the music site, as far as the library has them (Home's rows). */
+    val feeds: StateFlow<List<Feed>> = _feeds
+
     fun refresh() {
         scope.launch {
             // No friends server, or mixes are off there: Home just doesn't show them.
             _home.value = runCatching { api().mixes() }.getOrNull() ?: _home.value
             _followed.value = runCatching { api().followedMixes() }.getOrNull() ?: _followed.value
         }
+        refreshFeeds()
+    }
+
+    /** Fetches Trending and Latest again: when Home opens, and when the server says one changed. */
+    fun refreshFeeds() {
+        scope.launch { _feeds.value = runCatching { api().feeds() }.getOrNull() ?: _feeds.value }
     }
 
     fun isFollowed(id: String) = _followed.value.any { it.id == id }

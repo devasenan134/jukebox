@@ -14,7 +14,7 @@ npm run build    # dist/, which the Docker image copies to /app/web
 
 Fonts are served by Jukebox itself, not Google Fonts: Figtree and Noto Sans Tamil come from npm
 (`@fontsource`), and the icons are a subset of Material Symbols Rounded with only the icons the app uses,
-in `public/fonts/material-symbols-rounded.woff2`. After using a new icon, make the file again:
+in `src/assets/fonts/material-symbols-rounded.woff2` (bundled, so its name changes with it and browsers never keep an old one). After using a new icon, make the file again:
 
 ```bash
 python3 web/scripts/icons.py

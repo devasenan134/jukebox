@@ -1,0 +1,259 @@
+# Request fulfilment
+
+Built 2026-10-13: server (`/place`, review stage, `done` with an album), the Requests page's "Ready to check"
+on web, Mac and Android, `scripts/requests/fulfil.py` and the analyzer's wake-up signal.
+
+## Using it
+
+The download site can't be reached from the Mac mini (its DNS sends the site to a dead address, and WARP
+there didn't help), so the downloading half runs on the MacBook and the waiting half on the Mac mini.
+
+1. Look at the requests in Jukebox and run the matcher on the MacBook (one request or a batch) → one JSON file.
+2. On the MacBook: `fulfil.py run jukebox_requests_matched.json`. For each request it downloads, checks, tags and
+   fetches lyrics, rsyncs the folder to `craftingtable:/mnt/ugreen/jukebox/requests/<id>/` right away and hands it
+   in. At the end it starts the waiting half on the Mac mini over ssh, so the laptop can sleep afterwards.
+3. Requests → Everyone's → **Ready to check**: listen, then Approve or Reject.
+4. The Mac mini files approved music within a minute or two; the askers get "ready".
+   `ssh craftingtable /mnt/ugreen/jukebox/scripts/requests/fulfil.py status` shows what's in progress and
+   `/mnt/ugreen/jukebox/requests/fulfil.log` what it did.
+
+Other commands: `fulfil.py run <json> --dry-run` (nothing downloaded), `fulfil.py resume` (starts the waiting half
+again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/jukebox/requests/undo/<time>.jsonl`.
+
+## How music is filed
+
+- **Its own folder per source and language:** downloads go to `MusicLibrary/<language>/masstamilan/`
+  (`tamil/masstamilan`, `malayalam/masstamilan`, …), never into `tamil/jiosaavn_m4a`. The language is the matcher's
+  `metadata.language` (not always right: it said Tamil for Premam). `tamil-masstamilan` is a library that adds to
+  the Tamil albums (LIBRARIES' fourth part, `:tamil`), so a song for an album JioSaavn already has goes to
+  `tamil/masstamilan/<that album's folder name>/` with that album's tags and shows up in the same album.
+- **Background score vs songs:** a score album ("X BGM", "X Special BGM Additional", "X OST", "… (Original Background
+  Score)") is filed as X's score: `<Album> (<Year>) (Original Background Score)/`, album tag `<Album> (Original
+  Background Score)`. Inside a songs album, only tracks that say so ("Theme Music", "BGM", "Instrumental",
+  "Background Score") go there; Jukebox's own score detection (title and sound) still runs after each scan, and
+  `data/score-overrides.txt` (`song: <path>` / `score: <path>`) corrects it by hand.
+- **A request for the songs isn't filled by the score:** search keeps offering "Vishwaroopam II" while the library has
+  only its score, and the review card warns when a songs request was matched to a score page (or the other way).
+- **An album already in the library:** only the songs (or score pieces) it doesn't have are downloaded; if it has them
+  all, the request is closed with that album.
+- **Named after the request** (the catalog's name, which the library uses), not the matched page's title.
+- **Two or more songs of one album asked for: the whole album comes.** The server already turns 2+ queued songs of an
+  album into one album request, but not when the album is partly in the library or the catalog doesn't list it; then
+  they arrive as song requests. So the script groups a batch's song requests by album too: the first downloads every
+  song of the album (minus other versions and songs the library has), the rest come with it.
+- **Every album gets a cover:** the page's poster, else the catalog's (iTunes) album art. `fulfil.py covers` on the
+  Mac mini gives downloaded albums that still have none iTunes' art (`--dry-run` lists them first) and rescans; the
+  scanner now picks up a cover.jpg put beside songs it has already read.
+- **Other versions left out:** karaoke, remix, EDM, lo-fi, slowed/reverb, 8D, sped-up, mash-up and DJ-mix tracks
+  aren't downloaded with an album unless the request is for one; a song request matched to a version is flagged.
+- **Lyrics:** LRCLIB (synced first, then plain), else JioSaavn's plain lyrics; only lyrics in the song's language's
+  script (or English letters) count, so another language's song of the same name isn't used.
+- **Admins correct things** on the Requests page: "Change" on a download picks the album it joins; "Match album"
+  closes an open request with an album from the library; "Change album" / "Reopen" fix a closed one.
+
+## Trending and Latest (feeds)
+
+Built 2026-11-16. `fulfil.py feeds` keeps the library up to date with masstamilan's two home-page lists,
+"Trending at MassTamilan.com" and "Latest Tamil songs download", and Home shows each as a row of albums
+(website, Mac app, Android), in the site's order:
+
+1. It reads both lists with api-anything (the `masstamilan` site's `trending` and `latest` operations), and for a
+   Trending album (only a name there) its composer, poster and year from the site's search.
+2. Every album on them is downloaded **whole**: the songs the library doesn't have (other versions left out, a song
+   JioSaavn names differently, "Hukum" for "Hukum - Thalaivar Alappara", counts as had), tagged, with lyrics and a
+   cover, like a request. Latest albums grow as singles come out, so each run looks again.
+3. **No check:** these aren't requests. On the laptop the albums go to `requests/feeds/<page>/` on the Mac mini and
+   `fulfil.py file-feeds` there files them (into the album's own folder if it's there, else
+   `tamil/masstamilan/<Album> (<Year>)/`), rescans and wakes the analyzer. Undo logs: `requests/undo/feeds-*.jsonl`.
+4. The lists go to `PUT /admin/feeds/{trending|latest}`. The server keeps them (schema 35), and when one changed it
+   sends `feedsChanged` so open apps fetch `GET /feeds` again. Home shows the albums of each list the library has.
+
+**Where it runs:** the home network's DNS sends masstamilan to a block page (156.154.112.141), on the Mac mini and the
+HP alike, so it runs on the MacBook, every 6 hours while it's awake. api-anything is a local tool and uses the network
+of the machine it runs on.
+
+**Setup on the MacBook (once):**
+
+```sh
+# the two lists, as api-anything operations of the masstamilan site (the sidebar is on every page)
+api-anything add masstamilan trending --trigger 'https://www.masstamilan.dev/' --match path=/ \
+  --html '{"items":"div.sb section.wid:first-of-type li","fields":{"title":"a","url":"a@href"}}' \
+  --description "The Trending at MassTamilan.com list (sidebar), in order"
+api-anything add masstamilan latest --trigger 'https://www.masstamilan.dev/' --match path=/ \
+  --html '{"items":"div.a-i","fields":{"title":"h2","url":"a@href","poster":"img@src","info":"p"}}' \
+  --description "The home page's Latest Tamil songs download list, in order"
+api-anything call masstamilan trending      # should list about 10 albums
+```
+
+Add `API_ANYTHING=<output of: which api-anything>` to `~/.config/jukebox-fulfil.env`, try
+`fulfil.py feeds --dry-run`, then schedule it with `~/Library/LaunchAgents/cc.craftingtable.jukebox-feeds.plist`
+(`launchctl load` it):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>cc.craftingtable.jukebox-feeds</string>
+  <key>ProgramArguments</key><array>
+    <string>/opt/homebrew/bin/uv</string><string>run</string><string>--script</string>
+    <string>/Users/YOU/code/jukebox/scripts/requests/fulfil.py</string><string>feeds</string>
+  </array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StartInterval</key><integer>21600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/tmp/jukebox-feeds.log</string>
+  <key>StandardErrorPath</key><string>/tmp/jukebox-feeds.log</string>
+</dict></plist>
+```
+
+The ssh to the Mac mini has to work without a prompt (`ssh-copy-id craftingtable`; if Cloudflare Access asks for a
+login, `cloudflared access login https://tp.craftingtable.cc` once).
+
+## Setup (once)
+
+MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`); `ssh craftingtable`
+working (`ssh-copy-id craftingtable` to stop password prompts); `~/.config/jukebox-fulfil.env` (chmod 600):
+`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil/jiosaavn_m4a`,
+`MUSIC_ROOT=/mnt/ugreen/NAS/MusicLibrary`, `LIBRARY_NAME=tamil`,
+`LIBRARY_FOLDERS=tamil-masstamilan=tamil/masstamilan,malayalam=malayalam/masstamilan,telugu=telugu/masstamilan,hindi=hindi/masstamilan`,
+`REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
+
+Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys); in `.env` `REQUESTS_FOLDER`, `REQUESTS_DIR=/requests`,
+`LIBRARY_ROOT=/mnt/ugreen/NAS/MusicLibrary` and the language libraries in `LIBRARIES`
+(`tamil-masstamilan=/library/tamil/masstamilan:film:tamil:tamil;malayalam=/library/malayalam/masstamilan:film:malayalam;…`); the live `docker-compose.yml` mounts `/requests` and `/library`
+read-only; the analyzer's `.env` has `LIBRARY_ROOT` too. `~/.config/jukebox-fulfil.env` as on the MacBook but
+`JUKEBOX_URL=http://127.0.0.1:8098`, no `REMOTE*`, and `ANALYZER=jukebox-analyzer`.
+Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).
+
+## Decided (2026-10-13)
+
+- The matcher runs only on the MacBook and writes `jukebox_requests_matched.json`. The Mac mini can't reach the
+  download site, so downloading happens on the MacBook too; files go to the Mac mini by rsync.
+- A **fulfil script** does the rest, using the server's existing admin API: download → tag → rescan →
+  mark done. Almost no server changes.
+- The matcher fetches only the song for a song request and the whole album for an album request; a song is
+  filed into its album (below).
+- Prefer the 320 kbps file; keep mp3 as mp3 (converting to m4a would only lose quality; the scanner
+  reads mp3).
+- Lyrics are fetched with the download (LRCLIB), shown per song in the check.
+- Every fulfilment is checked by an admin on the Requests page before it moves into the library; a
+  rejected one is deleted.
+- The fulfil script runs only when started by hand with a batch JSON; approvals drive the rest.
+
+## Flow (decided 2026-10-13)
+
+Nothing runs on a timer. The admin starts each batch; approving in the app starts the rest.
+
+```
+1. You look at the requests in Jukebox, run the matcher on one request or a batch → one JSON file.
+2. scp it to the Mac mini and start:   fulfil.py run batch.json
+   for each request in the file (an album before songs from that album):
+     skip    if the request is no longer open, or match_found is false (listed in the report)
+     covered a song whose album is also in this batch: no download, it closes with the album
+     download 320 kbps (128 if 320 fails) + poster → requests/<id>/
+     check    ffprobe opens it, length ±3 s, no track missing, really ≥256 kbps
+     tag      site tags dropped; ours written (album tags copied from the album's folder if it exists)
+     hand in  POST /admin/requests/{id}/review  → stage "review"; admins get a push "N ready to check"
+   prints a report, then keeps running in the background (systemd-run, survives logging out) waiting for
+   your decisions on this batch: one cheap call to the local server every 30 s, only while it waits.
+3. You check in Jukebox (Requests → "Ready to check", admins only): cover, album, year, composer, where it
+   goes, each track playable, length, bitrate → Approve / Reject (note).
+4. The waiting script acts on each decision as it comes:
+   Rejected → delete requests/<id>/, request back to open with the note.
+   Approved → a. look up the destination again (/place), since the album may have arrived since
+              b. normalise tags: copy the album tags from the destination album if it exists now
+              c. move into the main library (album folder or new <Album> (<Year>)/), undo log
+              d. POST /library/scan, wait until it's finished (also runs people merging, score
+                 splitting, photos and small covers)
+              e. /place → POST /admin/requests/{id}/done {albumId, songId} → askers get "ready"
+              f. wake the analyzer (docker kill -s USR1 jukebox-analyzer) so mixes get the new songs
+                 now, not at its next 10-minute check
+   It exits once every request in the batch is decided (or after 7 days; `fulfil.py resume` picks up
+   decisions left over, e.g. after a reboot).
+```
+
+- **Why the script moves files, not the server:** the server mounts the music read-only and should stay that
+  way. The server stores the decision; the script, on the host, acts on it.
+- **Listening before approving:** the server mounts `requests/` read-only (outside `LIBRARIES`, so it's never
+  scanned and other users never see it) and streams a track from it to admins only:
+  `GET /admin/requests/{id}/review/{n}`.
+- **Tags are written before the review**, so what you check is what lands; step 4b only re-copies the album
+  tags if the destination changed in between.
+- **Links expire about a day after matching**, so downloading happens right away at step 2. Approval can wait.
+- Everything goes to the **main library** (no `requests` library).
+
+**Server, on top of `/place` and `done` (done, 955be4b):** schema 26 `music_requests.stage`
+(`review` / `approved` / `rejected`) + `review_json`; `POST /admin/requests/{id}/review`,
+`POST …/approve`, `POST …/reject {note}`, `GET /admin/requests/decisions?ids=` for the script,
+the stream route, the "ready to check" push. Old apps ignore the new fields.
+**Analyzer:** SIGUSR1 = check for new songs now.
+
+### Mapping the matcher's JSON
+
+Sample: request 12, the song *Mayiliragae* from *Anbe Aaruyire*. Song requests carry `matched_song`; album
+requests list the whole album in `tracks`.
+
+| Field | Used as |
+|---|---|
+| `request_id`, `kind` (`song` / album) | which request, and what to download |
+| `match_found: false` | skipped, reported at the end |
+| `match_score`, `matched_song.match_score` | shown in the review step |
+| `metadata.year` | the album's **real** year (2005 here; the request's `year` 2013 is the iTunes re-release) |
+| `metadata.music` | composer + album artist |
+| `metadata.lyricists` | lyricist (album-wide; split on `,` / `&`) |
+| `metadata.track_count` | checked against `tracks` for an album request |
+| `metadata.poster` | cover |
+| `best_match.title` | album, minus a bracketed alias: "Anbe Aaruyire (Ah Aah)" → "Anbe Aaruyire" |
+| `matched_song` | the one file for a song request (`download320`, else `download128`) |
+| `tracks[i]` | album request: track i + 1 of `track_count`. Song request: the matched song's position in `tracks` gives its track number (Mayiliragae = 3 of 6) |
+| `name`, `artist`, `duration` | title (minus a trailing "(<album>)"), singers (split on `,` / `&`), expected length |
+
+Relative links (`/downloader/…`) are resolved against `best_match.url`. Not used: `metadata.zip320`
+(per-track files can each be checked), `director`, `starring`, `language`, `downloads`.
+
+### Where a file goes
+
+The scanner groups files into albums by **library + album title + year** (Scanner.kt:174), not by folder.
+A song joins an existing album when it is in the same library with the same album tag and year
+(tested: RequestPlaceTest).
+
+| Request | Album in the library? | Destination after approval |
+|---|---|---|
+| Album | no (the app only offers albums that aren't there) | main library, new `<Album> (<Year>)/` |
+| Song | **yes** | **that album's own folder**; album, date and album_artist tags copied from a track already there |
+| Song | no | main library, new `<Album> (<Year>)/`; a later album request for it joins |
+
+**"Is it in the library" must check the year, not just the title.** The live library has *Anbe Aaruyire*
+**(1975)**, 5 songs, a different film. Matching on the title alone would drop the 2005 A.R. Rahman song into
+the 1975 film. So the lookup takes the matcher's year and composer: same title **and** (year within 1 **or**
+same composer). For request 12 that finds nothing, so the song goes to `requests/Anbe Aaruyire (2005)/`.
+
+Adding to an existing album folder is the only write into the main library: one new file, existing files
+never touched, every added path in an undo log (`fulfil.py --undo <log>`).
+
+## Server changes
+
+1. `GET /admin/requests/{id}/place?year=&composer=`: where the request's album is in the library, matched on
+   title + (year ±1 or composer), using the matcher's year and composer, not the catalog's. Returns
+   `{ albumId, album, year, songId, library, folder, sampleFile }`, or 404. The script reads the exact album
+   tags from `sampleFile` with ffprobe.
+2. `POST /admin/requests/{id}/done` takes an optional `{ albumId, songId }`. `Shelf.find` uses the catalog's
+   year and artist, and for request 12 those are 2013 and "A.R. Rahman, Madhushree, Naresh Iyer & Vaali".
+   It would answer "not in the library" even after the song is there. The script knows the album it filled,
+   so it passes the id and the server checks it exists. The apps' "Added" button keeps working as today.
+3. The review step (see Flow).
+
+## Things to watch
+
+- **Links expire and carry an address.** `/downloader/<token>/1792017876/d320_cdn/…/<base64>`: the number is
+  a Unix time (2026-10-14 22:44 UTC, about a day after matching), and the base64 decodes to the IPv6 address
+  the match ran from (a Cloudflare WARP one). So run the fulfil script soon after matching. If a link
+  refuses, the request is left open and the script says "match again".
+- **Rescan time.** `/library/scan` walks every library, but unchanged files are skipped by size + mtime,
+  so it's mostly the new album. Polling has a timeout (30 min) and then reports "scan still running".
+- **Admin login.** The script signs in with an admin account from `~/.config/jukebox-fulfil.env`
+  (chmod 600) on the Mac mini.
+
+## Later
+
+- Lyrics from JioSaavn when LRCLIB has none.

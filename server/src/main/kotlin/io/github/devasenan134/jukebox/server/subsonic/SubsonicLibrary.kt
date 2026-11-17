@@ -5,6 +5,7 @@ import io.github.devasenan134.jukebox.server.Fuzzy
 import io.github.devasenan134.jukebox.server.library.Covers
 import io.github.devasenan134.jukebox.server.library.Personal
 import io.github.devasenan134.jukebox.server.library.PlaylistRow
+import io.github.devasenan134.jukebox.server.library.Transcoder
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.serialization.json.JsonArray
@@ -29,7 +30,12 @@ import java.time.Instant
  * album's id, and its background score release, if any, as a second album under the release's id, named
  * "<album> (Original Background Score)". A song is a recording; its id never changes.
  */
-class SubsonicLibrary(private val db: Db, private val covers: Covers, private val roots: () -> Map<Long, String>) {
+class SubsonicLibrary(
+    private val db: Db,
+    private val covers: Covers,
+    private val roots: () -> Map<Long, String>,
+    private val transcoder: Transcoder? = null,
+) {
 
     // ---------- albums ----------
 
@@ -139,7 +145,7 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
     }
 
     /** Album list entries for album views by id, in that order. */
-    private suspend fun albumsById(ids: List<String>, me: Personal = Personal.NOBODY): List<JsonObject> {
+    suspend fun albumsById(ids: List<String>, me: Personal = Personal.NOBODY): List<JsonObject> {
         val byId = views().byId
         return ids.mapNotNull { byId[it] }.map { albumJson(it, null, me) }
     }
@@ -265,16 +271,19 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
         """SELECT p.id, p.name, p.sort_name,
                   (SELECT count(DISTINCT c.album_id) FROM album_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
                   EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'singer'),
-                  EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer')
+                  EXISTS (SELECT 1 FROM recording_credits c WHERE c.person_id = p.id AND c.role = 'composer'),
+                  (SELECT count(DISTINCT rl.album_id) FROM recording_credits rc JOIN tracks t ON t.recording_id = rc.recording_id JOIN releases rl ON rl.id = t.release_id WHERE rc.person_id = p.id)
              FROM people p ${if (where.isBlank()) "WHERE" else "$where AND"} p.merged_into IS NULL""", *args,
     ) {
-        val albums = it.getInt(4)
+        val composerAlbums = it.getInt(4)
+        val singerAlbums = it.getInt(7)
+        val albums = maxOf(composerAlbums, singerAlbums)
         buildJsonObject {
             put("id", it.getString(1))
             put("name", it.getString(2))
             put("albumCount", albums)
             putJsonArray("roles") {
-                if (albums > 0) add("albumartist")
+                if (composerAlbums > 0) add("albumartist")
                 if (it.getInt(6) == 1) add("composer")
                 if (it.getInt(5) == 1) add("artist")
             }
@@ -297,12 +306,13 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
         // An old id of a spelling that was merged leads to the person.
         val id = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", asked) { it.getString(1) } ?: return@read null
         val person = people("WHERE p.id = ?", id).firstOrNull() ?: return@read null
-        // Their albums (credited on the album, or singing on it).
-        val albumIds = query(
-            """SELECT album_id FROM album_credits WHERE person_id = ?
-               UNION SELECT rl.album_id FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
-                     JOIN releases rl ON rl.id = t.release_id WHERE c.person_id = ?""", id, id,
-        ) { it.getString(1) }.toSet()
+        // A composer's albums are the ones they composed (not every film they sang a song in); anyone else's are
+        // the albums they sing on.
+        val albumIds = query("SELECT album_id FROM album_credits WHERE person_id = ? AND role = 'composer'", id) { it.getString(1) }.toSet()
+            .ifEmpty {
+                query("""SELECT DISTINCT rl.album_id FROM recording_credits c JOIN tracks t ON t.recording_id = c.recording_id
+                           JOIN releases rl ON rl.id = t.release_id WHERE c.person_id = ?""", id) { it.getString(1) }.toSet()
+            }
         person to albumIds
     }?.let { (person, albumIds) ->
         // Every view of those albums: the songs and, for films, the background score; newest first.
@@ -422,11 +432,17 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
     } }
 
     /** The best copy of a song on disk: (file, content type). */
-    suspend fun audio(requested: String): Pair<File, String>? = mapped(requested).let { id -> db.read {
-        val rid = resolve(id)
-        queryOne("""SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
-                    ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
-    }?.let { (lib, path, format) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(format) } } }
+    suspend fun audio(requested: String, maxBitRate: Int? = null, format: String? = null): Pair<File, String>? = mapped(requested).let { id ->
+        val rid = db.read { resolve(id) }
+        if (transcoder != null && (format?.lowercase() == "opus" || (maxBitRate != null && maxBitRate <= 192))) {
+            val mobile = transcoder.find(rid)
+            if (mobile != null) return mobile to "audio/ogg; codecs=opus"
+        }
+        db.read {
+            queryOne("""SELECT library_id, path, format FROM files WHERE recording_id = ? AND missing_since IS NULL
+                        ORDER BY coalesce(bitrate, 0) DESC LIMIT 1""", rid) { Triple(it.getLong(1), it.getString(2), it.getString(3)) }
+        }?.let { (lib, path, fmt) -> roots()[lib]?.let { File(it, path) }?.takeIf { it.isFile }?.let { it to contentType(fmt) } }
+    }
 
     /** A cover (by artwork, album, release or song id), resized to fit [size] when asked. */
     suspend fun cover(requested: String, size: Int?): Pair<File, String>? {
@@ -461,12 +477,14 @@ class SubsonicLibrary(private val db: Db, private val covers: Covers, private va
     }
 
     /**
-     * A person has no photo here, so their picture (a "This Is" mix, a station) is the cover of their newest
-     * album: one they're credited on as a whole (a composer's), else one they sing on.
+     * A person's photo (people-photos/), else the cover of their newest album: one they compose, else one they
+     * sing on (a "This Is" mix, a station).
      */
     private fun Connection.personCover(id: String): Pair<String, String>? {
         val person = queryOne("SELECT coalesce(merged_into, id) FROM people WHERE id = ?", id) { it.getString(1) } ?: return null
-        return queryOne(
+        return queryOne("SELECT w.hash, w.mime FROM people p JOIN artwork w ON w.id = p.photo_id WHERE p.id = ?", person) {
+            it.getString(1) to it.getString(2)
+        } ?: queryOne(
             """SELECT w.hash, w.mime FROM album_credits c JOIN albums a ON a.id = c.album_id JOIN artwork w ON w.id = a.cover_id
                 WHERE c.person_id = ? ORDER BY coalesce(a.year, 0) DESC LIMIT 1""", person,
         ) { it.getString(1) to it.getString(2) } ?: queryOne(

@@ -78,6 +78,7 @@ import io.github.devasenan134.isaipetti.ui.search.SearchScreen
 import io.github.devasenan134.isaipetti.ui.settings.SettingsScreen
 import io.github.devasenan134.isaipetti.ui.settings.StatsScreen
 import io.github.devasenan134.isaipetti.ui.search.RequestsScreen
+import io.github.devasenan134.isaipetti.ui.library.ImportScreen
 import io.github.devasenan134.isaipetti.ui.settings.UpdateDialog
 import io.github.devasenan134.isaipetti.ui.social.ChatScreen
 import io.github.devasenan134.isaipetti.ui.social.SocialScreen
@@ -96,6 +97,7 @@ import kotlinx.serialization.Serializable
 @Serializable object SettingsRoute
 @Serializable object StatsRoute
 @Serializable object RequestsRoute
+@Serializable data class ImportRoute(val link: String? = null)
 @Serializable object LibraryRoute
 @Serializable object LikedSongsRoute
 @Serializable object PlaylistsRoute
@@ -124,6 +126,8 @@ class Nav(
     val openMix: (String) -> Unit,
     /** Your requests for music that isn't in the library (admins: everyone's). */
     val openRequests: () -> Unit,
+    /** Import a playlist from Spotify, Apple Music, YouTube or a file. */
+    val openImport: () -> Unit,
     val back: () -> Unit,
 )
 
@@ -162,6 +166,7 @@ fun MainScreen() {
         },
         openMix = { navController.navigate(MixRoute(it)) },
         openRequests = { navController.navigate(RequestsRoute) },
+        openImport = { navController.navigate(ImportRoute()) },
         back = { navController.popBackStack() },
     )
 
@@ -173,7 +178,11 @@ fun MainScreen() {
         val target = pending ?: return@LaunchedEffect
         app.pendingOpen.value = null
         playerOpen = false
-        val tab = if (target is PendingOpen.Album || target is PendingOpen.Requests) SearchRoute else SocialRoute
+        val tab = when (target) {
+            is PendingOpen.Album, PendingOpen.Requests -> SearchRoute
+            is PendingOpen.Import -> LibraryRoute
+            else -> SocialRoute
+        }
         currentTab = tabs.indexOfFirst { it.route == tab }
         navController.navigate(tab) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -184,6 +193,7 @@ fun MainScreen() {
             is PendingOpen.Album -> nav.openAlbum(target.albumId)
             PendingOpen.Requests -> nav.openRequests()
             PendingOpen.Friends -> Unit
+            is PendingOpen.Import -> navController.navigate(ImportRoute(target.link))
         }
     }
 
@@ -270,6 +280,7 @@ fun MainScreen() {
                 screen<SettingsRoute> { SettingsScreen(nav) }
                 screen<StatsRoute> { StatsScreen(nav) }
                 screen<RequestsRoute> { RequestsScreen(nav) }
+                screen<ImportRoute> { ImportScreen(nav, it.toRoute<ImportRoute>().link) }
                 screen<LibraryRoute> { LibraryScreen(nav) }
                 screen<LikedSongsRoute> { LikedSongsScreen(nav) }
                 screen<PlaylistsRoute> { PlaylistsScreen(nav) }

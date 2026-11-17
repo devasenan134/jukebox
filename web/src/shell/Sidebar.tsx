@@ -42,7 +42,7 @@ export function Sidebar() {
             <Icon name="library_music" size={26} />
             Your Library
           </a>
-          <IconButton icon="add" label="New playlist" onClick={newPlaylist.start} />
+          <IconButton icon="add" label="New or import playlist" onClick={newPlaylist.start} />
           <IconButton icon="settings" label="Settings" onClick={nav.openSettings} />
         </div>
         <div style={{ padding: '6px 16px 8px' }}>{chips}</div>

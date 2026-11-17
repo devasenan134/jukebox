@@ -192,10 +192,25 @@ class Push(private val db: Db, private val sender: PushSender) {
         mapOf("type" to "musicRequest", "title" to "New request", "body" to "${by.displayName} asked for $label"),
     )
 
+    /** The request queue has gone through a batch: its new requests are in Requests now. Every admin is told, the asker too. */
+    suspend fun requestsReady(adminIds: List<Long>, body: String) = notify(
+        adminIds,
+        mapOf("type" to "musicRequest", "title" to "New requests", "body" to body),
+    )
+
     /** The music someone asked for is in the library now: tapping opens its movie. */
     suspend fun musicReady(userIds: List<Long>, label: String, albumId: String) = notify(
         userIds,
         mapOf("type" to "musicReady", "albumId" to albumId, "title" to "It's in the library", "body" to "♪ $label is ready to play"),
+    )
+
+    /** Fulfilled requests are downloaded and waiting for an admin to listen and approve. */
+    suspend fun musicToCheck(adminIds: List<Long>, count: Int, label: String) = notify(
+        adminIds,
+        mapOf(
+            "type" to "musicRequest", "title" to "Ready to check",
+            "body" to if (count == 1) "$label is downloaded: listen and approve" else "$count requests are downloaded: listen and approve",
+        ),
     )
 
     suspend fun musicDeclined(userIds: List<Long>, label: String, note: String?) = notify(

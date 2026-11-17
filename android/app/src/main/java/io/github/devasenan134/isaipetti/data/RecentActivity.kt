@@ -11,7 +11,8 @@ import kotlinx.serialization.json.Json
 /**
  * Everything you played recently, newest first, for Home: songs you started by tapping them
  * ("Recent songs"), and movies, playlists, composers, artists, mixes and Liked songs you started as a
- * whole with Play, Shuffle or Resume ("Recently played"). Kept on the phone.
+ * whole with Play, Shuffle or Resume ("Recently played"). Kept on the phone, and on the server for your other
+ * devices: [onPlayed] / [onForget] send changes there, [merge] takes in what the server has.
  */
 class RecentActivity(context: Context) {
     enum class Kind { Song, Movie, Playlist, Composer, Artist, Liked, Mix }
@@ -36,9 +37,21 @@ class RecentActivity(context: Context) {
     )
     val items: StateFlow<List<Item>> = _items
 
+    var onPlayed: (Item) -> Unit = {}
+    var onForget: (Kind, String) -> Unit = { _, _ -> }
+
     fun played(item: Item) {
         val stamped = item.copy(playedAt = System.currentTimeMillis())
         val list = (listOf(stamped) + _items.value.filterNot { it.kind == item.kind && it.id == item.id }).take(MAX)
+        _items.value = list
+        prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
+        onPlayed(stamped)
+    }
+
+    /** Takes in what the server has: each thing once, the newest time it was played (things played here offline stay). */
+    fun merge(server: List<Item>) {
+        val list = (server + _items.value).groupBy { it.kind to it.id }.values.map { same -> same.maxBy { it.playedAt } }
+            .sortedByDescending { it.playedAt }.take(MAX)
         _items.value = list
         prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
     }
@@ -56,6 +69,7 @@ class RecentActivity(context: Context) {
         val list = _items.value.filterNot { it.kind == kind && it.id == id }
         _items.value = list
         prefs.edit { putString(KEY, Json.encodeToString(serializer, list)) }
+        onForget(kind, id)
     }
 
     fun clear() {

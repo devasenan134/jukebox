@@ -118,9 +118,11 @@ class PlayerConnection(private val context: Context, private val api: SubsonicAp
         if (locked()) return
         val c = controller ?: return
         if (songs.isEmpty()) return
-        c.shuffleModeEnabled = shuffle
+        // Shuffle goes on after the songs are in, so the service shuffles from the first song (PlaybackService.shuffleFromCurrent).
+        c.shuffleModeEnabled = false
         val start = if (shuffle) songs.indices.random() else startIndex
         c.setMediaItems(songs.map { it.toMediaItem(api, source = source) }, start, 0)
+        c.shuffleModeEnabled = shuffle
         c.prepare()
         c.play()
     }

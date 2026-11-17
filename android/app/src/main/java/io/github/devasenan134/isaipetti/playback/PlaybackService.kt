@@ -11,11 +11,24 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.CommandButton
+import android.os.Bundle
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+import androidx.media3.session.SessionError
+import com.google.common.collect.ImmutableList
+import com.google.common.util.concurrent.SettableFuture
 import io.github.devasenan134.isaipetti.IsaipettiApp
+import io.github.devasenan134.isaipetti.data.OfflineDownloads
+import io.github.devasenan134.isaipetti.data.SongRef
 import io.github.devasenan134.isaipetti.lockscreen.LockScreenLyrics
 import io.github.devasenan134.isaipetti.MainActivity
 import com.google.common.util.concurrent.Futures
@@ -30,9 +43,11 @@ import kotlinx.coroutines.launch
  * Plays music in the background. Android keeps this service alive while music plays,
  * and Media3 shows the notification and lock-screen controls for it.
  * The UI never touches the player directly; it sends commands through [PlayerConnection].
+ * Android Auto browses and plays through it too ([CarLibrary]).
  */
-class PlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+class PlaybackService : MediaLibraryService() {
+    private var session: MediaLibrarySession? = null
+    private var car: CarLibrary? = null
     private var listenSync: ListenSync? = null
     private var lockScreenLyrics: LockScreenLyrics? = null
     private val scope = MainScope()
@@ -42,12 +57,28 @@ class PlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        // Turn "isaipetti://song/<id>" into a stream URL with the current login, right when it's needed.
-        val dataSource = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
-            if (spec.uri.scheme == SONG_SCHEME) spec.withUri(api.streamUrl(spec.uri.lastPathSegment!!).toUri()) else spec
+        // Turn "isaipetti://song/<id>" into a stream URL (or local offline copy), cached with Media3 CacheDataSource.
+        val offlineDownloads = OfflineDownloads.getInstance(this)
+        val upstreamFactory = ResolvingDataSource.Factory(DefaultDataSource.Factory(this)) { spec ->
+            if (spec.uri.scheme == SONG_SCHEME) {
+                val songId = spec.uri.lastPathSegment!!
+                val offlineFile = offlineDownloads.getOfflineFile(songId)
+                if (offlineFile != null && offlineFile.exists()) {
+                    spec.withUri(offlineFile.toUri())
+                } else {
+                    val quality = app.audioQuality.streamingQuality.value
+                    spec.withUri(api.streamUrl(songId, quality).toUri())
+                }
+            } else spec
         }
+        val cache = AudioCache.get(this)
+        val cacheDataSourceFactory = CacheDataSource.Factory()
+            .setCache(cache)
+            .setUpstreamDataSourceFactory(upstreamFactory)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -63,13 +94,20 @@ class PlaybackService : MediaSessionService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, player)
+        car = CarLibrary(app) { session?.player }
+        session = MediaLibrarySession.Builder(this, player, SessionCallback())
             .setSessionActivity(openApp)
-            .setCallback(SessionCallback())
             .build()
+        // The repeat button in the notification and on the lock screen shows the current mode.
+        player.addListener(object : Player.Listener {
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                session?.setMediaButtonPreferences(listOf(repeatButton(repeatMode)))
+            }
+        })
 
         startScrobbling(player)
         rememberQueues(player)
+        shuffleFromCurrent(player)
         stopAtClipEnds(player)
         // Lyrics over the lock screen when the screen goes off while music plays (if that's on in Settings).
         lockScreenLyrics = LockScreenLyrics(this) { player.isPlaying }.also { it.register() }
@@ -78,11 +116,86 @@ class PlaybackService : MediaSessionService() {
         val socialApi = { app.social.api.takeIf { app.session.social.value != null } }
         PlayReporter(player, socialApi, listeningTogether = { app.social.listen.joined.value != null }, scope)
         Stations(player, api, socialApi, scope)
-        // Tell friends what's playing (only while it's actually playing).
+
+        fun syncDevicePlayback() {
+            val song = player.currentMediaItem?.toSongRef()
+            val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toSongRef() }
+            val index = player.currentMediaItemIndex.coerceAtLeast(0)
+            val pos = player.currentPosition.coerceAtLeast(0L)
+            val isPlaying = player.isPlaying
+            val vol = player.volume
+            app.social.onDevicePlayback(song, queue, index, pos, isPlaying, vol)
+        }
+
+        app.social.onRemoteCommand = { cmd ->
+            when (cmd.action) {
+                "play" -> {
+                    val queueRefs = cmd.queue ?: (cmd.song?.let { listOf(it) })
+                    if (queueRefs?.isNotEmpty() == true && player.mediaItemCount == 0) {
+                        val items = queueRefs.map { it.toSong().toMediaItem(api) }
+                        val targetIndex = (cmd.index ?: 0).coerceIn(items.indices)
+                        val targetPos = (cmd.positionMs ?: 0L).coerceAtLeast(0L)
+                        player.setMediaItems(items, targetIndex, targetPos)
+                        player.prepare()
+                        player.play()
+                    } else if (player.mediaItemCount > 0) {
+                        if (player.playbackState == Player.STATE_IDLE) {
+                            player.prepare()
+                        }
+                        player.play()
+                    }
+                    syncDevicePlayback()
+                }
+                "pause" -> {
+                    player.pause()
+                    syncDevicePlayback()
+                }
+                "next" -> {
+                    if (player.hasNextMediaItem()) player.seekToNextMediaItem()
+                    syncDevicePlayback()
+                }
+                "previous" -> {
+                    if (player.hasPreviousMediaItem()) player.seekToPreviousMediaItem()
+                    syncDevicePlayback()
+                }
+                "seek" -> {
+                    cmd.positionMs?.let { player.seekTo(it) }
+                    syncDevicePlayback()
+                }
+                "volume" -> {
+                    cmd.volume?.let { player.volume = it }
+                    syncDevicePlayback()
+                }
+            }
+        }
+
+        app.social.onTransferPlayback = { transfer ->
+            val state = transfer.state
+            val queueRefs = state.queue ?: (state.song?.let { listOf(it) } ?: emptyList())
+            if (queueRefs.isNotEmpty()) {
+                val items = queueRefs.map { it.toSong().toMediaItem(api, source = state.source) }
+                val targetIndex = state.index.coerceIn(items.indices)
+                val targetPos = state.positionMs.coerceAtLeast(0L)
+                player.setMediaItems(items, targetIndex, targetPos)
+                player.prepare()
+                if (state.playing) {
+                    player.play()
+                } else {
+                    player.pause()
+                }
+                syncDevicePlayback()
+            }
+        }
+
+        // Initial device playback broadcast on startup
+        syncDevicePlayback()
+
+        // Tell friends what's playing (only while it's actually playing) and sync devices.
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
-                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) {
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) {
                     app.social.onPlayback(player.currentMediaItem?.toSongRef(), player.isPlaying)
+                    syncDevicePlayback()
                 }
                 // Remember songs that actually play, for "recently played" when sharing in a chat.
                 if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && player.isPlaying) {
@@ -103,7 +216,10 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         lockScreenLyrics?.unregister()
         lockScreenLyrics = null
+        app.social.onRemoteCommand = null
+        app.social.onTransferPlayback = null
         app.social.onPlayback(null, false)
+        app.social.onDevicePlayback(null, emptyList(), 0, 0L, false, 1f)
         // Without a player there's nothing to keep in sync.
         listenSync?.release()
         listenSync = null
@@ -117,7 +233,56 @@ class PlaybackService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private inner class SessionCallback : MediaSession.Callback {
+    /** The notification's and lock screen's repeat button: off → the queue → this song, like the app's. */
+    private val repeatCommand = SessionCommand("io.github.devasenan134.isaipetti.REPEAT", Bundle.EMPTY)
+
+    @OptIn(UnstableApi::class)
+    private fun repeatButton(mode: Int): CommandButton = CommandButton.Builder(
+        when (mode) {
+            Player.REPEAT_MODE_ONE -> CommandButton.ICON_REPEAT_ONE
+            Player.REPEAT_MODE_ALL -> CommandButton.ICON_REPEAT_ALL
+            else -> CommandButton.ICON_REPEAT_OFF
+        },
+    )
+        .setDisplayName(when (mode) { Player.REPEAT_MODE_ONE -> "Repeating this song"; Player.REPEAT_MODE_ALL -> "Repeating all"; else -> "Repeat" })
+        .setSessionCommand(repeatCommand)
+        .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+        .build()
+
+    /** Runs [block] off the binder thread and hands back its result the way Media3 wants it. */
+    private fun <T> future(block: suspend () -> T): ListenableFuture<T> {
+        val result = SettableFuture.create<T>()
+        scope.launch {
+            try { result.set(block()) } catch (e: Exception) { result.setException(e) }
+        }
+        return result
+    }
+
+    @OptIn(UnstableApi::class)
+    private inner class SessionCallback : MediaLibrarySession.Callback {
+        // Every controller (the notification, the lock screen, the app, Android Auto) may browse and use the repeat button too.
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+            MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(repeatCommand).build())
+                .setMediaButtonPreferences(listOf(repeatButton(session.player.repeatMode)))
+                .build()
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != repeatCommand.customAction) return super.onCustomCommand(session, controller, customCommand, args)
+            val player = session.player
+            player.repeatMode = when (player.repeatMode) {
+                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                else -> Player.REPEAT_MODE_OFF
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+        }
+
         // Items sent from the UI arrive without their address, so rebuild it from the song id.
         override fun onAddMediaItems(
             mediaSession: MediaSession,
@@ -126,6 +291,97 @@ class PlaybackService : MediaSessionService() {
         ): ListenableFuture<MutableList<MediaItem>> = Futures.immediateFuture(
             mediaItems.map { it.buildUpon().setUri(songUri(it.mediaId)).build() }.toMutableList()
         )
+
+        // Something picked in Android Auto (or asked for by voice) becomes its whole queue; the app's own songs go as before.
+        override fun onSetMediaItems(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            mediaItems: MutableList<MediaItem>,
+            startIndex: Int,
+            startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val car = car ?: return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            val forCar = mediaItems.singleOrNull()?.let { it.mediaId.startsWith("car/") || (it.mediaId.isEmpty() && it.requestMetadata.searchQuery != null) } == true
+            if (!forCar) return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            return future { car.resolve(mediaItems) ?: throw IllegalStateException("Nothing to play") }
+        }
+
+        override fun onGetLibraryRoot(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val car = car ?: return Futures.immediateFuture(LibraryResult.ofError(SessionError.ERROR_UNKNOWN))
+            return Futures.immediateFuture(LibraryResult.ofItem(car.root(), MediaLibraryService.LibraryParams.Builder().setExtras(car.rootExtras).build()))
+        }
+
+        override fun onGetChildren(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            parentId: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = future {
+            val all = car?.children(parentId).orEmpty()
+            LibraryResult.ofItemList(all.page(page, pageSize), params)
+        }
+
+        override fun onSearch(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = future {
+            searched = query to car?.search(query).orEmpty()
+            session.notifySearchResultChanged(browser, query, searched.second.size, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: MediaLibraryService.LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = future {
+            val items = if (searched.first == query) searched.second else car?.search(query).orEmpty()
+            LibraryResult.ofItemList(items.page(page, pageSize), params)
+        }
+    }
+
+    private fun <T> List<T>.page(page: Int, size: Int): List<T> =
+        drop((page.toLong() * size).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(size)
+
+    /** The last search from Android Auto and what it found. */
+    private var searched: Pair<String, List<MediaItem>> = "" to emptyList()
+
+    /**
+     * A shuffled queue starts with the song that's playing and then plays every other song once, in a random
+     * order. The player's own shuffle order is random over the whole queue, so a queue started on a random song
+     * (Shuffle on a playlist), or shuffle turned on mid-queue, would skip every song shuffled before the current
+     * one. Songs added later (Play next, a station's next batch) keep the player's own placing.
+     */
+    @OptIn(UnstableApi::class)
+    private fun shuffleFromCurrent(player: ExoPlayer) {
+        fun reshuffle() {
+            val count = player.mediaItemCount
+            val current = player.currentMediaItemIndex
+            if (!player.shuffleModeEnabled || count < 2 || current !in 0 until count) return
+            val rest = (0 until count).filter { it != current }.shuffled()
+            player.setShuffleOrder(DefaultShuffleOrder((listOf(current) + rest).toIntArray(), System.nanoTime()))
+        }
+        player.addListener(object : Player.Listener {
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                if (shuffleModeEnabled) reshuffle()
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // A whole new queue (setMediaItems), not just the next song.
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) reshuffle()
+            }
+        })
     }
 
     /**

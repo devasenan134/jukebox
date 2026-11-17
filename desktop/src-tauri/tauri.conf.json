@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jukebox",
+  "version": "2.7.0",
+  "identifier": "io.github.devasenan134.jukebox",
+  "build": {
+    "frontendDist": "../start"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Jukebox",
+        "url": "index.html",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "theme": "Dark",
+        "backgroundColor": "#121212",
+        "create": false,
+        "backgroundThrottling": "disabled"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "category": "Music",
+    "copyright": "Apache-2.0",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwQTAwNEYzQzEyQTdCN0MKUldSOGV5ckI4d1NnNEVZSHg2YlRDMngza3ZaYUZsM0hTTEoycGs4cG5mRkZ3MXVXb05EV3BKUzYK",
+      "endpoints": [
+        "https://github.com/devasenan134/jukebox/releases/download/mac-latest/latest-macos.json",
+        "https://github.com/devasenan134/jukebox/releases/latest/download/latest-macos.json"
+      ]
+    }
+  }
+}

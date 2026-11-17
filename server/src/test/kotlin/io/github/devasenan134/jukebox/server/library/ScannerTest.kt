@@ -106,6 +106,24 @@ class ScannerTest {
     }
 
     @Test
+    fun `a cover put beside songs already scanned is picked up`(): Unit = runBlocking {
+        airaa(1, "Kaariga", 300)
+        airaa(2, "Megathoodham", 500)
+        scanner.scan(library)
+        assertEquals(1, count("SELECT count(*) FROM albums WHERE cover_id IS NULL"))
+
+        File(root, "Airaa (2019)/cover.jpg").writeBytes(jpeg())
+        val report = scanner.scan(library)
+        assertEquals(2, report.unchanged)
+        assertEquals(1, report.coversAdded)
+        assertEquals(0, count("SELECT count(*) FROM albums WHERE cover_id IS NULL"))
+        assertEquals(0, count("SELECT count(*) FROM releases WHERE cover_id IS NULL"))
+        assertEquals(0, count("SELECT count(*) FROM files WHERE cover_id IS NULL"))
+        // Once it has one, later scans leave it be.
+        assertEquals(0, scanner.scan(library).coversAdded)
+    }
+
+    @Test
     fun `moving, renaming and retagging keep the recording id`() = runBlocking {
         val file = airaa(1, "Kaariga", 300)
         scanner.scan(library)
@@ -154,6 +172,17 @@ class ScannerTest {
         scanner.scan(library)
         assertEquals(id, recordingOf("Airaa (2019)/02 - Megathoodham.m4a"))
         assertNull(db.tx { queryOne("SELECT missing_since FROM files") { it.getObject(1) } })
+    }
+
+    @Test
+    fun `a recording whose only file is missing doesn't count as work left`() = runBlocking {
+        val file = airaa(2, "Megathoodham", 500)
+        scanner.scan(library)
+        file.delete()
+        scanner.scan(library)
+        // Nothing can fingerprint it, so the background loop must be told it's done (not spin on it).
+        assertEquals(0, fingerprints.run().left)
+        assertEquals(1, count("SELECT count(*) FROM recordings WHERE fingerprint IS NULL"))
     }
 
     @Test
