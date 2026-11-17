@@ -19,6 +19,7 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ### Server
 - A new cover.jpg in an album's folder replaces the old cover on the album's releases too, not only on the album.
+- An album's Background Score release takes the newest cover of its own files, so it gets the sharper cover too.
 
 ## Trending Now (2.8.0)
 

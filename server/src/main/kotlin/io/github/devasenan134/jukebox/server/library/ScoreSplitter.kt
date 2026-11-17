@@ -79,6 +79,7 @@ class ScoreSplitter(
 
         var movedNow = 0
         var movedBack = 0
+        var recovered = 0
         db.tx {
             val now = System.currentTimeMillis()
             for (t in songs) {
@@ -101,8 +102,14 @@ class ScoreSplitter(
             // Moves of tracks that no longer exist, and score releases left empty by moving tracks back.
             update("DELETE FROM score_moves WHERE track_id NOT IN (SELECT id FROM tracks)")
             update("DELETE FROM releases WHERE kind = 'score' AND id NOT IN (SELECT release_id FROM tracks)")
+            // A score release takes the cover of its last scanned file: while a changed file is rescanned its track is
+            // back on the soundtrack, so a new cover put in the folder (fulfil.py covers --upgrade) only reaches this one here.
+            recovered = update(
+                """UPDATE releases SET cover_id = ($NEWEST_COVER) WHERE kind = 'score' AND ($NEWEST_COVER) IS NOT NULL
+                   AND cover_id IS NOT ($NEWEST_COVER)""",
+            )
         }
-        if (movedNow + movedBack > 0) db.catalogChanged()
+        if (movedNow + movedBack + recovered > 0) db.catalogChanged()
         writeList(tracks.associateBy { it.id }, reasons)
         val report = ScoreSplitReport(movedNow, movedBack, reasons.values.count { it == "title" }, reasons.values.count { it == "sound" },
             reasons.values.count { it == "by hand" })
@@ -205,6 +212,10 @@ class ScoreSplitter(
         }
 
     companion object {
+        /** The cover of the last scanned file on the release (SQL, for a releases row). */
+        private const val NEWEST_COVER = """SELECT f.cover_id FROM tracks t JOIN files f ON f.track_id = t.id AND f.missing_since IS NULL
+            WHERE t.release_id = releases.id AND f.cover_id IS NOT NULL ORDER BY f.scanned_at DESC, f.id DESC LIMIT 1"""
+
         /** How sure the sound model must be. At 0.9 it was right 95% of the time on held-out tracks (2026-10-08). */
         const val SOUND_BAR = 0.9f
         private const val SCALE = 10f

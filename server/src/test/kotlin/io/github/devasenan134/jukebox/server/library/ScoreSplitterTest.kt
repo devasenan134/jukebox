@@ -72,6 +72,27 @@ class ScoreSplitterTest {
     }
 
     @Test
+    fun `a new folder cover reaches the score release too`() = runBlocking {
+        TestAudio.airaa(root, 1, "Kaariga", 300)
+        TestAudio.airaa(root, 2, "Airaa Title Music", 500)
+        TestAudio.jpeg(File(root, "Airaa (2019)/cover.jpg"))
+        scanner.scan(library)
+        splitter.run()
+        val first = db.read { queryOne("SELECT a.cover_id FROM albums a") { it.getString(1) } }!!
+
+        // A bigger cover, and the songs get it inside (fulfil.py covers --upgrade): both releases follow the album.
+        TestAudio.jpeg(File(root, "Airaa (2019)/cover.jpg"), color = "blue")
+        TestAudio.airaa(root, 1, "Kaariga", 300, singers = "Haricharan")
+        TestAudio.airaa(root, 2, "Airaa Title Music", 500, singers = "Haricharan")
+        scanner.scan(library)
+        splitter.run()
+        val covers = db.read { query("SELECT DISTINCT rl.cover_id FROM releases rl UNION SELECT cover_id FROM albums") { it.getString(1) } }
+        assertEquals(1, covers.size)
+        assertTrue(covers.single() != first)
+        assertEquals("score", releaseKindOf("Airaa Title Music"))
+    }
+
+    @Test
     fun `people's photos are found by name and taken away with the file`() = runBlocking {
         TestAudio.airaa(root, 1, "Kaariga", 300)
         scanner.scan(library)
