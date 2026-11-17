@@ -308,7 +308,7 @@ def loose(text):
     return re.sub(r"(.)\1+", r"\1", key(text))
 
 
-OWN_SONG = re.compile(r"\b(reprise|unplugged|female|male|sad|happy|duet|version|part\s*\d|theme)\b", re.I)
+OWN_SONG = re.compile(r"\b(reprise|unplugged|female|male|sad|happy|duet|version|part\s*\d|theme|extended|reloaded)\b", re.I)
 
 
 def has_song(titles, title):
@@ -1322,10 +1322,14 @@ def page_of(url):
     return urlparse(url or "").path.strip("/")
 
 
+def label_of(info, label):
+    """"Starring: … Music: Anirudh Ravichander Lyricists: Vivek Director: Nelson", "Music" → "Anirudh Ravichander"."""
+    m = re.search(rf"\b{label}:\s*(.*?)\s*(?=\b[A-Z][A-Za-z]+:|$)", re.sub(r"\s+", " ", info or ""))
+    return m.group(1).strip(" ,") or None if m else None
+
+
 def music_of(info):
-    """"Starring: … Music: Anirudh Ravichander Director: Nelson" → "Anirudh Ravichander"."""
-    m = re.search(r"Music:\s*(.*?)\s*(?:Director:|Starring:|Lyrics?:|$)", info or "")
-    return m.group(1).strip() if m else None
+    return label_of(info, "Music")
 
 
 def feed_entries(cfg, feed):
@@ -1339,20 +1343,22 @@ def feed_entries(cfg, feed):
         poster = item.get("poster")
         year = re.search(r"-((?:19|20)\d\d)-songs", page) or re.search(r"-((?:19|20)\d\d)\.(?:jpe?g|png|webp)$", poster or "")
         entries.append({"title": html.unescape(item["title"]).strip(), "page": page, "year": int(year.group(1)) if year else None,
-                        "composer": music_of(item.get("info")), "poster": poster})
+                        "composer": music_of(item.get("info")), "lyricists": label_of(item.get("info"), "Lyricists"), "poster": poster})
     return entries
 
 
 def complete(cfg, entry):
     """Fills in what the list didn't say (Trending has only names) from the site's search: composer, poster, year."""
-    if entry["composer"] and entry["poster"]:
+    if entry["composer"] and entry["poster"] and entry["lyricists"]:
         return entry
+    time.sleep(2)  # slowly: quick calls get Cloudflare's check
     try:
         hit = next((x for x in site_call(cfg, "search", keyword=entry["title"]) if page_of(x.get("url")) == entry["page"]), None)
     except RuntimeError:
         hit = None
     if hit:
         entry["composer"] = entry["composer"] or music_of(hit.get("info"))
+        entry["lyricists"] = entry["lyricists"] or label_of(hit.get("info"), "Lyricists")
         entry["poster"] = entry["poster"] or hit.get("poster")
         if not entry["year"]:
             found = re.search(r"-((?:19|20)\d\d)\.(?:jpe?g|png|webp)$", hit.get("poster") or "")
@@ -1398,17 +1404,23 @@ def feeds(cfg, dry, only=None):
             say()
             year = f" ({entry['year']})" if entry["year"] else ""
             say(f"  [{i}/{len(albums)}] {entry['title']}{year}")
-            try:
-                tracks = site_call(cfg, "album", path=entry["page"])
-            except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
-                say(f"      ✗ couldn't read its page: {e}")
+            tracks = None
+            for attempt in range(2):
+                time.sleep(3 if attempt == 0 else 45)  # one page at a time, slowly: quick ones get Cloudflare's check
+                try:
+                    tracks = site_call(cfg, "album", path=entry["page"])
+                    break
+                except (RuntimeError, ValueError, subprocess.TimeoutExpired) as e:
+                    say(f"      ✗ couldn't read its page: {e}" + ("; trying again in a moment" if attempt == 0 else "; the next run tries again"))
+            if tracks is None:
                 continue
             if not tracks:
                 say("      no songs on its page yet")
                 continue
             match = {"request_id": None, "work_id": f"feeds/{entry['page']}", "match_found": True,
                      "best_match": {"title": entry["title"], "url": f"{SITE}/{entry['page']}", "poster": entry["poster"]},
-                     "metadata": {"year": entry["year"], "music": entry["composer"], "poster": entry["poster"], "language": "tamil",
+                     "metadata": {"year": entry["year"], "music": entry["composer"], "lyricists": entry["lyricists"],
+                                  "poster": entry["poster"], "language": "tamil",
                                   "track_count": len(tracks)},
                      "tracks": tracks}
             request = {"item": {"kind": "movie", "movie": entry["title"], "title": entry["title"]}}
