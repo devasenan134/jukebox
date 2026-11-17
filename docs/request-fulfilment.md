@@ -22,11 +22,23 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
 
 ## How music is filed
 
-- **Its own folder per source and language:** downloads go to `MusicLibrary/<language>/masstamilan/`
-  (`tamil/masstamilan`, `malayalam/masstamilan`, …), never into `tamil/jiosaavn_m4a`. The language is the matcher's
-  `metadata.language` (not always right: it said Tamil for Premam). `tamil-masstamilan` is a library that adds to
-  the Tamil albums (LIBRARIES' fourth part, `:tamil`), so a song for an album JioSaavn already has goes to
-  `tamil/masstamilan/<that album's folder name>/` with that album's tags and shows up in the same album.
+- **One folder per album** (since 2026-11-17): every album is `MusicLibrary/<language>/<Album> (<Year>)/`, whichever
+  source its songs came from. A song for an album the library has goes into that album's folder with its tags. Where a
+  file came from is a tag: `source=masstamilan` on everything downloaded from masstamilan; a file without one is from
+  JioSaavn (those 28,500 files weren't rewritten for a tag: a changed file is analysed again). The language is the
+  matcher's `metadata.language` (not always right: it said Tamil for Premam).
+- **The newest download wins:** when a download joins an album and brings another year or album artist (JioSaavn
+  dated Jailer 2 2025 from its first single, masstamilan 2026), every file of the album, songs and background score,
+  gets the new one and its folders are renamed (`Jailer 2 (2025)` → `Jailer 2 (2026)`). The run says so
+  (`updates   year 2025 → 2026`, and in a request's review notes) and the undo log keeps the old tags and names, so
+  `fulfil.py undo` puts them back. Per-song composers are left alone (an album can have several).
+- **How the library got here:** `scripts/library/flatten.py` moved `tamil/jiosaavn_m4a/*` and `<language>/masstamilan/*`
+  up into the language folders (renames; the 5 albums in both were merged, JioSaavn's `cover.jpg` kept, masstamilan's
+  in `MusicLibrary/_flatten/leftovers/`), the never-scanned repeats to `MusicLibrary/_duplicate_singles/tamil/`, and
+  tagged masstamilan's files. The masstamilan library's rows in the database became the Tamil library's
+  (`UPDATE files SET library_id = <tamil> WHERE library_id = <tamil-masstamilan>`, after deleting the Tamil library's
+  missing rows of the same paths), so every song kept its id. Undo: `flatten.py undo MusicLibrary/_flatten/undo-….jsonl`,
+  the database and settings from `backups/before-flatten-20261117/`.
 - **Background score vs songs:** a score album ("X BGM", "X Special BGM Additional", "X OST", "… (Original Background
   Score)") is filed as X's score: `<Album> (<Year>) (Original Background Score)/`, album tag `<Album> (Original
   Background Score)`. Inside a songs album, only tracks that say so ("Theme Music", "BGM", "Instrumental",
@@ -64,7 +76,7 @@ Built 2026-11-16. `fulfil.py feeds` keeps the library up to date with masstamila
    cover, like a request. Latest albums grow as singles come out, so each run looks again.
 3. **No check:** these aren't requests. The albums are put together in `requests/feeds/<page>/` and
    `fulfil.py file-feeds` files them (into the album's own folder if it's there, else
-   `tamil/masstamilan/<Album> (<Year>)/`), rescans and wakes the analyzer. Undo logs: `requests/undo/feeds-*.jsonl`.
+   `tamil/<Album> (<Year>)/`), rescans and wakes the analyzer. Undo logs: `requests/undo/feeds-*.jsonl`.
    Run on the server itself (no `REMOTE`), `feeds` does this directly; run on a laptop, it sends them over and
    starts `file-feeds` there over ssh.
 4. The lists go to `PUT /admin/feeds/{trending|latest}`. The server keeps them (schema 35), and when one changed it
@@ -156,14 +168,14 @@ login, `cloudflared access login https://tp.craftingtable.cc` once). Don't sched
 
 MacBook: `brew install ffmpeg uv`; the script from the repo (`scripts/requests/fulfil.py`); `ssh craftingtable`
 working (`ssh-copy-id craftingtable` to stop password prompts); `~/.config/jukebox-fulfil.env` (chmod 600):
-`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil/jiosaavn_m4a`,
+`JUKEBOX_URL=https://jukebox.craftingtable.cc`, `JUKEBOX_TOKEN`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil`,
 `MUSIC_ROOT=/mnt/ugreen/NAS/MusicLibrary`, `LIBRARY_NAME=tamil`,
-`LIBRARY_FOLDERS=tamil-masstamilan=tamil/masstamilan,malayalam=malayalam/masstamilan,telugu=telugu/masstamilan,hindi=hindi/masstamilan`,
+`LIBRARY_FOLDERS=malayalam=malayalam,telugu=telugu,hindi=hindi`,
 `REQUESTS_FOLDER=/mnt/ugreen/jukebox/requests`, `REMOTE=craftingtable`, `REMOTE_FULFIL=/mnt/ugreen/jukebox/scripts/requests/fulfil.py`.
 
 Mac mini: `/mnt/ugreen/jukebox/requests` (kept by deploys); in `.env` `REQUESTS_FOLDER`, `REQUESTS_DIR=/requests`,
 `LIBRARY_ROOT=/mnt/ugreen/NAS/MusicLibrary` and the language libraries in `LIBRARIES`
-(`tamil-masstamilan=/library/tamil/masstamilan:film:tamil:tamil;malayalam=/library/malayalam/masstamilan:film:malayalam;…`); the live `docker-compose.yml` mounts `/requests` and `/library`
+(`tamil=/music:film:tamil;malayalam=/library/malayalam:film:malayalam;telugu=/library/telugu:film:telugu;hindi=/library/hindi:film:hindi`, `MUSIC_FOLDER=/mnt/ugreen/NAS/MusicLibrary/tamil`, also in the analyzer's `.env`); the live `docker-compose.yml` mounts `/requests` and `/library`
 read-only; the analyzer's `.env` has `LIBRARY_ROOT` too. `~/.config/jukebox-fulfil.env` as on the MacBook but
 `JUKEBOX_URL=http://127.0.0.1:8098`, no `REMOTE*`, and `ANALYZER=jukebox-analyzer`.
 Lyrics come from LRCLIB (synced `.lrc` or plain `.txt` next to each song, like the rest of the library).
