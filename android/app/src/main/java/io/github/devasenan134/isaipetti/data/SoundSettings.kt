@@ -211,7 +211,7 @@ class SoundSettings(context: Context) {
         // Straight to the state (not update()): what came from the server isn't sent back.
         val s = now.copy(
             custom = custom,
-            gains = if (follow) after!!.gains else now.gains,
+            gains = if (follow) after.gains else now.gains,
             profileId = if (after?.deleted == true) null else now.profileId,
         )
         _state.value = s
