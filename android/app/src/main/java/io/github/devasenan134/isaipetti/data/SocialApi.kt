@@ -2,6 +2,7 @@ package io.github.devasenan134.isaipetti.data
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -324,6 +325,10 @@ class SocialApi(
     suspend fun resumePoints(): List<QueueMemory.Saved> = get("/me/resume")
     suspend fun saveResumePoint(source: String, songIds: List<String>, currentId: String) =
         send<Unit>("PUT", "/me/resume", json.encodeToString(ResumeBody.serializer(), ResumeBody(source, songIds, currentId)))
+
+    /** Your equalizer profiles (SoundProfiles.kt on the server): sends this phone's, returns all of them. */
+    suspend fun syncSoundProfiles(profiles: List<SoundProfileDto>): List<SoundProfileDto> =
+        ListSerializer(SoundProfileDto.serializer()).let { send("PUT", "/me/sound-profiles", json.encodeToString(it, profiles), it) }
 
     /** This server's Firebase settings for push notifications, or null if it has none. */
     suspend fun pushConfig(): PushConfig? = try {

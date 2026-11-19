@@ -141,6 +141,8 @@ fun SettingsScreen(nav: Nav) {
 
             AudioQualityCard()
 
+            SoundCard()
+
             LockScreenCard()
 
             ChangePasswordCard()

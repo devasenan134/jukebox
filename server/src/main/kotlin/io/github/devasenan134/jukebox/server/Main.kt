@@ -122,6 +122,7 @@ fun Application.jukeboxServer(
     val friends = Friends(db)
     val hub = Hub(friends::friendIds)
     val recents = Recents(db, hub)
+    val soundProfiles = SoundProfiles(db, hub)
     friends.hub = hub
     // Passwords are kept encrypted with a key that lives next to the database (docs/milestone-2.md).
     val signIn = SignIn(db, Passwords(File(File(config.dbPath).absoluteFile.parentFile, "secret.key")))
@@ -359,6 +360,9 @@ fun Application.jukeboxServer(
                 call.respond(recents.resumePoint(call.me(), source) ?: throw ApiError(HttpStatusCode.NotFound, "Nothing to resume"))
             }
             put("/me/resume") { recents.saveResumePoint(call.me(), call.receive()); call.respond(HttpStatusCode.NoContent) }
+            // Equalizer profiles, the same on every device (SoundProfiles.kt): send yours, get everyone's back.
+            get("/me/sound-profiles") { call.respond(soundProfiles.list(call.me())) }
+            put("/me/sound-profiles") { call.respond(soundProfiles.sync(call.me(), call.receive<List<SoundProfileDto>>())) }
             // Profile pictures: the body is the image itself.
             put("/me/avatar") { call.respond(pictures.setAvatar(call.me().id, Picture(call.receive<ByteArray>()))) }
             delete("/me/avatar") { call.respond(pictures.removeAvatar(call.me().id)) }

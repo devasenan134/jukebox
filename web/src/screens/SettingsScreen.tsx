@@ -14,6 +14,7 @@ import { usePhotoPicker } from '../ui/PhotoPicker'
 import { useQuery } from '@tanstack/react-query'
 import { load, save } from '../state/storage'
 import type { StreamingQuality } from '../api/catalog'
+import { SoundSettings } from './SoundSettings'
 
 /** Settings (ui/settings/SettingsScreen.kt): your profile, password, invites for friends, and signing out. */
 export function SettingsScreen() {
@@ -85,6 +86,10 @@ export function SettingsScreen() {
         {me && <NotificationsCard />}
 
         <StreamingQualityCard />
+
+        <Card title="Sound">
+          <SoundSettings />
+        </Card>
 
         {me && <AdminCard onOpen={nav.openStats} />}
 
