@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import {
   BUILTIN_PROFILES, CURVE_FREQS, EQ_BANDS, EQ_MAX_DB, allProfiles, chooseProfile, deleteProfile, ownProfiles, preampDb, renameProfile,
-  responseDb, sameGains, saveProfileAs, setBandGain, setEqEnabled, setProfileSync, updateProfile, useEqualizer, type EqProfile,
+  responseDb, sameGains, saveProfileAs, setBandGain, setEqEnabled, setProfileSync, updateProfile, useEqualizer,
 } from '../player/equalizer'
 import { useSession } from '../state/session'
-import { Dialog, NameDialog, Switch, toast } from '../ui/kit'
+import { Dialog, Icon, NameDialog, Switch, toast } from '../ui/kit'
 
 /**
- * Settings › Sound (SoundCard.kt): the equalizer. Built-in profiles and your own, and the curve, with a handle
- * per band to drag up and down (or focus and use the arrow keys).
+ * Settings › Sound (SoundCard.kt): the equalizer. A profile list (built-in and your own), and, folded away under
+ * "Adjust bands", the curve with a handle per band to drag up and down (or focus and use the arrow keys).
  */
 export function SoundSettings() {
   const s = useEqualizer()
   const signedIn = useSession((x) => x.social != null)
   const [naming, setNaming] = useState<'new' | 'rename' | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // The bands, saving and sync fold away, so Settings stays short: the profile list is enough most of the time.
+  const [open, setOpen] = useState(false)
   const profiles = allProfiles(s)
   const chosen = profiles.find((p) => p.id === s.profileId)
   const edited = chosen != null && !sameGains(chosen.gains, s.gains)
@@ -26,50 +28,65 @@ export function SoundSettings() {
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
         <div className="body-medium muted" style={{ flex: 1 }}>
-          An equalizer for your headphones or IEMs: choose a profile, or drag the bands and save your own.
+          An equalizer for your headphones or IEMs: choose a profile, or adjust the bands and save your own.
         </div>
         <Switch checked={s.enabled} onChange={setEqEnabled} />
       </div>
 
-      {[
-        { title: 'Yours', list: ownProfiles(s) },
-        { title: 'Tuning', list: BUILTIN_PROFILES.filter((p) => p.group === 'tuning') },
-        { title: 'Genres', list: BUILTIN_PROFILES.filter((p) => p.group === 'genre') },
-      ].filter((g) => g.list.length > 0).map((g) => (
-        <div key={g.title} style={{ marginBottom: 12 }}>
-          <div className="label-medium muted" style={{ marginBottom: 6 }}>{g.title}</div>
-          <ProfileChips list={g.list} chosenId={s.enabled ? s.profileId : null} edited={edited} />
+      <div className="field" style={{ position: 'relative', marginBottom: 8 }}>
+        <select aria-label="Profile" value={chosen ? chosen.id : ''} onChange={(e) => chooseProfile(e.target.value)}>
+          {!chosen && <option value="" disabled>Your changes (not saved)</option>}
+          {[
+            { title: 'Yours', list: ownProfiles(s) },
+            { title: 'Tuning', list: BUILTIN_PROFILES.filter((p) => p.group === 'tuning') },
+            { title: 'Genres', list: BUILTIN_PROFILES.filter((p) => p.group === 'genre') },
+          ].filter((g) => g.list.length > 0).map((g) => (
+            <optgroup key={g.title} label={g.title}>
+              {g.list.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}{p.id === s.profileId && edited ? ' (changed)' : ''}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <Icon name="expand_more" className="select-chevron" />
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="body-small muted" style={{ flex: 1 }}>
+          {!s.enabled ? 'Off: music plays as it is.' : preamp < 0 ? `Preamp ${preamp.toFixed(1)} dB, so boosts don't distort` : 'On'}
         </div>
-      ))}
-
-      <div style={{ opacity: s.enabled ? 1 : 0.5, transition: 'opacity 0.2s' }}>
-        <EqGraph gains={s.gains} />
+        <button className="btn text small" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? 'Hide bands' : 'Adjust bands'}
+          <Icon name={open ? 'expand_less' : 'expand_more'} size={20} />
+        </button>
       </div>
 
-      <div className="body-small muted" style={{ margin: '8px 0 12px' }}>
-        {!s.enabled ? 'Off: music plays as it is.'
-          : chosen ? `${chosen.name}${edited ? ' (changed)' : ''}` : 'Your changes, not saved as a profile'}
-        {s.enabled && preamp < 0 && ` · Preamp ${preamp.toFixed(1)} dB, so boosts don't distort`}
-      </div>
-
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {own && edited && <button className="btn tonal small" onClick={() => { updateProfile(); toast(`Saved ${own.name}`) }}>Save</button>}
-        <button className="btn tonal small" onClick={() => setNaming('new')}>Save as new profile</button>
-        {own && <button className="btn text small" onClick={() => setNaming('rename')}>Rename</button>}
-        {own && <button className="btn text small" style={{ color: 'var(--error)' }} onClick={() => setConfirmDelete(true)}>Delete</button>}
-        <button className="btn text small" onClick={() => chooseProfile(BUILTIN_PROFILES[0].id)}>Reset to flat</button>
-      </div>
-
-      {signedIn && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
-          <div style={{ flex: 1 }}>
-            <div className="body-large">Sync my profiles</div>
-            <div className="body-small muted">
-              {s.sync ? 'Profiles you save are on your phone, the Mac app and the website too. The equalizer\'s on/off and the curve playing stay with each device.'
-                : 'Your profiles are kept on this device only.'}
-            </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ opacity: s.enabled ? 1 : 0.5, transition: 'opacity 0.2s' }}>
+            <EqGraph gains={s.gains} />
           </div>
-          <Switch checked={s.sync} onChange={setProfileSync} />
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+            {own && edited && <button className="btn tonal small" onClick={() => { updateProfile(); toast(`Saved ${own.name}`) }}>Save</button>}
+            <button className="btn tonal small" onClick={() => setNaming('new')}>Save as new profile</button>
+            {own && <button className="btn text small" onClick={() => setNaming('rename')}>Rename</button>}
+            {own && <button className="btn text small" style={{ color: 'var(--error)' }} onClick={() => setConfirmDelete(true)}>Delete</button>}
+            <button className="btn text small" onClick={() => chooseProfile(BUILTIN_PROFILES[0].id)}>Reset to flat</button>
+          </div>
+
+          {signedIn && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16 }}>
+              <div style={{ flex: 1 }}>
+                <div className="body-large">Sync my profiles</div>
+                <div className="body-small muted">
+                  {s.sync ? 'Profiles you save are on your phone, the Mac app and the website too. The equalizer\'s on/off and the curve playing stay with each device.'
+                    : 'Your profiles are kept on this device only.'}
+                </div>
+              </div>
+              <Switch checked={s.sync} onChange={setProfileSync} />
+            </div>
+          )}
         </div>
       )}
 
@@ -104,19 +121,6 @@ export function SoundSettings() {
         </Dialog>
       )}
     </>
-  )
-}
-
-function ProfileChips({ list, chosenId, edited }: { list: EqProfile[]; chosenId: string | null; edited: boolean }) {
-  return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {list.map((p) => (
-        <button key={p.id} className={`chip${p.id === chosenId ? ' selected' : ''}`} onClick={() => chooseProfile(p.id)}>
-          {p.name}
-          {p.id === chosenId && edited && ' •'}
-        </button>
-      ))}
-    </div>
   )
 }
 

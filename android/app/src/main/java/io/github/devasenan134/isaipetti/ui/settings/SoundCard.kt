@@ -1,6 +1,19 @@
 package io.github.devasenan134.isaipetti.ui.settings
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.rotate
+import io.github.devasenan134.isaipetti.data.EqProfile
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -17,7 +30,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -55,8 +67,9 @@ import kotlin.math.abs
 import kotlin.math.ln
 
 /**
- * Settings › Sound (SoundSettings.tsx on the website): the equalizer. Built-in profiles and your own, and the
- * curve, with a handle per band to drag up and down (or pick a band and step it with − and +).
+ * Settings › Sound (SoundSettings.tsx on the website): the equalizer. A profile list (built-in and your own), and,
+ * folded away under "Adjust bands", the curve with a handle per band to drag up and down (or pick a band and step
+ * it with − and +).
  */
 @Composable
 fun SoundCard() {
@@ -68,6 +81,8 @@ fun SoundCard() {
     var naming by remember { mutableStateOf<Naming?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var active by remember { mutableStateOf<Int?>(null) }
+    // The bands, saving and sync fold away, so Settings stays short: the profile list is enough most of the time.
+    var open by rememberSaveable { mutableStateOf(false) }
     val chosen = s.chosen
     val edited = chosen != null && !Eq.same(chosen.gains, s.gains)
     // The chosen profile, if it's one of yours (those can be saved over, renamed and deleted).
@@ -82,7 +97,7 @@ fun SoundCard() {
                 Column(Modifier.weight(1f).padding(end = 12.dp)) {
                     Text("Equalizer", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "For your headphones or IEMs: choose a profile, or drag the bands and save your own.",
+                        "For your headphones or IEMs: choose a profile, or adjust the bands and save your own.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -90,90 +105,92 @@ fun SoundCard() {
                 Switch(checked = s.enabled, onCheckedChange = sound::setEnabled)
             }
 
-            listOf(
-                "Yours" to s.own,
-                "Tuning" to Eq.BUILTIN.filter { it.group == EqGroup.Tuning },
-                "Genres" to Eq.BUILTIN.filter { it.group == EqGroup.Genre },
-            ).filter { it.second.isNotEmpty() }.forEach { (title, list) ->
-                Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    list.forEach { p ->
-                        FilterChip(
-                            selected = s.enabled && p.id == s.profileId,
-                            onClick = { sound.choose(p.id) },
-                            label = { Text(if (p.id == s.profileId && edited) "${p.name} •" else p.name) },
-                        )
-                    }
-                }
-            }
-
-            EqGraph(
-                gains = s.gains,
-                active = active,
-                onActive = { active = it },
-                onBand = sound::setBand,
-                modifier = Modifier.alpha(if (s.enabled) 1f else 0.5f),
-            )
-
-            // Fine steps for the band last touched.
-            active?.let { band ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "${freqLabel(Eq.BANDS[band])}Hz  ${formatDb(s.gains[band])}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { sound.setBand(band, s.gains[band] - 0.5f) }) { Text("−", fontSize = 20.sp) }
-                    TextButton(onClick = { sound.setBand(band, 0f) }) { Text("0") }
-                    TextButton(onClick = { sound.setBand(band, s.gains[band] + 0.5f) }) { Text("+", fontSize = 20.sp) }
-                }
-            }
-
-            Text(
-                buildString {
-                    append(
-                        when {
-                            !s.enabled -> "Off: music plays as it is."
-                            chosen != null -> chosen.name + if (edited) " (changed)" else ""
-                            else -> "Your changes, not saved as a profile"
-                        },
-                    )
-                    if (s.enabled && preamp < 0) append(" · Preamp ${"%.1f".format(preamp)} dB, so boosts don't distort")
+            ProfileDropdown(
+                own = s.own,
+                chosenId = chosen?.id,
+                label = when {
+                    chosen != null -> chosen.name + if (edited) " (changed)" else ""
+                    else -> "Your changes (not saved)"
                 },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                onChoose = sound::choose,
             )
 
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (own != null && edited) {
-                    FilledTonalButton(onClick = {
-                        sound.saveChosen()
-                        Toast.makeText(context, "Saved ${own.name}", Toast.LENGTH_SHORT).show()
-                    }) { Text("Save") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when {
+                        !s.enabled -> "Off: music plays as it is."
+                        preamp < 0 -> "Preamp ${"%.1f".format(preamp)} dB, so boosts don't distort"
+                        else -> "On"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { open = !open }) {
+                    Text(if (open) "Hide bands" else "Adjust bands")
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown, contentDescription = null,
+                        modifier = Modifier.padding(start = 4.dp).rotate(if (open) 180f else 0f),
+                    )
                 }
-                FilledTonalButton(onClick = { naming = Naming.New }) { Text("Save as new") }
-                if (own != null) {
-                    TextButton(onClick = { naming = Naming.Rename }) { Text("Rename") }
-                    TextButton(onClick = { confirmDelete = true }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-                }
-                TextButton(onClick = { sound.choose(Eq.BUILTIN.first().id) }) { Text("Reset to flat") }
             }
 
-            if (signedIn) {
-                HorizontalDivider()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("Sync my profiles", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            if (s.sync) "Profiles you save are on the website and the Mac app too. The equalizer's on/off and the curve playing stay with each device."
-                            else "Your profiles are kept on this phone only.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+            AnimatedVisibility(open) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    EqGraph(
+                        gains = s.gains,
+                        active = active,
+                        onActive = { active = it },
+                        onBand = sound::setBand,
+                        modifier = Modifier.alpha(if (s.enabled) 1f else 0.5f),
+                    )
+
+                    // Fine steps for the band last touched.
+                    active?.let { band ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "${freqLabel(Eq.BANDS[band])}Hz  ${formatDb(s.gains[band])}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { sound.setBand(band, s.gains[band] - 0.5f) }) { Text("−", fontSize = 20.sp) }
+                            TextButton(onClick = { sound.setBand(band, 0f) }) { Text("0") }
+                            TextButton(onClick = { sound.setBand(band, s.gains[band] + 0.5f) }) { Text("+", fontSize = 20.sp) }
+                        }
                     }
-                    Switch(checked = s.sync, onCheckedChange = sound::setSync)
+
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (own != null && edited) {
+                            FilledTonalButton(onClick = {
+                                sound.saveChosen()
+                                Toast.makeText(context, "Saved ${own.name}", Toast.LENGTH_SHORT).show()
+                            }) { Text("Save") }
+                        }
+                        FilledTonalButton(onClick = { naming = Naming.New }) { Text("Save as new") }
+                        if (own != null) {
+                            TextButton(onClick = { naming = Naming.Rename }) { Text("Rename") }
+                            TextButton(onClick = { confirmDelete = true }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                        }
+                        TextButton(onClick = { sound.choose(Eq.BUILTIN.first().id) }) { Text("Reset to flat") }
+                    }
+
+                    if (signedIn) {
+                        HorizontalDivider()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Sync my profiles", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    if (s.sync) "Profiles you save are on the website and the Mac app too. The equalizer's on/off and the curve playing stay with each device."
+                                    else "Your profiles are kept on this phone only.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(checked = s.sync, onCheckedChange = sound::setSync)
+                        }
+                    }
                 }
             }
         }
@@ -208,6 +225,47 @@ fun SoundCard() {
 }
 
 private enum class Naming { New, Rename }
+
+/** The profile list: a field showing the chosen one, opening a menu of yours, then Tuning and Genres. */
+@Composable
+private fun ProfileDropdown(own: List<EqProfile>, chosenId: String?, label: String, onChoose: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedCard(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(start = 16.dp, end = 8.dp).height(52.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Profile", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(label, style = MaterialTheme.typography.bodyLarge)
+                }
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Choose a profile", modifier = Modifier.rotate(if (expanded) 180f else 0f))
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 420.dp)) {
+            listOf(
+                "Yours" to own,
+                "Tuning" to Eq.BUILTIN.filter { it.group == EqGroup.Tuning },
+                "Genres" to Eq.BUILTIN.filter { it.group == EqGroup.Genre },
+            ).filter { it.second.isNotEmpty() }.forEach { (title, list) ->
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp),
+                )
+                list.forEach { p ->
+                    DropdownMenuItem(
+                        text = { Text(p.name, fontWeight = if (p.id == chosenId) FontWeight.SemiBold else null) },
+                        trailingIcon = { if (p.id == chosenId) Icon(Icons.Filled.Check, contentDescription = "Chosen") },
+                        onClick = {
+                            expanded = false
+                            onChoose(p.id)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
 
 private fun freqLabel(f: Int) = if (f >= 1000) "${f / 1000}k" else "$f"
 
