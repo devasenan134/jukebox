@@ -8,6 +8,17 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## Tune Your Sound (2.9.0)
+
+### New
+- **An equalizer, in Settings › Sound.** Ten bands from 32 Hz to 16 kHz, each up or down by 12 dB, on a curve you drag (on the Mac and the website you can also use the arrow keys; on the phone, tap a band and step it with − and +). Made for getting the most out of your headphones and IEMs. A preamp turns things down by the curve's biggest boost, so boosted bass doesn't distort.
+- **26 profiles to start from.** Tuning: Flat, Bass Booster, Sub-bass, Bass Reducer, Treble Booster, Treble Reducer, Tame Treble (for sharp, sibilant IEMs), V-Shape, Warm, Vocal Booster, Loudness, Deep, Small Speakers and Spoken Word. Genres: Acoustic, Classical, Dance, Electronic, Hip-Hop, Jazz, Latin, Lounge, Piano, Pop, R&B and Rock.
+- **Your own profiles.** Shape the curve and save it (named for your IEMs, say), then change, rename or delete it. A profile sounds the same on the phone, the website and the Mac app.
+- **Sync my profiles.** Profiles you save are on all your devices, and a change on one shows up on the others straight away. Whether the equalizer is on, and the curve playing, stay with each device, so your Mac speakers and your phone's IEMs can each have their own.
+
+### Server
+- `GET` and `PUT /me/sound-profiles` keep each person's equalizer profiles: a device sends its own and gets all of them back, with the newest change of each winning and deletions kept. A `soundProfilesChanged` event tells their other devices.
+
 ## Sharper Covers (2.8.1)
 
 ### Improved
