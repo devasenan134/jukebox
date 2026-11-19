@@ -883,7 +883,8 @@ a.nav-item:hover {
   color: var(--on-surface);
 }
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   height: 48px;
   border: 0;
   border-radius: 6px;
@@ -901,11 +902,13 @@ a.nav-item:hover {
   resize: vertical;
 }
 .field input:hover,
-.field textarea:hover {
+.field textarea:hover,
+.field select:hover {
   box-shadow: inset 0 0 0 1px var(--outline);
 }
 .field input:focus,
-.field textarea:focus {
+.field textarea:focus,
+.field select:focus {
   box-shadow: inset 0 0 0 2px var(--on-surface);
 }
 .field .support {
@@ -1823,6 +1826,26 @@ a.nav-item:hover {
   gap: 12px;
   padding: 6px 0;
   font-size: 14px;
+}
+
+/* A dropdown in a field: the browser's own list, with our chevron. */
+.field select {
+  appearance: none;
+  padding-right: 40px;
+  cursor: pointer;
+}
+.field select option,
+.field select optgroup {
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+}
+.field .select-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--on-surface-variant);
 }
 
 /* ---- Rows of chips; small buttons (requests, filters) ---- */
