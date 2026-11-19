@@ -8,6 +8,11 @@ Notes are grouped into **New**, **Improved**, **Fixed** and **Server**. Plans ar
 
 ---
 
+## A Shorter Sound Card (2.9.1)
+
+### Improved
+- **Settings › Sound is short now.** It shows the equalizer switch and a dropdown of profiles (yours, then Tuning and Genres) instead of 26 chips. The curve, saving your own profiles and **Sync my profiles** open under **Adjust bands**. Same on the phone, the website and the Mac app.
+
 ## Tune Your Sound (2.9.0)
 
 ### New
