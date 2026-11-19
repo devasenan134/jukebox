@@ -195,6 +195,10 @@ sealed interface SocialEvent
 @Serializable @SerialName("recentsChanged")
 data object RecentsChangedEvent : SocialEvent
 
+/** One of your equalizer profiles changed on another device: sync them again. */
+@Serializable @SerialName("soundProfilesChanged")
+data object SoundProfilesChangedEvent : SocialEvent
+
 /** Trending or Latest changed on the music site: Home's rows are fetched again. */
 @Serializable @SerialName("feedsChanged")
 data object FeedsChangedEvent : SocialEvent

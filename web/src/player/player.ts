@@ -8,6 +8,7 @@ import { session } from '../state/session'
 import { queueMemory, useRecentSongs } from '../state/history'
 import { queryClient } from '../state/queries'
 import { load, save, remove } from '../state/storage'
+import { equalizeElements } from './equalizer'
 
 // The web app's player: one <audio> element plus a queue that works like the Android app's
 // Media3 player (PlaybackService.kt, PlayerConnection.kt, MixPlayback.kt): shuffle keeps a play
@@ -86,6 +87,8 @@ let standby = makeAudio()
 /** The queue entry the standby holds (-1: none). */
 let standbyUid = -1
 const PRELOAD_LAST_MS = 30_000
+// Both go through the equalizer (Settings › Sound) once it's switched on.
+equalizeElements([audio, standby])
 
 /** Sets the volume (0 to 1) and remembers it. */
 export function setVolume(v: number) {

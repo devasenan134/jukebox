@@ -175,6 +175,8 @@ export type SocialEvent =
   /** Something you played on another device (or this one): fetch Recently played again. */
   | { type: 'recentsChanged' }
   | { type: 'feedsChanged' }
+  /** One of your equalizer profiles changed on another device: sync them again. */
+  | { type: 'soundProfilesChanged' }
   | {
       type: 'remoteCommand'
       commandId: string
@@ -297,3 +299,12 @@ export const isGroup = (c: Conversation) => c.kind === 'group'
 /** Group name, or the other person's name for a DM. */
 export const conversationTitle = (c: Conversation, me?: number) =>
   isGroup(c) ? c.name ?? '' : c.members.find((u) => u.id !== me)?.displayName ?? 'Chat'
+
+/** One of your own equalizer profiles, as the server keeps it (SoundProfiles.kt). */
+export interface SoundProfile {
+  id: string
+  name: string
+  gains: number[]
+  updatedAt: number
+  deleted: boolean
+}

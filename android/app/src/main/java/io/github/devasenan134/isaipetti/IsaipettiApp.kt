@@ -31,6 +31,7 @@ import io.github.devasenan134.isaipetti.social.Social
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -73,6 +74,8 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         private set
     lateinit var audioQuality: io.github.devasenan134.isaipetti.data.AudioQualitySettings
         private set
+    lateinit var sound: io.github.devasenan134.isaipetti.data.SoundSettings
+        private set
     lateinit var offlineDownloads: io.github.devasenan134.isaipetti.data.OfflineDownloads
         private set
     lateinit var waveforms: Waveforms
@@ -92,6 +95,7 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         appearance = Appearance(this)
         lockScreen = LockScreenSettings(this)
         audioQuality = io.github.devasenan134.isaipetti.data.AudioQualitySettings(this)
+        sound = io.github.devasenan134.isaipetti.data.SoundSettings(this)
         offlineDownloads = io.github.devasenan134.isaipetti.data.OfflineDownloads.getInstance(this)
         val http = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -144,6 +148,9 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
         }
         queueMemory.onSaved = { source, ids, current -> toServer { it.saveResumePoint(source, ids, current) } }
         social.onRecentsChanged = { syncRecents() }
+        // Your equalizer profiles, the same on all your devices (SoundProfiles.kt on the server).
+        sound.onProfilesChanged = { syncSoundProfiles() }
+        social.onSoundProfilesChanged = { syncSoundProfiles() }
         searches = SearchHistory(this)
         likes = Likes(this, api, session) { social.api }
         myPlaylists = MyPlaylists(api, session)
@@ -161,6 +168,21 @@ class IsaipettiApp : Application(), SingletonImageLoader.Factory {
     private fun toServer(call: suspend (SocialApi) -> Unit) {
         if (session.credentials.value == null) return
         appScope.launch { runCatching { call(social.api) } }
+    }
+
+    private val soundSync = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Sends this phone's equalizer profiles and takes in everyone's (each one's newest change wins), one sync at a
+     * time. Only when sync is on in Settings › Sound.
+     */
+    fun syncSoundProfiles() {
+        if (session.social.value == null || !sound.state.value.sync) return
+        appScope.launch {
+            soundSync.withLock {
+                runCatching { social.api.syncSoundProfiles(sound.toServer()) }.onSuccess { sound.merge(it) }
+            }
+        }
     }
 
     /** Takes in what any of your devices played (the server's Recently played) into Home's lists. */

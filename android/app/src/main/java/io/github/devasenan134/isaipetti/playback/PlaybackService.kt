@@ -1,6 +1,7 @@
 package io.github.devasenan134.isaipetti.playback
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
@@ -14,7 +15,10 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionResult
 import androidx.media3.session.SessionCommand
@@ -77,7 +81,19 @@ class PlaybackService : MediaLibraryService() {
             .setUpstreamDataSourceFactory(upstreamFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
 
-        val player = ExoPlayer.Builder(this)
+        // The equalizer (Settings › Sound) sits in the audio sink, so everything that plays goes through it.
+        val equalizer = EqualizerProcessor()
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink =
+                DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                    .setAudioProcessors(arrayOf(equalizer))
+                    .build()
+        }
+        scope.launch { app.sound.state.collect { equalizer.set(if (it.enabled) it.gains else null) } }
+
+        val player = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(cacheDataSourceFactory))
             .setAudioAttributes(
                 AudioAttributes.Builder()

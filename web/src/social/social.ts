@@ -10,6 +10,7 @@ import { toast } from '../ui/kit'
 import { getDeviceId, getDeviceName, getClientType } from '../state/deviceIdentity'
 import { syncCurrentPlayback } from '../state/devices'
 import { syncRecents } from '../state/history'
+import { syncSoundProfiles } from '../player/equalizerSync'
 import { queryClient } from '../state/queries'
 
 /**
@@ -179,6 +180,7 @@ function runSocket(): Promise<void> {
     ws.onopen = () => {
       setS({ status: 'Online' })
       void syncRecents()
+      void syncSoundProfiles()
       sendEvent({ type: 'appState', visible: visible() })
       if (nowPlaying) sendEvent({ type: 'nowPlaying', song: nowPlaying })
       syncCurrentPlayback()
@@ -315,6 +317,9 @@ function handle(event: SocialEvent) {
       break
     case 'recentsChanged':
       void syncRecents()
+      break
+    case 'soundProfilesChanged':
+      void syncSoundProfiles()
       break
     case 'feedsChanged':
       // Trending or Latest changed on the music site: Home's rows follow.

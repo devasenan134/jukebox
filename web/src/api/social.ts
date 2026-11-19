@@ -4,7 +4,7 @@ import type {
 } from './types'
 import type {
   AddFriendResponse, AdminAccess, BugReport, ChatMessage, Conversation, Friend, FriendRequests, Invite,
-  ListeningStats, PushConfig, ResumePoint,
+  ListeningStats, PushConfig, ResumePoint, SoundProfile,
 } from './socialTypes'
 import type { ActivityItem } from '../state/history'
 import type { Album } from './types'
@@ -100,6 +100,8 @@ export const social = {
   /** Every place you can resume from, on any of your devices, newest first. */
   resumePoints: () => get<ResumePoint[]>('/me/resume'),
   saveResumePoint: (point: Omit<ResumePoint, 'savedAt'>) => send<void>('PUT', '/me/resume', point),
+  /** Your equalizer profiles (SoundProfiles.kt): sends this device's, returns all of them (the newest change of each wins). */
+  syncSoundProfiles: (profiles: SoundProfile[]) => send<SoundProfile[]>('PUT', '/me/sound-profiles', profiles),
   avatarPath: (u: SocialUser) => (u.avatar != null ? `/users/${u.id}/avatar?v=${u.avatar}` : undefined),
 
   setGroupPicture: (conversationId: number, jpeg: Blob) =>
