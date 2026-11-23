@@ -360,8 +360,11 @@ class PlaylistMissingTest {
         )
         val requests = MusicRequests(db, music, catalog, Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
         val imports = PlaylistImports(db, music, io.github.devasenan134.jukebox.server.library.Listening(db), requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
-        // Villu's "Daddy Mummy" isn't the Telugu "Mummy Daddy" by someone else.
+        // Villu's "Daddy Mummy" isn't the Telugu "Mummy Daddy" by someone else, nor its Telugu dub by the same composer.
         assertFailsWith<ApiError> { imports.request(alice, ImportRequestMusic("Daddy Mummy", artists = listOf("Devi Sri Prasad"), durationMs = 260_855)) }
+        assertFailsWith<ApiError> { imports.request(alice, ImportRequestMusic("Mummy Daddy", artists = listOf("Someone Else"), durationMs = 260_855)) }
+        // The very same recording in another language's library (as long, same artist) is it.
+        assertEquals("saavn-song-V9EfUI5V", imports.request(alice, ImportRequestMusic("Mummy Daddy", artists = listOf("Someone Else"), durationMs = 251_000)).item.id)
         // Named a little differently, but by the same composer and as long: the catalog's song.
         val asked = imports.request(alice, ImportRequestMusic("Padayappa Theme Music", artists = listOf("A.R. Rahman"), durationMs = 121_000))
         assertEquals("saavn-song-pt", asked.item.id)

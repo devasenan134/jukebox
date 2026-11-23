@@ -266,10 +266,14 @@ class PlaylistImports(
         fun byArtist(hit: CatalogHit) = ImportMatcher.splitArtists(hit.item.artist.orEmpty()).map(Fuzzy::words)
             .let { theirs -> artists.any { a -> theirs.any { MusicRequests.same(a, it) } } }
         fun asLong(hit: CatalogHit) = wanted.durationMs != null && hit.item.durationMs?.let { abs(it - wanted.durationMs) <= 3_000 } == true
-        val sameTitle = requests.search(me, title).songs.filter { MusicRequests.same(words, Fuzzy.words(Titles.song(it.item.title).first)) }
+        val (sameTitle, otherLanguage) = requests.search(me, title).songs
+            .filter { MusicRequests.same(words, Fuzzy.words(Titles.song(it.item.title).first)) }
+            .partition { MusicRequests.otherLanguage(it.item) == null }
         val best = sameTitle.firstOrNull(::byArtist) ?: sameTitle.firstOrNull(::asLong)
-            // Another language's song of that name ("Mummy Daddy" from a Telugu film for Villu's "Daddy Mummy") isn't it.
-            ?: sameTitle.firstOrNull { MusicRequests.otherLanguage(it.item) == null }
+            // Another language's song of that name is only it when it's the same recording, by the same artist and as
+            // long: Villu's "Daddy Mummy" isn't the Telugu dub's "Mummy Daddy" (same composer, 5 s shorter).
+            ?: otherLanguage.firstOrNull { byArtist(it) && asLong(it) }
+            ?: sameTitle.firstOrNull()
             // Spelled or named a little differently ("Padayappa Theme Music" is the catalog's "Padaiyappa Theme"):
             // a shorter search, and only a song by the same artist that's as long.
             ?: title.substringBeforeLast(' ', "").takeIf { words.size >= 3 && it.isNotBlank() }
