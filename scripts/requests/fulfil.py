@@ -353,17 +353,21 @@ NOISE_TAG = re.compile(r"\s*[(\[](?:feat\.?|ft\.?|with|prod\.?|remaster(?:ed)?|\
                        r"|lyric(?:al)? video|official.*?|full video|audio|video song|hd|4k)[^)\]]*[)\]]", re.I)
 DASH_TAG = re.compile(r"\s+-\s+(?:remaster(?:ed)?.*|\d{4} remaster.*|from .*|live.*|radio edit|single version)$", re.I)
 # "- Tamil", "(Tamil Version)" after a name: which language's version it is, not part of the name.
-LANGUAGE_TAG = re.compile(rf"(?:\s+[-–—]\s*(?:{LANGUAGES})(?:\s+version)?|\s*[(\[](?:{LANGUAGES})(?:\s+version)?[)\]])\s*$", re.I)
+LANGUAGE_TAG = re.compile(rf"(?:\s+[-–—]\s*({LANGUAGES})(?:\s+version)?|\s*[(\[]({LANGUAGES})(?:\s+version)?[)\]])\s*$", re.I)
 
 
-def song_name(raw):
+def song_name(raw, language=None):
     """A song's name without "(From "Film")", "(feat. …)", "- Remastered", "- Tamil" and the like, and the film it
-    named: "Hukum Reloaded - Tamil (From &quot;Jailer 2&quot;)" (JioSaavn's single) → ("Hukum Reloaded", "Jailer 2")."""
+    named: "Hukum Reloaded - Tamil (From &quot;Jailer 2&quot;)" (JioSaavn's single) → ("Hukum Reloaded", "Jailer 2").
+    With [language] (a name to file a song under in that language's library), only a tag naming that language goes:
+    "Theeranae (English Version)" on Baahubali's Tamil album is another song than "Theeranae"."""
     text = html.unescape(raw or "")
     m = FROM_TAG.search(text)
     film = (m.group(1) or m.group(2)).strip() if m else None
     title = re.sub(r"\s+", " ", DASH_TAG.sub("", NOISE_TAG.sub(" ", FROM_TAG.sub(" ", text)))).strip()
-    title = LANGUAGE_TAG.sub("", title).strip()
+    tag = LANGUAGE_TAG.search(title)
+    if tag and (language is None or (tag.group(1) or tag.group(2)).lower() == language.lower()):
+        title = title[:tag.start()].strip()
     return title or text.strip(), film
 
 
@@ -712,7 +716,7 @@ def saavn_album(client, album, year, composer, language, score=False):
             if (song.get("language") or language).lower() != language or song.get("id") in seen:
                 continue
             seen.add(song.get("id"))
-            title = without_film(plain_title(song.get("song")), album, html.unescape(song.get("album") or ""))
+            title = without_film(song_name(song.get("song"), language)[0], album, html.unescape(song.get("album") or ""))
             songs.append({"id": song["id"], "title": title, "secs": int(song.get("duration") or 0),
                           "singers": saavn_people(song, "singer"), "lyricists": saavn_people(song, "lyricist"),
                           "music": saavn_people(song, "music")})
@@ -765,7 +769,8 @@ def retag_in_place(path, tags):
     """Sets [tags] on [path], keeping its other tags and cover; an empty value removes that tag."""
     path = Path(path)
     tmp = path.with_name(f".retag-{path.name}")
-    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-map", "0", "-c", "copy"]
+    # Every stream but data ones (some of JioSaavn's m4a have one, which the m4a writer can't copy).
+    cmd = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(path), "-map", "0", "-map", "-0:d?", "-c", "copy"]
     if path.suffix.lower() == ".mp3":
         cmd += ["-id3v2_version", "3"]
     for k, v in tags.items():

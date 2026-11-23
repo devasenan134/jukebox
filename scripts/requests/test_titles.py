@@ -23,6 +23,10 @@ for raw, title, *film in cases:
 # What "already there" makes of them: another way of writing the same song is it, another version isn't.
 checks = [(fulfil.has_song(["Hukum Reloaded - Tamil"], "Hukum Reloaded"), True), (fulfil.has_song(["Kanmani"], "Kanmani (Reprise)"), False),
           (fulfil.has_song(["Nenjorathil"], "Nenjorathil (Female)"), False), (fulfil.has_song(["Hukum - Thalaivar Alappara"], "Hukum"), True)]
+# Filed in a language's library, only that language's tag comes off.
+checks += [(fulfil.song_name("Theeranae (English Version)", "tamil")[0], "Theeranae (English Version)"),
+           (fulfil.song_name("Yolo (Tamil)", "tamil")[0], "Yolo"), (fulfil.song_name("Shiddath - Hindi", "tamil")[0], "Shiddath - Hindi")]
+checks = [(got == want if isinstance(want, str) else got, True if isinstance(want, str) else want) for got, want in checks]
 for n, (got, want) in enumerate(checks):
     if got != want:
         failed += 1
