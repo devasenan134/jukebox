@@ -486,6 +486,9 @@ class RequestQueueTest {
         // Asking again for one that's requested changes nothing; the one it couldn't find is tried again.
         assertEquals("requested", s.imports.requestTrack(alice, ImportRequestMusic("Nenjukkulle")).status)
         assertEquals("queued", s.imports.requestMissing(alice, id, songs[2].id).let { if (it.queued) "queued" else "?" })
+        // A request taken back is asked for again too, not left pointing at a request that's gone.
+        s.requests.cancel(alice, songs[1].request!!.id)
+        assertTrue(s.imports.requestMissing(alice, id, songs[1].id).queued)
     }
 
     @Test
