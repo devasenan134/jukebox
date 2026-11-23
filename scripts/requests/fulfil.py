@@ -390,8 +390,9 @@ def has_song(titles, title):
 
 
 def clean_album(title):
-    """"Anbe Aaruyire (Ah Aah)" → "Anbe Aaruyire"; soundtrack labels go too."""
-    t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]\s*", " ", title or "")
+    """"Anbe Aaruyire (Ah Aah)" → "Anbe Aaruyire"; soundtrack labels go too, and a language after the name ("Baasha -
+    Tamil", as iTunes names some films)."""
+    t = re.sub(r"\s*[\(\[][^)\]]*[\)\]]\s*", " ", LANGUAGE_TAG.sub("", (title or "").strip()))
     t = re.sub(r"\b(original motion picture soundtrack|soundtrack|songs?)\b", " ", t, flags=re.I)
     return re.sub(r"\s+", " ", t).strip() or (title or "").strip()
 
