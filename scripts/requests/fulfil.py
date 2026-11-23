@@ -343,11 +343,27 @@ def loose(text):
 OWN_SONG = re.compile(r"\b(reprise|unplugged|female|male|sad|happy|duet|version|part\s*\d|theme|extended|reloaded)\b", re.I)
 
 
+LANGUAGES = "tamil|telugu|hindi|malayalam|kannada|marathi|bengali|punjabi|english"
+# "- Tamil", "(Tamil Version)" after a title: which language's version it is, not part of its name (as in the server's
+# ImportMatcher).
+LANGUAGE_TAG = re.compile(rf"(?:\s+[-–—]\s*(?:{LANGUAGES})(?:\s+version)?|\s*[(\[](?:{LANGUAGES})(?:\s+version)?[)\]])\s*$", re.I)
+FROM_TAG = re.compile(r"\s*[(\[]\s*from\s+[^)\]]*[)\]]", re.I)
+
+
+def plain_title(text):
+    """A song's name as the library writes it, whoever named it: "Hukum Reloaded - Tamil (From &quot;Jailer 2&quot;)"
+    (JioSaavn's single) → "Hukum Reloaded"."""
+    t = FROM_TAG.sub("", html.unescape(text or "")).strip()
+    t = re.sub(r"\s+", " ", LANGUAGE_TAG.sub("", t)).strip()
+    return t or html.unescape(text or "").strip()
+
+
 def has_song(titles, title):
     """Whether [title] is among [titles], however each site writes it: "Hukum - Thalaivar Alappara" is "Hukum", and
-    "Unakkaga" is "Unakaga"."""
+    "Unakkaga" is "Unakaga", "Hukum Reloaded - Tamil" is "Hukum Reloaded"."""
     def names(t):  # the whole title, and its part before " - " or "(" (a subtitle or a "From"), unless that part
         # says it's another song of the film ("Kanmani (Reprise)", "Kanmani - Female")
+        t = plain_title(t)
         if OWN_SONG.search(t or ""):
             return {loose(t)} - {""}
         return {loose(t), loose(re.split(r"\s+-\s+|\s*\(", t or "")[0])} - {""}
@@ -615,6 +631,87 @@ def saavn_lyrics(client, title, album, secs):
     return None
 
 
+def saavn(client, **params):
+    """One call to JioSaavn's web API (its older reply format, which names a song's singers and composer)."""
+    params.update(_format="json", _marker="0", ctx="web6dot0")
+    r = client.get(SAAVN, params=params, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+
+def without_film(title, *films):
+    """"Gnyabagam Varugiradha (Vishwaroopam)" on Vishwaroopam II → "Gnyabagam Varugiradha": the film's name (or the
+    start of it) after a song adds nothing."""
+    m = re.match(r"^(.*?)\s*\(([^)]*)\)\s*$", title or "")
+    if m and m.group(1) and key(m.group(2)) and any(key(clean_album(f)).startswith(key(m.group(2))) for f in films if f):
+        return m.group(1).strip()
+    return title
+
+
+def saavn_people(song, role):
+    """A JioSaavn song's people in [role] ("singer", "lyricist", "music"), as "A, B"; None when it doesn't say."""
+    found = [a.get("name") for a in ((song.get("artistMap") or {}).get("artists") or []) if isinstance(a, dict) and a.get("role") == role]
+    if not found and role == "singer":
+        found = [song.get("singers")]
+    if not found and role == "music":
+        found = [song.get("music")]
+    return people(html.unescape(", ".join(x for x in found if x))) or None
+
+
+def saavn_album(client, album, year, composer, language, score=False):
+    """JioSaavn's songs of [album] (from [year] ±1, in [language]), the names and ids the library goes by: the film's
+    album first, then its singles ("One Name (From "Jailer 2")"), which are often all there is of a new film. Each is
+    {"id", "title", "secs", "singers", "lyricists", "music"}. [] when JioSaavn doesn't have it, or can't be reached.
+    [score]: the album's background score is wanted (its own album on JioSaavn first, when it has one)."""
+    try:
+        results = saavn(client, __call="search.getAlbumResults", q=clean_album(album), n=30, p=1, api_version="4").get("results") or []
+    except (httpx.HTTPError, ValueError):
+        return []
+    want = key(clean_album(album))
+    mains, singles = [], []
+    for hit in results:
+        found = int(hit.get("year") or 0)
+        title = html.unescape(hit.get("title") or "")
+        music = (hit.get("more_info") or {}).get("music")
+        if ((hit.get("language") or "").lower() != language or (year and found and abs(found - year) > 1)
+                or (composer and music and not same_people(composer, html.unescape(music)))):
+            continue  # the same film in another language, a remake, another film of that name
+        film = FROM_FILM.search(title)
+        if film and key(clean_album(film.group(1))) == want:
+            singles.append(hit)
+        elif key(clean_album(re.sub(r"\s+-\s+(single|ep)$", "", title, flags=re.I))) == want:
+            mains.append(hit)
+    # The album of the kind asked for first (JioSaavn often keeps a film's score pieces in its songs album, though),
+    # then the biggest; a film can be there twice ("DC (Original Motion Picture Soundtrack)" in two editions).
+    mains.sort(key=lambda h: (bool(SCORE_ALBUM.search(html.unescape(h.get("title") or ""))) != score,
+                              -int((h.get("more_info") or {}).get("song_count") or 0)))
+    songs, seen = [], set()
+    for hit in mains[:3] + singles[:12]:
+        try:
+            details = saavn(client, __call="content.getAlbumDetails", albumid=hit["id"])
+        except (httpx.HTTPError, ValueError):
+            continue
+        for song in details.get("songs") or []:
+            if (song.get("language") or language).lower() != language or song.get("id") in seen:
+                continue
+            seen.add(song.get("id"))
+            title = without_film(plain_title(song.get("song")), album, html.unescape(song.get("album") or ""))
+            songs.append({"id": song["id"], "title": title, "secs": int(song.get("duration") or 0),
+                          "singers": saavn_people(song, "singer"), "lyricists": saavn_people(song, "lyricist"),
+                          "music": saavn_people(song, "music")})
+    return songs
+
+
+def saavn_song(songs, title, ms=None):
+    """The one of JioSaavn's [songs] a downloaded track called [title], [ms] long, is: the same song however it's
+    written, and as long (within 5 s) when both lengths are known; the same spelling first, then the closest length,
+    the album's before a single's. None when JioSaavn doesn't have it."""
+    secs = round(ms / 1000) if ms else 0
+    hits = [s for s in songs if has_song([s["title"]], title) and (not secs or not s["secs"] or abs(s["secs"] - secs) <= 5)]
+    hits.sort(key=lambda s: (loose(s["title"]) != loose(plain_title(title)), abs(s["secs"] - secs) if secs and s["secs"] else 0))
+    return hits[0] if hits else None
+
+
 # ---------------------------------------------------------------- handing in
 
 
@@ -766,6 +863,22 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
         + (f" · score {round(match['match_score'])}" if match.get("match_score") is not None else "")
         + (f" · {len(picked)} of {len(tracks)} songs" if is_song and not whole else f" · {len(picked)} songs") + f" · {language.title()}")
 
+    # The songs as JioSaavn names them, with their ids: the names the library goes by (its 28,500 songs came from
+    # there), so a song is never filed twice under two names ("Hukum Reloaded" / "Hukum Reloaded - Tamil").
+    saavn_songs = saavn_album(client, album, year, composer, language, score=score_album)
+    saavn_of = {n: saavn_song(saavn_songs, clean_title(t.get("name"), album), millis(t.get("duration"))) for n, t in picked}
+
+    def named(n, t):  # JioSaavn's name for a track, else the page's
+        return (saavn_of.get(n) or {}).get("title") or clean_title(t.get("name"), album)
+    unnamed = [clean_title(t.get("name"), album) for n, t in picked if not saavn_of.get(n)]
+    if saavn_songs:
+        say(f"      jiosaavn  {len(picked) - len(unnamed)} of {len(picked)} songs, named as JioSaavn has them"
+            + (f"; not there: {', '.join(unnamed)}" if unnamed else ""))
+    else:
+        say("      jiosaavn  doesn't have the album: the page's names")
+    if unnamed:
+        notes.append(f"JioSaavn doesn't have {', '.join(unnamed) if saavn_songs else 'this album'}: the page's names are used")
+
     # Where it goes: the album's own folder if it's in the library (same title, and its year or composer).
     title_for_place = clean_title((match.get("matched_song") or {}).get("name"), album) if is_song else None
     place = server.place(rid, year, composer, title_for_place, movie=album if score_album or rid is None else None, score=score_album)
@@ -788,8 +901,9 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             # The server's list leaves out what it took for background score ("Roddy Theme", "Das and Parvathy
             # (Instrumental)"): the files in the album's folders count too, or those come again on every run.
             have = (place.get("songs") or []) + folder_titles(cfg, folder, folder + SCORE)
-            kept = [(n, t) for n, t in picked if not has_song(have, clean_title(t.get("name"), album))]
-            review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
+            ids = set(place.get("saavnIds") or [])
+            kept = [(n, t) for n, t in picked if not has_song(have, named(n, t)) and (saavn_of.get(n) or {}).get("id") not in ids]
+            review["skipped"] = [named(n, t) for n, t in picked if (n, t) not in kept]
             picked = kept
             if not picked:
                 return review, existing, "already"
@@ -803,8 +917,8 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             if sample:
                 existing = {"folder": suggested, "sampleFile": sample, "library": into}
                 have = folder_titles(cfg, suggested, suggested + SCORE)
-                kept = [(n, t) for n, t in picked if not has_song(have, clean_title(t.get("name"), album))]
-                review["skipped"] = [clean_title(t.get("name"), album) for n, t in picked if (n, t) not in kept]
+                kept = [(n, t) for n, t in picked if not has_song(have, named(n, t))]
+                review["skipped"] = [named(n, t) for n, t in picked if (n, t) not in kept]
                 picked = kept
                 if not picked:
                     return review, None, "already"
@@ -826,7 +940,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             notes.append(f"The album's own tags change with it: {text}")
             say(f"      updates   {text}")
     if dry:
-        review["tracks"] = [{"n": n, "file": "", "title": clean_title(t.get("name"), album)} for n, t in picked]
+        review["tracks"] = [{"n": n, "file": "", "title": named(n, t), "saavnId": (saavn_of.get(n) or {}).get("id")} for n, t in picked]
         return review, existing, None
 
     work = Path(cfg["WORK_FOLDER"]) / str(work_id)
@@ -867,7 +981,8 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
     out = []
     width = max(2, len(str(total or len(tracks))))
     for i, (n, t) in enumerate(picked, 1):
-        title = clean_title(t.get("name"), album)
+        title = named(n, t)
+        known = saavn_of.get(n) or {}
         head = f"      {i}/{len(picked)} {title[:34]:<34}"
         expected = millis(t.get("duration"))
         downloaded = None
@@ -908,10 +1023,11 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
             raise RuntimeError(f"couldn't get a good file for {title}")
         dest, info = downloaded
         name = safe_name(f"{n:0{width}d} - {title}")
-        singers = people(t.get("artist") or "")
+        # JioSaavn's people when it names them (it often doesn't yet for a new film), else the page's.
+        singers = known.get("singers") or people(t.get("artist") or "")
         is_score = score_album or bool(SCORE_TRACK.search(title))
-        tags = dict(base_tags, title=title, artist=singers, lyricist=lyricists or None,
-                    track=f"{n}/{total}" if total else str(n), disc="1/1")
+        tags = dict(base_tags, title=title, artist=singers, lyricist=known.get("lyricists") or lyricists or None,
+                    track=f"{n}/{total}" if total else str(n), disc="1/1", saavn_id=known.get("id"))
         if is_score:
             tags.update(album=base_tags["album"] + SCORE, discsubtitle=None)
         live(f"{head} tagging…")
@@ -925,7 +1041,7 @@ def prepare(cfg, server, client, match, request, covered_by, notes, dry, whole=N
                 f"{megabytes(size)} · {dict(synced='synced lyrics', plain='plain lyrics').get(kind, 'no lyrics')}")
         live(done)
         say() if TTY else say(done)
-        out.append({"n": n, "file": f"{name}.mp3", "title": title, "singers": singers or None,
+        out.append({"n": n, "file": f"{name}.mp3", "title": title, "saavnId": known.get("id"), "singers": singers or None,
                     "durationMs": info["durationMs"], "bitrate": info["bitrate"], "lyrics": kind, "score": is_score})
     if cover:
         shutil.copy(cover, work / "cover.jpg")
@@ -1551,6 +1667,66 @@ def covers(cfg, dry, upgrade=False):
             subprocess.run(["docker", "kill", "-s", "USR1", cfg["ANALYZER"]], capture_output=True)
 
 
+def saavn_tags(cfg, dry):
+    """Gives the files downloaded from masstamilan before JioSaavn named them (tag source=masstamilan, no saavn_id) the
+    names and ids new downloads get: each is matched to its album's songs on JioSaavn by name and length, and gets
+    JioSaavn's title and id, and its singers and lyricists where JioSaavn names them. Files JioSaavn doesn't have are
+    left alone. Old tags go to an undo log (`fulfil.py undo <log>`); then the library is rescanned."""
+    music = Path(cfg["ROOT"])
+    logs = Path(cfg["REQUESTS_FOLDER"]) / "undo"
+    undo_path = logs / f"saavn-tags-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
+    changed = unmatched = 0
+    with httpx.Client(timeout=httpx.Timeout(30, connect=15), headers={"User-Agent": AGENT}) as client:
+        for library, folder in sorted(cfg["FOLDERS"].items()):
+            if not (music / folder).is_dir():
+                continue
+            language = language_of(library)
+            for album_dir in sorted(p for p in (music / folder).iterdir() if p.is_dir() and not p.name.startswith(".")):
+                files = []
+                for f in sorted(album_dir.iterdir()):
+                    if f.suffix.lower() != ".mp3" or f.name.startswith("."):
+                        continue
+                    info = probe(f)
+                    if info and info["tags"].get("source") == "masstamilan" and not info["tags"].get("saavn_id"):
+                        files.append((f, info))
+                if not files:
+                    continue
+                tags = files[0][1]["tags"]
+                album = tags.get("album") or album_dir.name
+                score = album.endswith(SCORE)
+                album = clean_album(album.replace(SCORE, ""))
+                year = int(m.group(0)) if (m := re.match(r"(19|20)\d\d", tags.get("date") or "")) else None
+                songs = saavn_album(client, album, year, tags.get("album_artist"), language, score=score)
+                where = album_dir.relative_to(music)
+                say(f"  {where}: " + (f"{len(songs)} songs on JioSaavn" if songs else "not on JioSaavn"))
+                for f, info in files:
+                    t = info["tags"]
+                    hit = saavn_song(songs, t.get("title") or f.stem, info["durationMs"])
+                    if not hit:
+                        unmatched += 1
+                        say(f"    –  {t.get('title')}: not on JioSaavn, left as it is")
+                        continue
+                    new = {"title": hit["title"], "saavn_id": hit["id"], "artist": hit["singers"], "lyricist": hit["lyricists"]}
+                    new = {k: v for k, v in new.items() if v and v != t.get(k)}
+                    shown = f"{t.get('title')} → {hit['title']}" if "title" in new else t.get("title")
+                    say(f"    {'would ' if dry else ''}✓ {shown} [{hit['id']}]"
+                        + (f" · singers {hit['singers']}" if "artist" in new else "") + (f" · lyrics {hit['lyricists']}" if "lyricist" in new else ""))
+                    changed += 1
+                    if dry:
+                        continue
+                    logs.mkdir(exist_ok=True)
+                    with open(undo_path, "a") as undo:
+                        undo.write(json.dumps({"retag": str(f.relative_to(music)), "tags": {k: t.get(k) for k in new}}) + "\n")
+                    retag_in_place(f, new)
+    say(f"{changed} file(s) {'to name' if dry else 'named'} as JioSaavn has them, {unmatched} JioSaavn doesn't have")
+    if changed and not dry:
+        say(f"Undo: fulfil.py undo {undo_path}")
+        say("Rescanning the library…", end="")
+        say(" ✓" if Server(cfg).scan() else " still running after 30 minutes")
+        if cfg.get("ANALYZER"):
+            subprocess.run(["docker", "kill", "-s", "USR1", cfg["ANALYZER"]], capture_output=True)
+
+
 def undo_covers(cfg, path):
     """Puts back the covers a covers run replaced (and takes away the ones it added); the songs keep the new picture."""
     music = Path(cfg["ROOT"])
@@ -1818,6 +1994,8 @@ def main():
     c = sub.add_parser("covers", help="give downloaded albums without a cover iTunes' or JioSaavn's album art (on the server)")
     c.add_argument("--dry-run", action="store_true")
     c.add_argument("--upgrade", action="store_true", help=f"also replace covers under {SMALL_COVER} px, in every library")
+    st = sub.add_parser("saavn-tags", help="on the server: name masstamilan's files already in the library as JioSaavn does, with its ids")
+    st.add_argument("--dry-run", action="store_true")
     uc = sub.add_parser("undo-covers")
     uc.add_argument("log")
     u = sub.add_parser("undo")
@@ -1870,6 +2048,10 @@ def main():
         if remote:
             sys.exit(f"Run covers on the server: ssh {remote} {cfg['REMOTE_FULFIL']} covers")
         covers(cfg, args.dry_run, args.upgrade)
+    elif args.command == "saavn-tags":
+        if remote:
+            sys.exit(f"Run saavn-tags on the server: ssh {remote} {cfg['REMOTE_FULFIL']} saavn-tags")
+        saavn_tags(cfg, args.dry_run)
     elif args.command == "undo-covers":
         undo_covers(cfg, args.log)
     elif args.command == "undo":
