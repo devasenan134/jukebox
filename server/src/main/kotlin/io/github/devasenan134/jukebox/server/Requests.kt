@@ -249,6 +249,8 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
         private val FROM = Regex("""\s*[(\[]From\s+["“”']([^"“”']+)["“”']\s*[)\]]""", RegexOption.IGNORE_CASE)
         private val SOUNDTRACK = Regex("""\s*[(\[](?:Original\s+)?(?:Motion\s+Picture\s+|Movie\s+)?Sound\s*track[)\]]""", RegexOption.IGNORE_CASE)
         private val EP = Regex("""\s+-\s+(?:EP|Single)$""", RegexOption.IGNORE_CASE)
+        /** "Kumki (Original Motion Picture Soundtrack), Vol. 1": a later edition of the film's album, not another film. */
+        private val VOLUME = Regex("""\s*(?:,\s*|\s-\s|[(\[])\s*Vol(?:ume|\.)?\s*\d+\s*[)\]]?$""", RegexOption.IGNORE_CASE)
         private val FILM = Regex("""Sound\s*track|Motion Picture|Background Score""", RegexOption.IGNORE_CASE)
         /** Words of compilations ("Kollywood's Top 10 Hits"), whose songs come from many movies. */
         private val COMPILATION = setOf(
@@ -260,8 +262,8 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
         /** "Kanave Kanave (From "David")" → "Kanave Kanave". */
         fun cleanTitle(title: String) = title.replace(FROM, "").replace(SOUNDTRACK, "").replace(EP, "").trim()
 
-        /** "David (Original Motion Picture Soundtrack) - EP" → "David". */
-        fun movieName(album: String) = album.replace(SOUNDTRACK, "").replace(EP, "").trim()
+        /** "David (Original Motion Picture Soundtrack) - EP" → "David", "Kumki (Original Motion Picture Soundtrack), Vol. 2" → "Kumki". */
+        fun movieName(album: String) = album.replace(SOUNDTRACK, "").replace(EP, "").trim().replace(VOLUME, "").trim()
 
         /** Whether an album is one movie's music, rather than a compilation or a single. */
         fun isMovieAlbum(album: String, albumArtist: String? = null): Boolean {
