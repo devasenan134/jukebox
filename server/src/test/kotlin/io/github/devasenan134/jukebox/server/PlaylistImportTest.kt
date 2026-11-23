@@ -66,16 +66,16 @@ class ImportMatcherTest {
 
     @Test
     fun `titles clean up and name their movie`() {
-        assertEquals("Naa Ready" to "Leo", ImportMatcher.cleanTitle("Naa Ready (From \"Leo\")"))
-        assertEquals("Kanave Kanave" to null, ImportMatcher.cleanTitle("Kanave Kanave (feat. Someone) - Remastered 2011"))
+        assertEquals("Naa Ready" to "Leo", Titles.song("Naa Ready (From \"Leo\")"))
+        assertEquals("Kanave Kanave" to null, Titles.song("Kanave Kanave (feat. Someone) - Remastered 2011"))
         assertEquals(listOf("A", "B", "C", "D"), ImportMatcher.splitArtists("A, B & C feat. D"))
     }
 
     @Test
     fun `a language after the title isn't part of it`() {
-        assertEquals("Hukum - Thalaivar Alappara" to "Jailer", ImportMatcher.cleanTitle("Hukum - Thalaivar Alappara - Tamil (From \"Jailer\")"))
-        assertEquals("Kaavaalaa" to null, ImportMatcher.cleanTitle("Kaavaalaa (Tamil Version)"))
-        assertEquals("Tamil Tamil" to null, ImportMatcher.cleanTitle("Tamil Tamil"))
+        assertEquals("Hukum - Thalaivar Alappara" to "Jailer", Titles.song("Hukum - Thalaivar Alappara - Tamil (From \"Jailer\")"))
+        assertEquals("Kaavaalaa" to null, Titles.song("Kaavaalaa (Tamil Version)"))
+        assertEquals("Tamil Tamil" to null, Titles.song("Tamil Tamil"))
     }
 
     @Test

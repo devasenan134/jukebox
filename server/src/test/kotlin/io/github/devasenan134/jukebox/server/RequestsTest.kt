@@ -45,8 +45,8 @@ class CatalogParseTest {
         // A later edition ("Vol. 1") is the same film, so it's found in the library like the first.
         assertEquals("Kumki", parse("""{"wrapperType":"collection","collectionId":9,"collectionName":"Kumki (Original Motion Picture Soundtrack), Vol. 2","artistName":"D. Imman"}""")!!.movie)
         assertEquals("Kumki", parse("""{"wrapperType":"track","kind":"song","trackId":10,"trackName":"Soi Soi","collectionName":"Kumki (Original Motion Picture Soundtrack), Vol. 1"}""")!!.movie)
-        assertEquals("Kumki", ITunesCatalog.movieName("Kumki (Volume 1)"))
-        assertEquals("Kumki 2", ITunesCatalog.movieName("Kumki 2 (Original Motion Picture Soundtrack) - EP"))
+        assertEquals("Kumki", Titles.album("Kumki (Volume 1)"))
+        assertEquals("Kumki 2", Titles.album("Kumki 2 (Original Motion Picture Soundtrack) - EP"))
         assertEquals("I (Hindi)", parse("""{"wrapperType":"collection","collectionId":7,"collectionName":"I (Hindi) [Original Motion Picture Soundtrack]"}""")!!.movie)
         assertNull(parse("""{"wrapperType":"track","kind":"song","trackId":8,"trackName":"Munbe Vaa","collectionName":"A. R. Rahman Vibration","collectionArtistName":"Various Artists"}"""))
     }

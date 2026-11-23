@@ -343,19 +343,33 @@ def loose(text):
 OWN_SONG = re.compile(r"\b(reprise|unplugged|female|male|sad|happy|duet|version|part\s*\d|theme|extended|reloaded)\b", re.I)
 
 
+# Song names as the library writes them, whoever named them: the same rules as the server's Titles.kt, both checked
+# against title-cases.tsv (test_titles.py).
 LANGUAGES = "tamil|telugu|hindi|malayalam|kannada|marathi|bengali|punjabi|english"
-# "- Tamil", "(Tamil Version)" after a title: which language's version it is, not part of its name (as in the server's
-# ImportMatcher).
+# "(From "Leo")", "(From the movie Leo)", "(From"Baasha")", "- From "Master"": the film a song is from.
+FROM_TAG = re.compile(r"""[(\[]\s*from(?:\s+|\s*(?=["“”']))(?:the\s+)?(?:movie\s+|film\s+)?["“”']?([^"“”')\]]+)["“”']?\s*[)\]]"""
+                      r"""|\s+-\s+from\s+["“”']([^"“”']+)["“”']""", re.I)
+NOISE_TAG = re.compile(r"\s*[(\[](?:feat\.?|ft\.?|with|prod\.?|remaster(?:ed)?|\d{4}\s+remaster(?:ed)?|original motion picture soundtrack"
+                       r"|lyric(?:al)? video|official.*?|full video|audio|video song|hd|4k)[^)\]]*[)\]]", re.I)
+DASH_TAG = re.compile(r"\s+-\s+(?:remaster(?:ed)?.*|\d{4} remaster.*|from .*|live.*|radio edit|single version)$", re.I)
+# "- Tamil", "(Tamil Version)" after a name: which language's version it is, not part of the name.
 LANGUAGE_TAG = re.compile(rf"(?:\s+[-–—]\s*(?:{LANGUAGES})(?:\s+version)?|\s*[(\[](?:{LANGUAGES})(?:\s+version)?[)\]])\s*$", re.I)
-FROM_TAG = re.compile(r"\s*[(\[]\s*from\s+[^)\]]*[)\]]", re.I)
+
+
+def song_name(raw):
+    """A song's name without "(From "Film")", "(feat. …)", "- Remastered", "- Tamil" and the like, and the film it
+    named: "Hukum Reloaded - Tamil (From &quot;Jailer 2&quot;)" (JioSaavn's single) → ("Hukum Reloaded", "Jailer 2")."""
+    text = html.unescape(raw or "")
+    m = FROM_TAG.search(text)
+    film = (m.group(1) or m.group(2)).strip() if m else None
+    title = re.sub(r"\s+", " ", DASH_TAG.sub("", NOISE_TAG.sub(" ", FROM_TAG.sub(" ", text)))).strip()
+    title = LANGUAGE_TAG.sub("", title).strip()
+    return title or text.strip(), film
 
 
 def plain_title(text):
-    """A song's name as the library writes it, whoever named it: "Hukum Reloaded - Tamil (From &quot;Jailer 2&quot;)"
-    (JioSaavn's single) → "Hukum Reloaded"."""
-    t = FROM_TAG.sub("", html.unescape(text or "")).strip()
-    t = re.sub(r"\s+", " ", LANGUAGE_TAG.sub("", t)).strip()
-    return t or html.unescape(text or "").strip()
+    """A song's name as the library writes it (song_name without the film)."""
+    return song_name(text)[0]
 
 
 def has_song(titles, title):
