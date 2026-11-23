@@ -120,6 +120,25 @@ class MusicRequestsTest {
     }
 
     @Test
+    fun `another language's film is only had in that language`(): Unit = runBlocking {
+        val items = listOf(
+            CatalogItem("saavn-song-or8LPjW6", "song", "Hukum - Thalaivar Alappara", "Jailer", 2023, language = "tamil"),
+            CatalogItem("saavn-song-rtIe2EtQ", "song", "Hukum - Thalaivar Alappara", "Jailer (Telugu)", 2023, language = "telugu"),
+            CatalogItem("saavn-song-x1", "song", "Kaavaalaa", "Jailer (Telugu)", 2023, language = "telugu"),
+        )
+        val db = Db(File.createTempFile("jukebox-language", ".db").apply { delete(); deleteOnExit() }.path)
+        val music = GrowingMusic().apply {
+            songs = listOf(
+                LibrarySong("t1", "Hukum - Thalaivar Alappara", "Jailer", "m-jailer", "", emptyList(), Person("p-ani", "Anirudh"), 2023, 207, "Tamil", 0, false),
+                LibrarySong("t2", "Kaavaalaa", "Jailer", "m-jailer-te", "", emptyList(), Person("p-ani", "Anirudh"), 2023, 190, "Telugu", 0, false),
+            )
+        }
+        val requests = MusicRequests(db, music, FakeCatalog(items), Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
+        // The Tamil Hukum is in the library; the Telugu one isn't (only the Telugu Kaavaalaa is).
+        assertEquals(listOf("saavn-song-rtIe2EtQ"), requests.search(alice, "jailer").songs.map { it.item.id })
+    }
+
+    @Test
     fun `asking, answering and being told`() = runBlocking {
         val (requests, music, push) = setUp()
         val first = requests.request(alice, "itunes-song-3")
