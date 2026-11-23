@@ -273,7 +273,9 @@ class PlaylistImports(
             // Another language's song of that name is only it when it's the same recording, by the same artist and as
             // long: Villu's "Daddy Mummy" isn't the Telugu dub's "Mummy Daddy" (same composer, 5 s shorter).
             ?: otherLanguage.firstOrNull { byArtist(it) && asLong(it) }
-            ?: sameTitle.firstOrNull()
+            // A song of that name when there's nothing to tell it by; when the artists and length are known and none
+            // agree, it's another song ("Daddy Mummy" from Kadhali Kanavillai, by Deva, a minute longer).
+            ?: sameTitle.firstOrNull()?.takeIf { artists.isEmpty() && wanted.durationMs == null }
             // Spelled or named a little differently ("Padayappa Theme Music" is the catalog's "Padaiyappa Theme"):
             // a shorter search, and only a song by the same artist that's as long.
             ?: title.substringBeforeLast(' ', "").takeIf { words.size >= 3 && it.isNotBlank() }
