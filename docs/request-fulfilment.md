@@ -69,8 +69,10 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
   recording as a JioSaavn file in the same film's album went to `MusicLibrary/_duplicates/` (the song kept its id), and 50
   titles that ended in their library's language ("Hukum Reloaded - Tamil", "Yolo (Tamil)") lost it, so a single and the
   album's copy are one song. Another language's tag stays ("Theeranae (English Version)"), when naming downloads too.
-  Three copies on a devotional compilation stay. Undo: `dedupe.py undo MusicLibrary/_duplicates/undo-<time>.jsonl` (two
-  logs: 20261123-170616 and -170659, newest first), then rescan.
+  Three copies on a devotional compilation stay. Then 118 of JioSaavn's own second copies (the album's track and the
+  single's "2-01 - Uyirey (Tamil).m4a", or a track listed twice) went the same way; 33 stay, where the names say they're
+  different versions (solo, karaoke, another singer) though the scanner took them for one recording. Undo: `dedupe.py undo MusicLibrary/_duplicates/undo-<time>.jsonl` (logs
+  20261123-171907, -170659, -170616, newest first), then rescan.
 - **One way of cleaning names:** "(From "Film")", "(feat. …)", "- Remastered", "- Tamil" and the like come off a song's
   name the same way everywhere: the server's `Titles.kt` (request search, playlist imports) and fulfil.py's
   `song_name`. A new case goes in `scripts/requests/title-cases.tsv`; the server's tests and

@@ -16,11 +16,16 @@ Then rescan (Jukebox's own scan finds the changes; the analyzer only looks at th
   again from masstamilan into the same film's album (its songs or its background score, any year), is moved to
   <root>/_duplicates/, the same path below it, with its lyrics. A copy on a compilation (a devotional album of songs
   from many films) stays: it's part of that album. The song keeps its id, so playlists and likes don't change.
+- Two of JioSaavn's files of the same recording in one album (the album's track and the single's copy on disc 2,
+  "2-01 - Uyirey (Tamil).m4a"; or the album listing it twice) are one: the album's track stays (disc 1, the name
+  without a label, the lower number), the other is moved to <root>/_duplicates/ like the above. Only when their names
+  are the same song however spelled: the scanner takes a solo or karaoke version for the same recording sometimes.
 - A title that ends in its library's language ("Hukum Reloaded - Tamil", "Yolo (Tamil)" in the Tamil library) gets the
   name without it, as fulfil.py's song_name gives it: the single and the album's copy of a song become one song.
   Another language's stays ("Theeranae (English Version)" on a Tamil album is another song).
 """
 import argparse
+import difflib
 import importlib.util
 import json
 import re
@@ -37,12 +42,38 @@ fulfil = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fulfil)
 
 SCORE = re.compile(r"\s*\(original background score\)\s*$", re.I)
+# Words that make a track another version of a song, though the scanner may have taken it for the same recording (a
+# solo or karaoke version shares the backing): such a copy is never moved.
+VERSION_WORDS = re.compile(r"\b(solo|duet|version|ver|minus\s*one|karaoke|instrumental|repeat|reprise|remix|unplugged|female|male|"
+                           r"sad|happy|pathos|bit|pt|part|theme|extended|reloaded|lo-?fi|slowed|reverb|\d+)\b", re.I)
+
+
+def same_song(a, b):
+    """Whether two of an album's file names are one song however spelled ("Vaangayya" / "Vangayya"), with no version
+    words or label in one that the other hasn't ("Rasa Magarasa (Solo Version)" is another version of "Rasa Magarasa",
+    "Vilakku Onnu (Krishnaraj)" of "Vilakku Onnu (Hariharan)"); its language tag aside."""
+    names = [fulfil.plain_title(re.sub(r"^(?:\d+-)?\d+\s*-\s*", "", Path(x).stem)) for x in (a, b)]
+    if {w.lower() for w in VERSION_WORDS.findall(names[0])} != {w.lower() for w in VERSION_WORDS.findall(names[1])}:
+        return False
+    # A label ("(Hariharan)" / "(Krishnaraj)", "(Climax Song)") says which version it is: they have to be the same.
+    if len({frozenset(fulfil.loose(x) for x in re.findall(r"[(\[]([^)\]]*)[)\]]", n)) for n in names}) > 1:
+        return False
+    keys = [fulfil.loose(re.sub(r"\s*[(\[][^)\]]*[)\]]", "", n)) for n in names]
+    return bool(keys[0]) and difflib.SequenceMatcher(None, *keys).ratio() >= 0.85
 
 
 def film_of(folder):
     """"Arasan (2026) (Original Background Score)" and "Arasan (2025)" are both Arasan's."""
     name = SCORE.sub("", folder.rsplit("/", 1)[-1])
     return fulfil.key(re.sub(r"\s*\((?:19|20)\d\d\)\s*$", "", name))
+
+
+def keeper(name):
+    """Which of a recording's files in one album stays: the album's own track (not disc 2's single copy), the name
+    without a bracketed label ("Kanne", not "Kanne (Thaka Thimi Thaa)"), the lower track number."""
+    m = re.match(r"^(?:(\d+)-)?(\d+)\s*-\s*(.*)$", Path(name).stem)
+    disc, number, title = (int(m.group(1) or 1), int(m.group(2)), m.group(3)) if m else (9, 999, name)
+    return disc > 1, "(" in title, disc, number, name
 
 
 def plan(root, db):
@@ -57,13 +88,22 @@ def plan(root, db):
         by_recording[(lib, recording)].append(path)
         if fulfil.LANGUAGE_TAG.search(title or ""):
             retitles.append((folders[lib] / path, languages[lib]))
+    copies = []
     for (lib, _), paths in by_recording.items():
         kept = [p for p in paths if not p.endswith(".mp3")]
         if not kept:
             continue
+        by_folder = defaultdict(list)
+        for p in kept:
+            by_folder[p.rsplit("/", 1)[0]].append(p)
+        for same in by_folder.values():
+            same.sort(key=lambda p: keeper(p.rsplit("/", 1)[1]))
+            copies += [folders[lib] / p for p in same[1:] if same_song(same[0], p)]
         films = {film_of(p.rsplit("/", 1)[0]) for p in kept}
         moves += [folders[lib] / p for p in paths if p.endswith(".mp3") and film_of(p.rsplit("/", 1)[0]) in films]
     steps = [("move", f, root / "_duplicates" / f.relative_to(root)) for f in sorted(moves) if f.exists()]
+    steps += [("copy", f, root / "_duplicates" / f.relative_to(root)) for f in sorted(copies) if f.exists()]
+    moves += copies
     for f, language in sorted(set(retitles)):
         if f in moves or not f.exists():
             continue
@@ -78,9 +118,11 @@ def show(root, steps):
     for kind, f, what in steps:
         if kind == "move":
             print(f"  move     {f.relative_to(root)}  (the same recording is in the library from JioSaavn)")
+        elif kind == "copy":
+            print(f"  move     {f.relative_to(root)}  (another of JioSaavn's copies of a track of the album)")
         else:
             print(f"  retitle  {f.relative_to(root)}: {what[0]} → {what[1]}")
-    print(f"{sum(k == 'move' for k, *_ in steps)} file(s) to move to _duplicates, {sum(k == 'retitle' for k, *_ in steps)} to retitle")
+    print(f"{sum(k in ('move', 'copy') for k, *_ in steps)} file(s) to move to _duplicates, {sum(k == 'retitle' for k, *_ in steps)} to retitle")
 
 
 def run(root, steps):
@@ -89,7 +131,7 @@ def run(root, steps):
     log_path = logs / f"undo-{datetime.now():%Y%m%d-%H%M%S}.jsonl"
     with open(log_path, "a") as log:
         for kind, f, what in steps:
-            if kind == "move":
+            if kind in ("move", "copy"):
                 for side in [f] + [f.with_suffix(s) for s in (".lrc", ".txt") if f.with_suffix(s).exists()]:
                     dest = what.with_name(side.name)
                     dest.parent.mkdir(parents=True, exist_ok=True)
