@@ -348,6 +348,26 @@ class PlaylistMissingTest {
     private val admin = UserDto(3, "admin", "Admin")
 
     @Test
+    fun `a playlist's song is requested as the catalog's, never another language's song of that name`(): Unit = runBlocking {
+        val db = Db(File.createTempFile("jukebox-ask", ".db").apply { delete(); deleteOnExit() }.path)
+        db.tx { update("INSERT INTO users (id, username, display_name, created_at) VALUES (1, 'alice', 'alice', 0)") }
+        val music = GrowingMusic()
+        val catalog = FakeCatalog(
+            listOf(
+                CatalogItem("saavn-song-V9EfUI5V", "song", "Mummy Daddy", "Simha Puthrudu (Telugu)", 2019, "Someone Else", durationMs = 250_000, language = "telugu"),
+                CatalogItem("saavn-song-pt", "song", "Padaiyappa Theme", "Padaiyappa", 1999, "A.R. Rahman", durationMs = 120_000, language = "tamil"),
+            ),
+        )
+        val requests = MusicRequests(db, music, catalog, Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
+        val imports = PlaylistImports(db, music, io.github.devasenan134.jukebox.server.library.Listening(db), requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
+        // Villu's "Daddy Mummy" isn't the Telugu "Mummy Daddy" by someone else.
+        assertFailsWith<ApiError> { imports.request(alice, ImportRequestMusic("Daddy Mummy", artists = listOf("Devi Sri Prasad"), durationMs = 260_855)) }
+        // Named a little differently, but by the same composer and as long: the catalog's song.
+        val asked = imports.request(alice, ImportRequestMusic("Padayappa Theme Music", artists = listOf("A.R. Rahman"), durationMs = 121_000))
+        assertEquals("saavn-song-pt", asked.item.id)
+    }
+
+    @Test
     fun `an import keeps its missing songs in place, they're requested, and they fill in when they arrive`(): Unit = runBlocking {
         val db = Db(File.createTempFile("jukebox-missing", ".db").apply { delete(); deleteOnExit() }.path)
         db.tx { listOf(1L to "alice", 3L to "admin").forEach { (id, name) -> update("INSERT INTO users (id, username, display_name, created_at) VALUES (?, ?, ?, 0)", id, name, name) } }
