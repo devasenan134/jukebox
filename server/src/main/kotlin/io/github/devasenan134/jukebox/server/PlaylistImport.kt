@@ -218,7 +218,9 @@ class PlaylistImports(
 
     /** The request queue (RequestQueue.kt); null when requests are off. */
     val queue: RequestQueue? = requests?.let { r ->
-        RequestQueue(db, listening, r, ::matcher) { user, t -> request(user, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId), hold = true) }
+        RequestQueue(db, listening, r, ::matcher) { user, t ->
+            request(user, ImportRequestMusic(t.title, t.artists.firstOrNull(), t.album, t.catalogId, t.artists, t.durationMs, t.isrc), hold = true)
+        }
     }
 
     private fun queueOn() = queue ?: throw ApiError(HttpStatusCode.NotFound, "Requests are off on this server")
@@ -257,15 +259,21 @@ class PlaylistImports(
         val requests = requests ?: throw ApiError(HttpStatusCode.NotFound, "Requests are off on this server")
         wanted.catalogId?.let { return requests.request(me, it, hold) }
         // Search by the title alone (the catalog search keeps results whose title or artist has every word asked
-        // for), then prefer the one by the same artist.
+        // for), then prefer the one by the same artist, then one as long.
         val title = Titles.song(wanted.title).first
         val words = Fuzzy.words(title)
+        val artists = wanted.track().artists.flatMap(ImportMatcher::splitArtists).map(Fuzzy::words).filter { it.isNotEmpty() }
+        fun byArtist(hit: CatalogHit) = ImportMatcher.splitArtists(hit.item.artist.orEmpty()).map(Fuzzy::words)
+            .let { theirs -> artists.any { a -> theirs.any { MusicRequests.same(a, it) } } }
+        fun asLong(hit: CatalogHit) = wanted.durationMs != null && hit.item.durationMs?.let { abs(it - wanted.durationMs) <= 3_000 } == true
         val sameTitle = requests.search(me, title).songs.filter { MusicRequests.same(words, Fuzzy.words(Titles.song(it.item.title).first)) }
-        val artists = wanted.artist?.let(ImportMatcher::splitArtists).orEmpty().map(Fuzzy::words).filter { it.isNotEmpty() }
-        val best = sameTitle.firstOrNull { hit ->
-            val theirs = ImportMatcher.splitArtists(hit.item.artist.orEmpty()).map(Fuzzy::words)
-            artists.any { a -> theirs.any { MusicRequests.same(a, it) } }
-        } ?: sameTitle.firstOrNull()
+        val best = sameTitle.firstOrNull(::byArtist) ?: sameTitle.firstOrNull(::asLong)
+            // Another language's song of that name ("Mummy Daddy" from a Telugu film for Villu's "Daddy Mummy") isn't it.
+            ?: sameTitle.firstOrNull { MusicRequests.otherLanguage(it.item) == null }
+            // Spelled or named a little differently ("Padayappa Theme Music" is the catalog's "Padaiyappa Theme"):
+            // a shorter search, and only a song by the same artist that's as long.
+            ?: title.substringBeforeLast(' ', "").takeIf { words.size >= 3 && it.isNotBlank() }
+                ?.let { shorter -> requests.search(me, shorter).songs.firstOrNull { byArtist(it) && asLong(it) } }
             ?: throw requests.notFoundOrBusy("Couldn't find \"$title\" in the catalog. Request it from Search instead.")
         return requests.request(me, best.item.id, hold)
     }

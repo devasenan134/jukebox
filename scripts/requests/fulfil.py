@@ -363,7 +363,7 @@ def song_name(raw, language=None):
     "Theeranae (English Version)" on Baahubali's Tamil album is another song than "Theeranae"."""
     text = html.unescape(raw or "")
     m = FROM_TAG.search(text)
-    film = (m.group(1) or m.group(2)).strip() if m else None
+    film = ((m.group(1) or m.group(2)).strip().lstrip("-–: ") or None) if m else None
     title = re.sub(r"\s+", " ", DASH_TAG.sub("", NOISE_TAG.sub(" ", FROM_TAG.sub(" ", text)))).strip()
     tag = LANGUAGE_TAG.search(title)
     if tag and (language is None or (tag.group(1) or tag.group(2)).lower() == language.lower()):

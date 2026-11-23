@@ -36,7 +36,7 @@ object Titles {
      */
     fun song(raw: String): Pair<String, String?> {
         val text = unescape(raw)
-        val film = from.find(text)?.let { m -> (m.groups[1] ?: m.groups[2])?.value?.trim() }
+        val film = from.find(text)?.let { m -> (m.groups[1] ?: m.groups[2])?.value?.trim()?.trimStart('-', '–', ':', ' ')?.ifEmpty { null } }
         val title = text.replace(from, " ").replace(noise, " ").replace(dashNoise, "").replace(spaces, " ").trim()
             .replace(languageTag, "").trim()
         return title.ifEmpty { text.trim() } to film
