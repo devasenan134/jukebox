@@ -2,6 +2,7 @@ package io.github.devasenan134.jukebox.server.library
 
 import io.github.devasenan134.jukebox.server.Db
 import io.github.devasenan134.jukebox.server.query
+import io.github.devasenan134.jukebox.server.update
 import io.github.devasenan134.jukebox.server.queryOne
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -237,6 +238,51 @@ class ScannerTest {
         assertEquals(3, count("SELECT count(*) FROM tracks"))
         // A different song with a different sound is never merged.
         assertNotEquals(recordingOf("Airaa (2019)/01 - Kaariga.m4a"), recordingOf("Airaa (2019)/02 - Megathoodham.m4a"))
+    }
+
+    @Test
+    fun `another version on the same backing isn't merged, and one merged before is parted`(): Unit = runBlocking {
+        // The same sound: a solo, repeat or "area version" shares the song's backing track.
+        airaa(3, "Sangu", 300)
+        airaa(4, "Sangu (Area Version)", 300)
+        scanner.scan(library)
+        val song = "Airaa (2019)/03 - Sangu.m4a"
+        val other = "Airaa (2019)/04 - Sangu (Area Version).m4a"
+        assertEquals(0, fingerprints.run().merged)
+        assertNotEquals(recordingOf(song), recordingOf(other))
+
+        // As they were merged before labels were compared: the area version's file on the song's recording.
+        val main = recordingOf(song)
+        val area = recordingOf(other)
+        db.tx<Unit> {
+            update("UPDATE tracks SET recording_id = ? WHERE recording_id = ?", main, area)
+            update("UPDATE files SET recording_id = ? WHERE recording_id = ?", main, area)
+            update("UPDATE recordings SET merged_into = ?, title = 'Sangu (Area Version)' WHERE id = ?", main, area)
+            update("UPDATE recordings SET title = 'Sangu (Area Version)' WHERE id = ?", main)
+        }
+        assertEquals(main, recordingOf(other))
+        assertEquals(1, fingerprints.run().split)
+        // The song keeps its recording (and what points at it); the area version has its own, of the same song.
+        assertEquals(main, recordingOf(song))
+        assertNotEquals(main, recordingOf(other))
+        val (a, b) = recordingOf(song) to recordingOf(other)
+        val songs = db.tx { query("SELECT DISTINCT song_id FROM recordings WHERE id IN (?, ?)", a, b) { it.getString(1) } }
+        assertEquals(1, songs.size)
+        assertEquals("Sangu", db.tx { queryOne("SELECT title FROM recordings WHERE id = ?", main) { it.getString(1) } })
+        // And they stay apart.
+        val again = fingerprints.run()
+        assertEquals(0 to 0, again.split to again.merged)
+        assertNotEquals(recordingOf(song), recordingOf(other))
+    }
+
+    @Test
+    fun `a title's labels say which version it is, its language and film don't`() {
+        assertEquals(setOf("areaversion"), Fingerprints.labels("Sangu (Area Version)"))
+        assertEquals(emptySet(), Fingerprints.labels("Sangu"))
+        assertEquals(emptySet(), Fingerprints.labels("Yolo (Tamil)"))
+        assertEquals(emptySet(), Fingerprints.labels("Kaariga (From \"Airaa\")"))
+        assertEquals(Fingerprints.labels("Naane Ennul Illai (Remix)"), Fingerprints.labels("Naane Ennul Illai (Remix Version)"))
+        assertTrue(Fingerprints.labels("Yaarindha Devadhai (Version, 1)") != Fingerprints.labels("Yaarindha Devadhai (Version, 2)"))
     }
 
     @Test
