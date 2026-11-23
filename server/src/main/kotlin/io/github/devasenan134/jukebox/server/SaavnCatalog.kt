@@ -113,24 +113,18 @@ class SaavnCatalog(
         const val SONG = "saavn-song-"
         const val MOVIE = "saavn-movie-"
         private const val KEEP_MS = 6 * 60 * 60 * 1000L
-        /** "(From "Jailer 2")", and "(From"Baasha")" as JioSaavn sometimes writes it. */
-        private val FROM = Regex("""\s*[(\[]From\s*["“”']([^"“”']+)["“”']\s*[)\]]""", RegexOption.IGNORE_CASE)
 
         private fun JsonElement.jsonObject() = this as? JsonObject
-        private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull?.let(::unescape)?.trim()?.takeIf { it.isNotEmpty() }
-
-        /** JioSaavn writes its names with HTML entities ("Hukum Reloaded - Tamil (From &quot;Jailer 2&quot;)"). */
-        fun unescape(text: String) = text.replace("&quot;", "\"").replace("&#039;", "'").replace("&apos;", "'")
-            .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull?.let(Titles::unescape)?.trim()?.takeIf { it.isNotEmpty() }
 
         /**
          * Whether an album is one film's music. JioSaavn often calls it just the film ("Jailer 2", "96"), where iTunes
          * says "(Original Motion Picture Soundtrack)", so a number in the name is fine; compilations' words aren't.
          */
         fun isFilmAlbum(album: String): Boolean {
-            if (album.isBlank() || FROM.containsMatchIn(album)) return false
+            if (album.isBlank() || Titles.namesFilm(album)) return false
             if (ITunesCatalog.isMovieAlbum(album)) return true
-            val words = ITunesCatalog.movieName(album).lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+            val words = Titles.album(album).lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
             return words.size in 1..5 && words.none { it in ITunesCatalog.COMPILATION }
         }
 
@@ -156,19 +150,19 @@ class SaavnCatalog(
                     val album = more?.text("album").orEmpty()
                     // A single says which film it's from ("Hukum Reloaded - Tamil (From "Jailer 2")"); otherwise its album is the film.
                     val onMovieAlbum = isFilmAlbum(album)
-                    val movie = (FROM.find(title) ?: FROM.find(album))?.groupValues?.get(1)?.trim()
-                        ?: ITunesCatalog.movieName(album).takeIf { onMovieAlbum && it.isNotEmpty() }
+                    val movie = Titles.song(title).second ?: Titles.song(album).second
+                        ?: Titles.album(album).takeIf { onMovieAlbum && it.isNotEmpty() }
                         ?: return null
                     CatalogItem(
-                        SONG + id, "song", ImportMatcher.cleanTitle(title.replace(FROM, " ")).first, movie, year,
+                        SONG + id, "song", Titles.song(title).first, movie, year,
                         people(more, "primary_artists") ?: more?.text("music"), art,
                         durationMs = more?.text("duration")?.toLongOrNull()?.times(1000), compilation = !onMovieAlbum,
                         language = language,
                     )
                 }
                 "album" -> {
-                    if (FROM.containsMatchIn(title) || !isFilmAlbum(title)) return null
-                    val name = ITunesCatalog.movieName(title)
+                    if (Titles.namesFilm(title) || !isFilmAlbum(title)) return null
+                    val name = Titles.album(title)
                     CatalogItem(
                         MOVIE + id, "movie", name, name, year, more?.text("music") ?: people(more, "primary_artists"), art,
                         trackCount = (more?.text("song_count") ?: r.text("list_count"))?.toIntOrNull() ?: 0, language = language,

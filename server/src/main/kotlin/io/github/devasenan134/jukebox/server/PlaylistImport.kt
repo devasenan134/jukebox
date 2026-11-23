@@ -258,9 +258,9 @@ class PlaylistImports(
         wanted.catalogId?.let { return requests.request(me, it, hold) }
         // Search by the title alone (the catalog search keeps results whose title or artist has every word asked
         // for), then prefer the one by the same artist.
-        val title = ImportMatcher.cleanTitle(wanted.title).first
+        val title = Titles.song(wanted.title).first
         val words = Fuzzy.words(title)
-        val sameTitle = requests.search(me, title).songs.filter { MusicRequests.same(words, Fuzzy.words(ImportMatcher.cleanTitle(it.item.title).first)) }
+        val sameTitle = requests.search(me, title).songs.filter { MusicRequests.same(words, Fuzzy.words(Titles.song(it.item.title).first)) }
         val artists = wanted.artist?.let(ImportMatcher::splitArtists).orEmpty().map(Fuzzy::words).filter { it.isNotEmpty() }
         val best = sameTitle.firstOrNull { hit ->
             val theirs = ImportMatcher.splitArtists(hit.item.artist.orEmpty()).map(Fuzzy::words)
@@ -301,7 +301,7 @@ class PlaylistImports(
 class ImportMatcher(private val snapshot: LibrarySnapshot) {
     val version = snapshot.version
     private val songs = snapshot.songs
-    private val titleWords = songs.map { Fuzzy.words(cleanTitle(it.title).first) }
+    private val titleWords = songs.map { Fuzzy.words(Titles.song(it.title).first) }
     private val people = songs.map { s -> (s.singers + listOfNotNull(s.composer) + s.lyricists).map { Fuzzy.words(it.name) } }
     private val albumWords = songs.map { Fuzzy.words(it.album.substringBefore(" (Original")) }
     /** Songs by each word of their title, to look at only the songs that could match. */
@@ -311,11 +311,11 @@ class ImportMatcher(private val snapshot: LibrarySnapshot) {
 
     fun match(track: ImportedTrack, isrcSongId: String? = null): ImportRow {
         isrcSongId?.let { id -> snapshot.index[id]?.let { return ImportRow(track, song(it), sure = true) } }
-        val (title, movie) = cleanTitle(track.title)
+        val (title, movie) = Titles.song(track.title)
         // A YouTube title is often "Song | Movie | Singer" or "Singer - Song": try each part as the title too.
-        val titles = (listOf(title) + title.split(" | ", " - ", " – ", " — ").map { it.trim() }.filter { it.length >= 2 && !language.matches(it) }).distinct()
+        val titles = (listOf(title) + title.split(" | ", " - ", " – ", " — ").map { it.trim() }.filter { it.length >= 2 && !Titles.language.matches(it) }).distinct()
         val artists = track.artists.flatMap { splitArtists(it) }.map(Fuzzy::words).filter { it.isNotEmpty() }
-        val albumHints = listOfNotNull(movie, track.album?.let { cleanTitle(it).first }).map(Fuzzy::words).filter { it.isNotEmpty() }
+        val albumHints = listOfNotNull(movie, track.album?.let { Titles.song(it).first }).map(Fuzzy::words).filter { it.isNotEmpty() }
         // Words of the whole YouTube title, to recognise the movie or a singer mentioned in it.
         val allWords = Fuzzy.words(track.title).toSet()
 
@@ -376,25 +376,6 @@ class ImportMatcher(private val snapshot: LibrarySnapshot) {
     }
 
     companion object {
-        private val fromMovie = Regex("""[(\[]\s*from\s+(?:the\s+)?(?:movie\s+|film\s+)?["“']?([^"”')\]]+)["”']?\s*[)\]]|\s+-\s+from\s+["“']([^"”']+)["”']""", RegexOption.IGNORE_CASE)
-        private val noise = Regex(
-            """\s*[(\[](?:feat\.?|ft\.?|with|prod\.?|remaster(?:ed)?|\d{4}\s+remaster(?:ed)?|original motion picture soundtrack|lyric(?:al)? video|official.*?|full video|audio|video song|hd|4k)[^)\]]*[)\]]""",
-            RegexOption.IGNORE_CASE,
-        )
-        private val dashNoise = Regex("""\s+-\s+(?:remaster(?:ed)?.*|\d{4} remaster.*|from .*|live.*|radio edit|single version)$""", RegexOption.IGNORE_CASE)
-        private const val LANGUAGES = "tamil|telugu|hindi|malayalam|kannada|marathi|bengali|punjabi|english"
-        /** A word that only says which language's version it is ("Hukum - Thalaivar Alappara - Tamil"), not part of the title. */
-        private val language = Regex("""(?:$LANGUAGES)(?:\s+version)?""", RegexOption.IGNORE_CASE)
-        private val languageNoise = Regex("""(?:\s+[-–—]\s*(?:$LANGUAGES)(?:\s+version)?|\s*[(\[](?:$LANGUAGES)(?:\s+version)?[)\]])\s*$""", RegexOption.IGNORE_CASE)
-
-        /** A title without "(From \"Movie\")", "(feat. …)", "- Remastered", "- Tamil" and the like, and the movie it named. */
-        fun cleanTitle(raw: String): Pair<String, String?> {
-            val movie = fromMovie.find(raw)?.let { m -> (m.groups[1] ?: m.groups[2])?.value?.trim() }
-            val title = raw.replace(fromMovie, " ").replace(noise, " ").replace(dashNoise, "").replace(Regex("\\s+"), " ").trim()
-                .replace(languageNoise, "").trim()
-            return (title.ifEmpty { raw.trim() }) to movie
-        }
-
         /** "A, B & C feat. D" into its names. */
         fun splitArtists(text: String): List<String> =
             text.split(Regex("""\s*(?:,|&|/|;|\bfeat\.?|\bft\.?|\band\b|\bx\b|•)\s*""", RegexOption.IGNORE_CASE)).map { it.trim() }.filter { it.isNotEmpty() }

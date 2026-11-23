@@ -250,11 +250,6 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
     companion object {
         private const val KEEP_MS = 6 * 60 * 60 * 1000L
         private const val MAX_CALLS_PER_MINUTE = 16
-        private val FROM = Regex("""\s*[(\[]From\s+["“”']([^"“”']+)["“”']\s*[)\]]""", RegexOption.IGNORE_CASE)
-        private val SOUNDTRACK = Regex("""\s*[(\[](?:Original\s+)?(?:Motion\s+Picture\s+|Movie\s+)?Sound\s*track[)\]]""", RegexOption.IGNORE_CASE)
-        private val EP = Regex("""\s+-\s+(?:EP|Single)$""", RegexOption.IGNORE_CASE)
-        /** "Kumki (Original Motion Picture Soundtrack), Vol. 1": a later edition of the film's album, not another film. */
-        private val VOLUME = Regex("""\s*(?:,\s*|\s-\s|[(\[])\s*Vol(?:ume|\.)?\s*\d+\s*[)\]]?$""", RegexOption.IGNORE_CASE)
         private val FILM = Regex("""Sound\s*track|Motion Picture|Background Score""", RegexOption.IGNORE_CASE)
         /** Words of compilations ("Kollywood's Top 10 Hits"), whose songs come from many movies. */
         internal val COMPILATION = setOf(
@@ -263,15 +258,9 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
             "nonstop", "medley", "vibes", "mix", "hour",
         )
 
-        /** "Kanave Kanave (From "David")" → "Kanave Kanave". */
-        fun cleanTitle(title: String) = title.replace(FROM, "").replace(SOUNDTRACK, "").replace(EP, "").trim()
-
-        /** "David (Original Motion Picture Soundtrack) - EP" → "David", "Kumki (Original Motion Picture Soundtrack), Vol. 2" → "Kumki". */
-        fun movieName(album: String) = album.replace(SOUNDTRACK, "").replace(EP, "").trim().replace(VOLUME, "").trim()
-
         /** Whether an album is one movie's music, rather than a compilation or a single. */
         fun isMovieAlbum(album: String, albumArtist: String? = null): Boolean {
-            if (FROM.containsMatchIn(album)) return false
+            if (Titles.namesFilm(album)) return false
             if (FILM.containsMatchIn(album)) return true
             if (albumArtist.equals("Various Artists", ignoreCase = true)) return false
             val words = album.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
@@ -290,18 +279,18 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
                     val title = text("trackName") ?: return null
                     // A song on a compilation says which movie it's from; otherwise the album is the movie.
                     val onMovieAlbum = isMovieAlbum(album, text("collectionArtistName"))
-                    val movie = FROM.find(title)?.groupValues?.get(1)?.trim()
-                        ?: movieName(album).takeIf { onMovieAlbum }
+                    val movie = Titles.song(title).second
+                        ?: Titles.album(album).takeIf { onMovieAlbum }
                         ?: return null
                     CatalogItem(
-                        "itunes-song-${number("trackId") ?: return null}", "song", cleanTitle(title), movie, year,
+                        "itunes-song-${number("trackId") ?: return null}", "song", Titles.song(title).first, movie, year,
                         text("artistName"), art, durationMs = number("trackTimeMillis"), compilation = !onMovieAlbum,
                     )
                 }
                 "collection" -> {
                     if (!isMovieAlbum(album, text("artistName"))) return null
                     CatalogItem(
-                        "itunes-movie-${number("collectionId") ?: return null}", "movie", movieName(album), movieName(album), year,
+                        "itunes-movie-${number("collectionId") ?: return null}", "movie", Titles.album(album), Titles.album(album), year,
                         text("artistName"), art, trackCount = number("trackCount")?.toInt() ?: 0,
                     )
                 }

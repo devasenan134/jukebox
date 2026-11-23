@@ -65,6 +65,10 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
   review notes say which. `fulfil.py saavn-tags` (on the server, `--dry-run` first) did the same for the files
   downloaded before: 116 of 292 named, the rest (Annamalai, Indian, Kaala…) aren't on JioSaavn at all; undo with
   `fulfil.py undo requests/undo/saavn-tags-<time>.jsonl`.
+- **One way of cleaning names:** "(From "Film")", "(feat. …)", "- Remastered", "- Tamil" and the like come off a song's
+  name the same way everywhere: the server's `Titles.kt` (request search, playlist imports) and fulfil.py's
+  `song_name`. A new case goes in `scripts/requests/title-cases.tsv`; the server's tests and
+  `uv run --script scripts/requests/test_titles.py` both check it.
 - **Every album gets a cover, the best there is:** the catalog's art the request was made from, else iTunes' (1000 px),
   else JioSaavn's (500 px), else the page's poster (masstamilan's are 150 px and stamped with the site's name). iTunes
   and JioSaavn are only taken for an album by its composer: a title alone finds other people's albums ("Delivery Boy -

@@ -170,7 +170,7 @@ class RequestQueue(
 
     /** The movie album [album] in the catalog, requested (or joined, if someone asked already); null if it isn't there. */
     private suspend fun requestAlbum(user: UserDto, album: String): MusicRequestDto? {
-        val name = ImportMatcher.cleanTitle(album).first
+        val name = Titles.song(album).first
         val words = Fuzzy.words(name)
         val hit = requests.search(user, name).movies.firstOrNull { MusicRequests.same(words, Fuzzy.words(it.item.movie)) }
             ?: if (requests.catalogBusy()) throw ApiError(HttpStatusCode.ServiceUnavailable, MusicRequests.CATALOG_BUSY) else return null
@@ -220,11 +220,11 @@ class RequestQueue(
 
         /** The album a song is from, in words ("Minsara Kanavu (Original Motion Picture Soundtrack)" is "minsara kanavu"). */
         fun albumKey(t: ImportedTrack): String? =
-            t.album?.let { ImportMatcher.cleanTitle(it).first.substringBefore(" (Original") }?.let(Fuzzy::words)?.joinToString(" ")?.ifEmpty { null }
+            t.album?.let { Titles.song(it).first.substringBefore(" (Original") }?.let(Fuzzy::words)?.joinToString(" ")?.ifEmpty { null }
 
         /** One song, however it's written: its title's words, and its album's (or first artist's). */
         fun key(t: ImportedTrack): String {
-            val title = Fuzzy.words(ImportMatcher.cleanTitle(t.title).first).joinToString(" ")
+            val title = Fuzzy.words(Titles.song(t.title).first).joinToString(" ")
             val by = albumKey(t) ?: t.artists.firstOrNull()?.let(ImportMatcher::splitArtists)?.firstOrNull()?.let(Fuzzy::words)?.joinToString(" ").orEmpty()
             return "$title|$by"
         }
