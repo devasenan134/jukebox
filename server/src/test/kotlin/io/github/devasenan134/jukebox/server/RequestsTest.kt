@@ -356,11 +356,15 @@ class PlaylistMissingTest {
             listOf(
                 CatalogItem("saavn-song-V9EfUI5V", "song", "Mummy Daddy", "Simha Puthrudu (Telugu)", 2019, "Someone Else", durationMs = 250_000, language = "telugu"),
                 CatalogItem("saavn-song-pt", "song", "Padaiyappa Theme", "Padaiyappa", 1999, "A.R. Rahman", durationMs = 120_000, language = "tamil"),
+                CatalogItem("saavn-song-EmCJ6Fo0", "song", "Daddy Mummy", "Kadhali Kanavillai", 2015, "Deva, Kavitha", durationMs = 315_000, language = "tamil"),
             ),
         )
         val requests = MusicRequests(db, music, catalog, Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
         val imports = PlaylistImports(db, music, io.github.devasenan134.jukebox.server.library.Listening(db), requests, object : PlaylistReader { override suspend fun read(url: String) = error("no links") })
-        // Villu's "Daddy Mummy" isn't the Telugu "Mummy Daddy" by someone else, nor its Telugu dub by the same composer.
+        // Villu's "Daddy Mummy" isn't the Telugu "Mummy Daddy" by someone else, nor its Telugu dub by the same composer,
+        // nor another film's "Daddy Mummy" by other people and a minute longer; with nothing to tell them by, that one is.
+        assertEquals("saavn-song-EmCJ6Fo0", imports.request(alice, ImportRequestMusic("Daddy Mummy")).item.id)
+        requests.cancel(alice, requests.mine(alice).single().id)
         assertFailsWith<ApiError> { imports.request(alice, ImportRequestMusic("Daddy Mummy", artists = listOf("Devi Sri Prasad"), durationMs = 260_855)) }
         assertFailsWith<ApiError> { imports.request(alice, ImportRequestMusic("Mummy Daddy", artists = listOf("Someone Else"), durationMs = 260_855)) }
         // The very same recording in another language's library (as long, same artist) is it.
