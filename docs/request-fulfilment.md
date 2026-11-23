@@ -55,6 +55,16 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
   album into one album request, but not when the album is partly in the library or the catalog doesn't list it; then
   they arrive as song requests. So the script groups a batch's song requests by album too: the first downloads every
   song of the album (minus other versions and songs the library has), the rest come with it.
+- **Named as JioSaavn names them (since 2026-11-23):** the library's 28,500 songs came from JioSaavn, so its names and
+  ids are the ones the library goes by. Each download is matched to the album's songs on JioSaavn (the film's album in
+  the request's language, from its year ±1, its other editions, then its singles "X (From "Film")"), by name however
+  it's written ("Hukum Reloaded - Tamil" is "Hukum Reloaded") and length (within 5 s). A matched file gets JioSaavn's
+  title, its id (`saavn_id`, which the scanner keeps on the recording) and its singers and lyricists when JioSaavn names
+  them (it often doesn't yet for a new film; then the page's). A song is already there when its id is among the album's
+  (the server's `saavnIds`) or its name is. Songs JioSaavn doesn't have keep the page's names, and the run and the
+  review notes say which. `fulfil.py saavn-tags` (on the server, `--dry-run` first) did the same for the files
+  downloaded before: 116 of 292 named, the rest (Annamalai, Indian, Kaala…) aren't on JioSaavn at all; undo with
+  `fulfil.py undo requests/undo/saavn-tags-<time>.jsonl`.
 - **Every album gets a cover, the best there is:** the catalog's art the request was made from, else iTunes' (1000 px),
   else JioSaavn's (500 px), else the page's poster (masstamilan's are 150 px and stamped with the site's name). iTunes
   and JioSaavn are only taken for an album by its composer: a title alone finds other people's albums ("Delivery Boy -

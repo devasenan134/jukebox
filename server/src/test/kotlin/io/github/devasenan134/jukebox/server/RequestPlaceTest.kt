@@ -51,10 +51,13 @@ class RequestPlaceTest {
         assertEquals(null, before.songId)
 
         mp3("Airaa (2019)/03 - Paadal.mp3", mapOf("title" to "Paadal", "album" to "Airaa", "date" to "2019", "artist" to "Someone",
-            "album_artist" to "Sundaramurthy K.S.", "composer" to "Sundaramurthy K.S.", "track" to "3/3"))
+            "album_artist" to "Sundaramurthy K.S.", "composer" to "Sundaramurthy K.S.", "track" to "3/3", "saavn_id" to "Ab12-_cd"))
         scanner.scan(tamil)
         val after = requests.place(admin, request.id, 2019, "Sundaramurthy K.S.", "Paadal")
         assertEquals(before.albumId, after.albumId) // the same album, not a second "Airaa"
+        // The JioSaavn id fulfil.py writes is read back, so a later download of the same song is known to be there.
+        assertEquals(emptyList(), before.saavnIds)
+        assertEquals(listOf("Ab12-_cd"), after.saavnIds)
         val done = requests.complete(admin, request.id, CompleteMusicRequest(after.albumId, after.songId!!))
         assertEquals("done", done.status)
     }

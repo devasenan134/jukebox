@@ -157,6 +157,8 @@ data class RequestPlace(
     val sampleFile: String? = null,
     /** The album's songs, so a download can leave out the ones it already has. */
     val songs: List<String> = emptyList(),
+    /** The JioSaavn ids of its songs and background score, the surest way to tell a download is already there. */
+    val saavnIds: List<String> = emptyList(),
     /** It's a background score's own entry, not the film's songs. */
     val score: Boolean = false,
 )
@@ -556,20 +558,23 @@ class MusicRequests(
     /** Whether [albumId] is still an album in the library. */
     suspend fun hasAlbum(albumId: String): Boolean = shelf()?.album(albumId) != null
 
+    private class PlacedFile(val library: String, val path: String, val score: Boolean, val saavnId: String?)
+
     private suspend fun placeOf(movie: Shelf.Movie, songId: String?): RequestPlace {
         // The folder most of its files are in (a disc or two can sit in subfolders).
         val files = db.read {
             query(
-                """SELECT l.name, f.path, r.kind = 'score' FROM files f JOIN tracks t ON t.id = f.track_id JOIN releases r ON r.id = t.release_id
-                   JOIN libraries l ON l.id = f.library_id WHERE (r.album_id = ? OR r.id = ?) AND f.missing_since IS NULL ORDER BY f.path""",
+                """SELECT l.name, f.path, r.kind = 'score', rec.saavn_id FROM files f JOIN tracks t ON t.id = f.track_id JOIN releases r ON r.id = t.release_id
+                   JOIN libraries l ON l.id = f.library_id JOIN recordings rec ON rec.id = f.recording_id
+                   WHERE (r.album_id = ? OR r.id = ?) AND f.missing_since IS NULL ORDER BY f.path""",
                 // A background score is listed by its release's id.
                 movie.id, movie.id,
-            ) { Triple(it.getString(1), it.getString(2), it.getBoolean(3)) }
+            ) { PlacedFile(it.getString(1), it.getString(2), it.getBoolean(3), it.getString(4)) }
         }
         // The songs' folder rather than the background score's (Remo's score has more files than its songs);
         // for a background score itself, its own folder.
-        val songs = files.filterNot { it.third }.ifEmpty { files }
-        val folder = songs.groupBy { (lib, path) -> lib to path.substringBeforeLast('/', "") }.maxByOrNull { it.value.size }
+        val songs = files.filterNot { it.score }.ifEmpty { files }
+        val folder = songs.groupBy { it.library to it.path.substringBeforeLast('/', "") }.maxByOrNull { it.value.size }
         return RequestPlace(
             albumId = movie.id,
             album = movie.title,
@@ -577,8 +582,9 @@ class MusicRequests(
             songId = songId,
             library = folder?.key?.first,
             folder = folder?.key?.second,
-            sampleFile = folder?.value?.first()?.second,
+            sampleFile = folder?.value?.first()?.path,
             songs = movie.songTitles,
+            saavnIds = files.mapNotNull { it.saavnId?.takeIf(String::isNotBlank) }.distinct(),
             score = movie.isScore,
         )
     }
