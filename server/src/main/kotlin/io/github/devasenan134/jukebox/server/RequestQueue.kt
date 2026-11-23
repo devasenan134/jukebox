@@ -49,8 +49,10 @@ class RequestQueue(
     suspend fun add(me: UserDto, tracks: List<ImportedTrack>): List<QueuedSong> {
         if (tracks.isEmpty()) return emptyList()
         val had = find(me.id, tracks)
-        // A declined request, or a song the catalog didn't have, is tried again.
-        val declined = requests.byIds(me, had.values.mapNotNull { it.requestId }).filterValues { it.status == "declined" }.keys
+        // A declined request, one taken back (it's gone), or a song the catalog didn't have, is tried again.
+        val asked = had.values.mapNotNull { it.requestId }
+        val known = requests.byIds(me, asked)
+        val declined = known.filterValues { it.status == "declined" }.keys + asked.filter { it !in known }
         db.tx {
             tracks.distinctBy(::key).forEach { t ->
                 val old = had[key(t)]
