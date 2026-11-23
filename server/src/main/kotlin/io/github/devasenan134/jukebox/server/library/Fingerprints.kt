@@ -1,6 +1,9 @@
 package io.github.devasenan134.jukebox.server.library
 
 import io.github.devasenan134.jukebox.server.Db
+import io.github.devasenan134.jukebox.server.Fuzzy
+import io.github.devasenan134.jukebox.server.Titles
+import io.github.devasenan134.jukebox.server.insert
 import io.github.devasenan134.jukebox.server.query
 import io.github.devasenan134.jukebox.server.update
 import kotlinx.coroutines.Dispatchers
@@ -13,7 +16,7 @@ import java.nio.ByteOrder
 import java.sql.Connection
 
 @Serializable
-data class DeepPassReport(val hashed: Int, val fingerprinted: Int, val merged: Int, val left: Int)
+data class DeepPassReport(val hashed: Int, val fingerprinted: Int, val merged: Int, val left: Int, val split: Int = 0)
 
 private val log = LoggerFactory.getLogger("jukebox.fingerprints")
 
@@ -23,12 +26,16 @@ private val log = LoggerFactory.getLogger("jukebox.fingerprints")
  * same performance (a "From X" single and the soundtrack's copy, a better-quality re-download).
  *
  * Two recordings are merged when their titles match (title_key), their lengths are within 2 s, they are
- * the same version, and their fingerprints agree on at least [SAME] of the bits. The older id is kept.
+ * the same version with the same labels ([labels]: "Sangu (Area Version)" isn't "Sangu"), and their fingerprints
+ * agree on at least [SAME] of the bits. The older id is kept. A solo, repeat or "version 2" shares the backing track,
+ * so its fingerprint is close: before labels were compared, such versions were merged, and [splitVersions] parts them.
  */
 class Fingerprints(private val db: Db, private val tools: AudioTools, private val libraryRoots: () -> Map<Long, String>) {
     suspend fun run(limit: Int = 200): DeepPassReport = withContext(Dispatchers.IO) {
         val roots = libraryRoots()
         fun file(libraryId: Long, path: String) = roots[libraryId]?.let { File(it, path) }?.takeIf { it.isFile }
+
+        val split = db.tx { splitVersions() }
 
         var hashed = 0
         val toHash = db.tx {
@@ -64,26 +71,77 @@ class Fingerprints(private val db: Db, private val tools: AudioTools, private va
                      (SELECT count(*) FROM recordings r WHERE r.fingerprint IS NULL AND r.merged_into IS NULL
                       AND EXISTS (SELECT 1 FROM files f WHERE f.recording_id = r.id AND f.missing_since IS NULL))""") { it.getInt(1) }.first()
         }
-        if (merged > 0) db.catalogChanged()
-        DeepPassReport(hashed, fingerprinted, merged, left).also { if (hashed + fingerprinted > 0) log.info("Deep pass: {}", it) }
+        if (merged + split > 0) db.catalogChanged()
+        DeepPassReport(hashed, fingerprinted, merged, left, split).also { if (hashed + fingerprinted + split > 0) log.info("Deep pass: {}", it) }
     }
 
     /** Merges recording [id] with an earlier one that is the same performance. True if it did. */
     private fun Connection.mergeSame(id: String, print: IntArray): Boolean {
-        val me = query("SELECT title_key, version, duration_ms, created_at FROM recordings WHERE id = ?", id) {
-            listOf(it.getString(1), it.getString(2), it.getLong(3), it.getLong(4))
+        val me = query("SELECT title_key, version, duration_ms, created_at, title FROM recordings WHERE id = ?", id) {
+            listOf(it.getString(1), it.getString(2), it.getLong(3), it.getLong(4), it.getString(5))
         }.firstOrNull() ?: return false
         val (titleKey, version, duration, created) = me
+        val mine = labels(me[4] as String)
         val candidates = query(
-            """SELECT id, fingerprint, created_at FROM recordings WHERE title_key = ? AND version = ? AND id != ?
+            """SELECT id, fingerprint, created_at, title FROM recordings WHERE title_key = ? AND version = ? AND id != ?
                AND merged_into IS NULL AND length(fingerprint) > 0 AND abs(duration_ms - ?) <= 2000""",
             titleKey, version, id, duration,
-        ) { Triple(it.getString(1), fromBytes(it.getBytes(2)), it.getLong(3)) }
+        ) { listOf(it.getString(1), fromBytes(it.getBytes(2)), it.getLong(3), it.getString(4)) }
+            .filter { labels(it[3] as String) == mine }
+            .map { Triple(it[0] as String, it[1] as IntArray, it[2] as Long) }
         val same = candidates.filter { AudioTools.similarity(print, it.second) >= SAME }.minByOrNull { it.third } ?: return false
         val (keep, drop) = if (same.third <= created as Long) same.first to id else id to same.first
         merge(drop, keep)
         log.info("Merged recording {} into {} (same performance)", drop, keep)
         return true
+    }
+
+    /**
+     * Parts the versions merged into one recording before labels were compared: the files of a recording whose track
+     * titles name different versions ("Sangu" and "Sangu (Area Version)") get a recording each, of the same song. The
+     * file with the fewest labels (the song itself) keeps the recording, and the playlists and likes on it. How many
+     * recordings it made.
+     */
+    private fun Connection.splitVersions(): Int {
+        class Part(val trackId: String, val title: String, val durationMs: Long)
+        val byRecording = query(
+            """SELECT t.recording_id, t.id, t.title, f.duration_ms, r.title, r.song_id FROM tracks t JOIN files f ON f.track_id = t.id
+               JOIN recordings r ON r.id = t.recording_id
+               WHERE f.missing_since IS NULL AND r.merged_into IS NULL AND t.recording_id IN
+                 (SELECT t2.recording_id FROM tracks t2 JOIN files f2 ON f2.track_id = t2.id WHERE f2.missing_since IS NULL
+                  GROUP BY t2.recording_id HAVING count(DISTINCT t2.title) > 1)""",
+        ) { Triple(it.getString(1), it.getString(5), it.getString(6)) to Part(it.getString(2), it.getString(3), it.getLong(4)) }
+            .groupBy({ it.first }, { it.second })
+        var made = 0
+        val now = System.currentTimeMillis()
+        for ((recording, parts) in byRecording) {
+            val (id, title, songId) = recording
+            val groups = parts.groupBy { labels(it.title) }
+            if (groups.size < 2) continue
+            val own = labels(title)
+            val keep = groups.keys.minWith(compareBy<Set<String>> { it.size }.thenBy { if (it == own) 0 else 1 }.thenBy { it.sorted().joinToString() })
+            for ((key, group) in groups) {
+                if (key == keep) continue
+                val (base, version) = Names.version(group.first().title)
+                val newId = newId()
+                insert(
+                    "INSERT INTO recordings (id, song_id, title, title_key, version, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    newId, songId, base, Fuzzy.key(base), version, group.first().durationMs, now,
+                )
+                group.forEach { part ->
+                    update("UPDATE tracks SET recording_id = ? WHERE id = ?", newId, part.trackId)
+                    update("UPDATE files SET recording_id = ? WHERE track_id = ?", newId, part.trackId)
+                }
+                update("INSERT OR IGNORE INTO recording_credits SELECT ?, person_id, role, position FROM recording_credits WHERE recording_id = ?", newId, id)
+                update("INSERT OR IGNORE INTO lyrics SELECT ?, source, script, synced, text FROM lyrics WHERE recording_id = ?", newId, id)
+                log.info("Split {} off recording {}: \"{}\" is another version", newId, id, group.first().title)
+                made++
+            }
+            Names.version(groups.getValue(keep).first().title).first.let { base ->
+                update("UPDATE recordings SET title = ? WHERE id = ?", base, id)
+            }
+        }
+        return made
     }
 
     private fun Connection.merge(from: String, into: String) {
@@ -102,6 +160,18 @@ class Fingerprints(private val db: Db, private val tools: AudioTools, private va
 
     companion object {
         const val SAME = 0.85
+        private val bracket = Regex("""[(\[]([^)\]]*)[)\]]""")
+
+        /**
+         * What a title says about which version it is, beyond the version [Names.version] knows: the labels in its
+         * brackets ("Area Version", "Repeat", "Version, 2", "Hariharan"), and that version. Its film ("From …"), "feat."
+         * and a language tag ("(Tamil)": JioSaavn's single of the album's song) aren't.
+         */
+        fun labels(title: String): Set<String> {
+            val (base, version) = Names.version(title)
+            val keys = bracket.findAll(Titles.song(base).first).map { Fuzzy.key(it.groupValues[1]) }.filter { it.isNotEmpty() }.toSet()
+            return if (version == "original") keys else keys + version
+        }
 
         fun toBytes(print: IntArray): ByteArray =
             ByteBuffer.allocate(print.size * 4).order(ByteOrder.LITTLE_ENDIAN).apply { asIntBuffer().put(print) }.array()
