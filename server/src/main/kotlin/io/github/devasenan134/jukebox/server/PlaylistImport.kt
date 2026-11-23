@@ -313,7 +313,7 @@ class ImportMatcher(private val snapshot: LibrarySnapshot) {
         isrcSongId?.let { id -> snapshot.index[id]?.let { return ImportRow(track, song(it), sure = true) } }
         val (title, movie) = cleanTitle(track.title)
         // A YouTube title is often "Song | Movie | Singer" or "Singer - Song": try each part as the title too.
-        val titles = (listOf(title) + title.split(" | ", " - ", " – ", " — ").map { it.trim() }.filter { it.length >= 2 }).distinct()
+        val titles = (listOf(title) + title.split(" | ", " - ", " – ", " — ").map { it.trim() }.filter { it.length >= 2 && !language.matches(it) }).distinct()
         val artists = track.artists.flatMap { splitArtists(it) }.map(Fuzzy::words).filter { it.isNotEmpty() }
         val albumHints = listOfNotNull(movie, track.album?.let { cleanTitle(it).first }).map(Fuzzy::words).filter { it.isNotEmpty() }
         // Words of the whole YouTube title, to recognise the movie or a singer mentioned in it.
@@ -382,11 +382,16 @@ class ImportMatcher(private val snapshot: LibrarySnapshot) {
             RegexOption.IGNORE_CASE,
         )
         private val dashNoise = Regex("""\s+-\s+(?:remaster(?:ed)?.*|\d{4} remaster.*|from .*|live.*|radio edit|single version)$""", RegexOption.IGNORE_CASE)
+        private const val LANGUAGES = "tamil|telugu|hindi|malayalam|kannada|marathi|bengali|punjabi|english"
+        /** A word that only says which language's version it is ("Hukum - Thalaivar Alappara - Tamil"), not part of the title. */
+        private val language = Regex("""(?:$LANGUAGES)(?:\s+version)?""", RegexOption.IGNORE_CASE)
+        private val languageNoise = Regex("""(?:\s+[-–—]\s*(?:$LANGUAGES)(?:\s+version)?|\s*[(\[](?:$LANGUAGES)(?:\s+version)?[)\]])\s*$""", RegexOption.IGNORE_CASE)
 
-        /** A title without "(From \"Movie\")", "(feat. …)", "- Remastered" and the like, and the movie it named. */
+        /** A title without "(From \"Movie\")", "(feat. …)", "- Remastered", "- Tamil" and the like, and the movie it named. */
         fun cleanTitle(raw: String): Pair<String, String?> {
             val movie = fromMovie.find(raw)?.let { m -> (m.groups[1] ?: m.groups[2])?.value?.trim() }
             val title = raw.replace(fromMovie, " ").replace(noise, " ").replace(dashNoise, "").replace(Regex("\\s+"), " ").trim()
+                .replace(languageNoise, "").trim()
             return (title.ifEmpty { raw.trim() }) to movie
         }
 

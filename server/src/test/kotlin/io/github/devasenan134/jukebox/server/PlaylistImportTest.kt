@@ -59,6 +59,8 @@ class ImportMatcherTest {
         song("s2", "Naa Ready", "Leo", "Vijay", 245, "Anirudh"),
         song("s3", "Kadhal", "Old Movie", "S. P. Balasubrahmanyam", 300),
         song("s4", "Kadhal", "New Movie", "Sid Sriram", 200),
+        song("s5", "Hukum - Thalaivar Alappara", "Jailer", "Anirudh Ravichander", 208),
+        song("s6", "Tamil Tamil", "Pokkiri", "Mani Sharma", 292),
     )
     private val matcher = ImportMatcher(LibrarySnapshot(songs, arrayOfNulls(songs.size), emptyMap(), emptyMap(), FloatArray(songs.size), FloatArray(songs.size), "v1"))
 
@@ -67,6 +69,21 @@ class ImportMatcherTest {
         assertEquals("Naa Ready" to "Leo", ImportMatcher.cleanTitle("Naa Ready (From \"Leo\")"))
         assertEquals("Kanave Kanave" to null, ImportMatcher.cleanTitle("Kanave Kanave (feat. Someone) - Remastered 2011"))
         assertEquals(listOf("A", "B", "C", "D"), ImportMatcher.splitArtists("A, B & C feat. D"))
+    }
+
+    @Test
+    fun `a language after the title isn't part of it`() {
+        assertEquals("Hukum - Thalaivar Alappara" to "Jailer", ImportMatcher.cleanTitle("Hukum - Thalaivar Alappara - Tamil (From \"Jailer\")"))
+        assertEquals("Kaavaalaa" to null, ImportMatcher.cleanTitle("Kaavaalaa (Tamil Version)"))
+        assertEquals("Tamil Tamil" to null, ImportMatcher.cleanTitle("Tamil Tamil"))
+    }
+
+    @Test
+    fun `Spotify's "- Tamil" titles are found, not songs called Tamil`() {
+        val row = matcher.match(ImportedTrack("Hukum - Thalaivar Alappara - Tamil (From \"Jailer\")", listOf("Anirudh Ravichander", "Super Subu"), durationMs = 207_647))
+        assertEquals("s5", row.match?.id)
+        assertTrue(row.sure)
+        assertTrue(row.choices.none { it.id == "s6" })
     }
 
     @Test
