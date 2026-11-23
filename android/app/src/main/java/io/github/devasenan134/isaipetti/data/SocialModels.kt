@@ -448,7 +448,7 @@ data class LibrarySearchResults(
 @Serializable
 data class PersonPage(val person: PersonHit, val movies: List<MovieHit> = emptyList(), val songs: List<MixSong> = emptyList())
 
-// Asking for music that isn't in the library: the friends server finds it in the iTunes catalog.
+// Asking for music that isn't in the library: the friends server finds it in the music catalog (JioSaavn).
 
 /** A song or a movie's album from the music catalog, not in the library. */
 @Serializable

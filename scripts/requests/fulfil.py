@@ -414,8 +414,11 @@ def millis(duration):
 
 
 def catalog_art(request):
-    """The request's album art from the catalog (iTunes, at 1000 px), the cover when the page's poster can't be had."""
+    """The request's album art from the catalog when it's iTunes' (at 1000 px), the cover when the page's poster can't
+    be had. JioSaavn's (the catalog since 2026-11-23) is 500 px: iTunes' for the album is looked for first then."""
     url = (request.get("item") or {}).get("artworkUrl") or ""
+    if "mzstatic.com" not in url:
+        return None
     return re.sub(r"/\d+x\d+bb\.", "/1000x1000bb.", url) or None
 
 

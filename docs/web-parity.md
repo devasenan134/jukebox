@@ -32,7 +32,7 @@ website has them.
 - [x] The **lyric being sung** under the cover; save, share and radio buttons in the full player
 
 **2. Music requests**
-- [x] **Not in the library** results in Search (the iTunes catalog) with **Request** / **Requested ✓**
+- [x] **Not in the library** results in Search (the music catalog: JioSaavn, iTunes before 2026-11-23) with **Request** / **Requested ✓**
 - [x] **Your requests** (waiting, added, can't find) and, for admins, **Everyone's** with Added / Can't find
 - [x] **Search history**: past searches to tap again, ✕ to remove, Clear (the store is there unused)
 
