@@ -27,10 +27,10 @@ import kotlin.math.abs
 
 private val log = LoggerFactory.getLogger("requests")
 
-/** A song or a movie's album from the music catalog (iTunes), which may not be in the library. */
+/** A song or a movie's album from the music catalog (JioSaavn; iTunes before), which may not be in the library. */
 @Serializable
 data class CatalogItem(
-    /** "itunes-song-123" or "itunes-movie-456". */
+    /** "saavn-song-or8LPjW6" or "saavn-movie-47094777" ("itunes-song-123", "itunes-movie-456" from before). */
     val id: String,
     /** "song" or "movie". */
     val kind: String,
@@ -46,6 +46,8 @@ data class CatalogItem(
     val durationMs: Long? = null,
     /** A song found on a compilation rather than its movie's own album. */
     @Transient val compilation: Boolean = false,
+    /** "tamil", "telugu"…: which language's version it is, when the catalog says. */
+    val language: String? = null,
 )
 
 @Serializable
@@ -255,7 +257,7 @@ class ITunesCatalog(private val http: HttpClient = HttpClient(CIO)) : Catalog {
         private val VOLUME = Regex("""\s*(?:,\s*|\s-\s|[(\[])\s*Vol(?:ume|\.)?\s*\d+\s*[)\]]?$""", RegexOption.IGNORE_CASE)
         private val FILM = Regex("""Sound\s*track|Motion Picture|Background Score""", RegexOption.IGNORE_CASE)
         /** Words of compilations ("Kollywood's Top 10 Hits"), whose songs come from many movies. */
-        private val COMPILATION = setOf(
+        internal val COMPILATION = setOf(
             "hits", "top", "best", "songs", "collection", "beats", "jukebox", "vol", "volume", "essentials", "playlist",
             "mashup", "lofi", "birthday", "special", "melodies", "favourites", "favorites", "greatest", "classics",
             "nonstop", "medley", "vibes", "mix", "hour",

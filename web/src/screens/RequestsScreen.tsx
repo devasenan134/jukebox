@@ -9,7 +9,7 @@ import { Cover, ScreenHeader, SectionTitle } from '../ui/components'
 import { Dialog, ErrorBox, Icon, IconButton, Loading, toast } from '../ui/kit'
 import { useNav } from '../ui/nav'
 
-// Music that isn't in the library (ui/search/Requests.kt): search shows it from the iTunes catalog with a
+// Music that isn't in the library (ui/search/Requests.kt): search shows it from the music catalog (JioSaavn) with a
 // Request button, and the requests page lists yours (and, for admins, everyone's to answer).
 
 /** A catalog cover (from Apple's servers, not Jukebox). */

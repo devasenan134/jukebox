@@ -115,7 +115,7 @@ fun Application.jukeboxServer(
     pushConfig: PushConfig? = config.firebaseAppConfigFile?.let { PushConfig.fromGoogleServices(it) },
     /** Where mixes, search, requests and stats get their music; by default the library in [Config.libraries]. */
     music: MusicSource? = null,
-    catalog: Catalog = ITunesCatalog(),
+    catalog: Catalog = SaavnCatalog(SaavnCatalog.languagesOf(config.libraries), legacy = ITunesCatalog()),
     playlistReader: PlaylistReader = WebPlaylistReader(spotifyClientId = config.spotifyClientId, spotifyClientSecret = config.spotifyClientSecret),
 ) {
     val db = Db(config.dbPath)
