@@ -65,6 +65,12 @@ again, e.g. after a reboot), and on the Mac mini `fulfil.py undo /mnt/ugreen/juk
   review notes say which. `fulfil.py saavn-tags` (on the server, `--dry-run` first) did the same for the files
   downloaded before: 116 of 292 named, the rest (Annamalai, Indian, Kaala…) aren't on JioSaavn at all; undo with
   `fulfil.py undo requests/undo/saavn-tags-<time>.jsonl`.
+- **What was filed twice before (2026-11-23, `scripts/library/dedupe.py`):** 10 masstamilan files that were the same
+  recording as a JioSaavn file in the same film's album went to `MusicLibrary/_duplicates/` (the song kept its id), and 50
+  titles that ended in their library's language ("Hukum Reloaded - Tamil", "Yolo (Tamil)") lost it, so a single and the
+  album's copy are one song. Another language's tag stays ("Theeranae (English Version)"), when naming downloads too.
+  Three copies on a devotional compilation stay. Undo: `dedupe.py undo MusicLibrary/_duplicates/undo-<time>.jsonl` (two
+  logs: 20261123-170616 and -170659, newest first), then rescan.
 - **One way of cleaning names:** "(From "Film")", "(feat. …)", "- Remastered", "- Tamil" and the like come off a song's
   name the same way everywhere: the server's `Titles.kt` (request search, playlist imports) and fulfil.py's
   `song_name`. A new case goes in `scripts/requests/title-cases.tsv`; the server's tests and
