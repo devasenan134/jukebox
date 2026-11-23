@@ -729,6 +729,8 @@ class MusicRequests(
             val songs: List<Pair<String, List<String>>>, val songTitles: List<String>,
             /** A background score (its own entry in the library), not the film's songs. */
             val isScore: Boolean = false,
+            /** "tamil", "telugu"…, or "" when the library doesn't know. */
+            val language: String = "",
         ) {
             /** The film's name as words, without words about the album's kind ("(Original Background Score)"). */
             val core = movieWords(title)
@@ -741,6 +743,7 @@ class MusicRequests(
                 id, first.album, Fuzzy.words(first.album), list.maxOf { snapshot.songs[it].year }, Fuzzy.words(first.composer?.name.orEmpty()),
                 songs.map { it.id to Fuzzy.words(it.title) }, songs.map { it.title }.distinct(),
                 isScore = list.all { snapshot.songs[it].score },
+                language = first.genre.lowercase(),
             )
         }
         private val byId = movies.associateBy { it.id }
@@ -767,10 +770,12 @@ class MusicRequests(
         }
 
         fun find(item: CatalogItem): Place? {
-            val words = movieWords(item.movie)
+            // Another language's film ("Jailer (Telugu)", see SaavnCatalog) is only that language's album in the library.
+            val other = otherLanguage(item)
+            val words = movieWords(other?.let { item.movie.removeSuffix(" (${it.replaceFirstChar(Char::uppercase)})") } ?: item.movie)
             // Asked for the songs: the score alone doesn't have them. Asked for the score: only a score is it.
             val wantScore = isScoreTitle(item.movie) || (item.kind == "song" && isScoreTitle(item.title))
-            val candidates = movies.filter { same(words, it.core) && it.isScore == wantScore }
+            val candidates = movies.filter { same(words, it.core) && it.isScore == wantScore && (other == null || it.language == item.language) }
             if (item.kind == "movie") {
                 // A remake has the same name: the year tells them apart, or, when the catalog's year is a re-release's
                 // ("Pichaikkaran", 2021 for the 2016 film), the library's composer being among the catalog's artists.
@@ -814,8 +819,13 @@ class MusicRequests(
         fun movieWords(title: String): List<String> =
             Fuzzy.words(title.replace(KIND_WORDS, " ")).ifEmpty { Fuzzy.words(title) }
 
-        /** One key per song or movie, whatever catalog entry it came from. */
-        fun matchKey(item: CatalogItem) = listOf(item.kind, Fuzzy.key(item.title), Fuzzy.key(item.movie)).joinToString("|")
+        /** One key per song or movie, whatever catalog entry it came from; another language's ("Jailer (Telugu)") is its own. */
+        fun matchKey(item: CatalogItem) =
+            (listOf(item.kind, Fuzzy.key(item.title), Fuzzy.key(item.movie)) + listOfNotNull(otherLanguage(item))).joinToString("|")
+
+        /** The language a film is marked as when it isn't the first library's ("telugu" for "Jailer (Telugu)", SaavnCatalog). */
+        fun otherLanguage(item: CatalogItem): String? =
+            item.language?.takeIf { item.movie.endsWith(" (${it.replaceFirstChar(Char::uppercase)})") }
 
         /** "Kanave Kanave (David)", or "David (2013)" for a whole movie. */
         fun label(item: CatalogItem) = if (item.kind == "movie") item.movie + (item.year?.let { " ($it)" } ?: "") else "${item.title} (${item.movie})"

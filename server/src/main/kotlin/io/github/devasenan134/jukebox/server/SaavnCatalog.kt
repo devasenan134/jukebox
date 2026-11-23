@@ -54,7 +54,7 @@ class SaavnCatalog(
             val songs = async { call("search.getResults", "q" to query, "n" to "40", "p" to "1") }
             val replies = listOf(albums.await(), songs.await())
             if (replies.any { it == null }) null
-            else replies.flatMap { reply -> (reply!!.jsonObject()?.get("results") as? JsonArray).orEmpty().mapNotNull { parse(it, languages.toSet()) } }
+            else replies.flatMap { reply -> (reply!!.jsonObject()?.get("results") as? JsonArray).orEmpty().mapNotNull { parse(it, languages.toSet())?.let(::marked) } }
                 .sortedBy { languages.indexOf(it.language).let { i -> if (i < 0) languages.size else i } }
         } ?: return emptyList()
         mutex.withLock {
@@ -73,10 +73,21 @@ class SaavnCatalog(
         } else {
             call("content.getAlbumDetails", "albumid" to id.removePrefix(MOVIE))?.let { parse(it, emptySet()) }
         }
-        return item?.takeIf { it.id == id }?.also { mutex.withLock { items[id] = it } }
+        return item?.takeIf { it.id == id }?.let(::marked)?.also { mutex.withLock { items[id] = it } }
     }
 
     override suspend fun busy(): Boolean = false
+
+    /**
+     * A film in another language than the first library's says so in its name ("Jailer (Telugu)"): the apps show a
+     * request's title and film, and the Telugu "Hukum" looks like the Tamil one otherwise.
+     */
+    private fun marked(item: CatalogItem): CatalogItem {
+        val language = item.language ?: return item
+        if (language == languages.firstOrNull()) return item
+        val movie = "${item.movie} (${language.replaceFirstChar(Char::uppercase)})"
+        return item.copy(movie = movie, title = if (item.kind == "movie") movie else item.title)
+    }
 
     private suspend fun call(method: String, vararg params: Pair<String, String>): JsonElement? = withTimeoutOrNull(15_000) {
         runCatching {
