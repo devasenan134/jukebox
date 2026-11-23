@@ -731,6 +731,8 @@ class MusicRequests(
             val isScore: Boolean = false,
             /** "tamil", "telugu"…, or "" when the library doesn't know. */
             val language: String = "",
+            /** Each song's title before a subtitle ("Hukum" of "Hukum - Thalaivar Alappara") and its length in seconds. */
+            val shortTitles: List<Pair<List<String>, Int>> = emptyList(),
         ) {
             /** The film's name as words, without words about the album's kind ("(Original Background Score)"). */
             val core = movieWords(title)
@@ -744,6 +746,7 @@ class MusicRequests(
                 songs.map { it.id to Fuzzy.words(it.title) }, songs.map { it.title }.distinct(),
                 isScore = list.all { snapshot.songs[it].score },
                 language = first.genre.lowercase(),
+                shortTitles = songs.map { Fuzzy.words(it.title.substringBefore(" - ")) to it.duration },
             )
         }
         private val byId = movies.associateBy { it.id }
@@ -788,6 +791,14 @@ class MusicRequests(
             val title = Fuzzy.words(item.title)
             for (m in candidates) {
                 m.songs.firstOrNull { same(title, it.second) }?.let { return Place(m.id, it.first) }
+            }
+            // The same recording under a shorter name ("Hukum (From "Jailer")" on a compilation is the library's "Hukum -
+            // Thalaivar Alappara"): the title before the subtitle, and as long (within 3 s).
+            val secs = item.durationMs?.let { (it / 1000).toInt() } ?: return null
+            val short = Fuzzy.words(item.title.substringBefore(" - "))
+            for (m in candidates) {
+                m.shortTitles.indexOfFirst { (words, length) -> length > 0 && abs(length - secs) <= 3 && same(short, words) }
+                    .takeIf { it >= 0 }?.let { return Place(m.id, m.songs[it].first) }
             }
             return null
         }

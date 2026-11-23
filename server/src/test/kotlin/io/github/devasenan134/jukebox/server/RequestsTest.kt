@@ -125,6 +125,8 @@ class MusicRequestsTest {
             CatalogItem("saavn-song-or8LPjW6", "song", "Hukum - Thalaivar Alappara", "Jailer", 2023, language = "tamil"),
             CatalogItem("saavn-song-rtIe2EtQ", "song", "Hukum - Thalaivar Alappara", "Jailer (Telugu)", 2023, language = "telugu"),
             CatalogItem("saavn-song-x1", "song", "Kaavaalaa", "Jailer (Telugu)", 2023, language = "telugu"),
+            // On a compilation, by a shorter name: the same recording when it's as long, another song when it isn't.
+            CatalogItem("saavn-song-Q4xE_4i7", "song", "Hukum", "Jailer", 2025, durationMs = 207_000, language = "tamil"),
         )
         val db = Db(File.createTempFile("jukebox-language", ".db").apply { delete(); deleteOnExit() }.path)
         val music = GrowingMusic().apply {
@@ -133,9 +135,15 @@ class MusicRequestsTest {
                 LibrarySong("t2", "Kaavaalaa", "Jailer", "m-jailer-te", "", emptyList(), Person("p-ani", "Anirudh"), 2023, 190, "Telugu", 0, false),
             )
         }
-        val requests = MusicRequests(db, music, FakeCatalog(items), Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
-        // The Tamil Hukum is in the library; the Telugu one isn't (only the Telugu Kaavaalaa is).
-        assertEquals(listOf("saavn-song-rtIe2EtQ"), requests.search(alice, "jailer").songs.map { it.item.id })
+        fun found(vararg items: CatalogItem) = runBlocking {
+            MusicRequests(db, music, FakeCatalog(items.toList()), Push(db, RecordingPush()), isAdmin = { false }, adminIds = { emptyList() })
+                .search(alice, "jailer").songs.map { it.item.id }
+        }
+        // The Tamil Hukum is in the library, under its full name or a shorter one; the Telugu one isn't (only the
+        // Telugu Kaavaalaa is).
+        assertEquals(listOf("saavn-song-rtIe2EtQ"), found(*items.toTypedArray()))
+        // A song of that shorter name that isn't as long is another song.
+        assertEquals(listOf("saavn-song-x2"), found(CatalogItem("saavn-song-x2", "song", "Hukum", "Jailer", 2025, durationMs = 150_000, language = "tamil")))
     }
 
     @Test
